@@ -118,3 +118,52 @@ fn binary_loading_checks_canonical_identity_and_propagates_host_denial() {
         }
     }
 }
+
+#[test]
+fn static_deferred_imports_preserve_binary_and_host_attributes() {
+    let loader = Rc::new(VirtualLoader::new());
+    loader.insert_bytes("blob", vec![255, 128]);
+    loader.insert("main","import defer * as ns from 'blob' with {type:'bytes'};export function read(){return ns.default[0];}");
+    let mut vm = Interpreter::with_builtins();
+    vm.set_module_loader(loader);
+    truth(&mut vm, "import {read} from 'main';read()===255");
+}
+
+#[test]
+fn deferred_host_attributes_select_source_without_executing_the_body() {
+    struct Attributed;
+    impl ModuleLoader for Attributed {
+        fn resolve(&self, id: &str, _: Option<&str>) -> Result<String, VmErr> {
+            Ok(id.into())
+        }
+        fn load(&self, id: &str) -> Result<ModuleSource, VmErr> {
+            Ok(ModuleSource {
+                id: id.into(),
+                source: "effects++;export const value=1;".into(),
+            })
+        }
+        fn load_with_attributes(
+            &self,
+            id: &str,
+            attributes: &[(String, napi_vm_core::JsString)],
+        ) -> Result<ModuleSource, VmErr> {
+            assert_eq!(attributes.len(), 1);
+            assert_eq!(attributes[0].0, "flavor");
+            assert_eq!(attributes[0].1, "selected");
+            Ok(ModuleSource {
+                id: id.into(),
+                source: "effects++;export const value=42;".into(),
+            })
+        }
+    }
+    let mut vm = Interpreter::with_builtins();
+    vm.set_module_loader(Rc::new(Attributed));
+    vm.eval_source("var effects=0;").unwrap();
+    vm.define_module("main","import defer * as ns from 'dep' with {flavor:'selected'};export function read(){return ns.value;}".into());
+    vm.load_module("main").unwrap();
+    truth(&mut vm, "effects===0");
+    truth(
+        &mut vm,
+        "import {read} from 'main';read()===42 && effects===1",
+    );
+}

@@ -462,9 +462,8 @@ impl Parser {
                 self.expect(&Token::KwAs);
                 let ns = self.ident()?;
                 let m = self.from()?;
-                let attributes = self.import_attributes()?;
                 Some(Statement::Import {
-                    attributes,
+                    attributes: Vec::new(),
                     module: m,
                     phase,
                     default: None,

@@ -45,3 +45,10 @@ six package tests, and two TypeScript tests pass with all runtime features.
 All-feature runtime Clippy and formatting pass. This host integration does not
 change the Test262 worker score. See
 [runtime adapter evidence](../tools/test262/evidence/runtime-byte-adapters-2026-10-20/summary.json).
+
+Static deferred-import declarations now retain their attributes: parsing uses
+the common attribute tail once, avoiding an empty-list overwrite. Six byte and
+attribute tests and 33 module tests pass, with strict workspace Clippy and
+formatting. A host-selection regression also verifies that the selected body
+remains deferred until namespace access. No Test262 gain is claimed. See
+[deferred attribute evidence](../tools/test262/evidence/defer-attributes-2026-10-20/summary.json).
