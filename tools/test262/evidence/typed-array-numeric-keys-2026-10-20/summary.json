@@ -1,0 +1,34 @@
+{
+  "domain": "ECMAScript",
+  "suite": "Test262",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "selection": [
+    "built-ins/TypedArrayConstructors",
+    "built-ins/TypedArray"
+  ],
+  "groups": [],
+  "engine_sha256": "e484dcea160a75d64e3c4f7e2207a38d5fadbc6a20c9db82f42263e58c38f94c",
+  "skip_features": [],
+  "denominator": "all selected variants, including skips and errors",
+  "worker_jobs": 2,
+  "timeout_seconds": 5.0,
+  "resumed_files": 0,
+  "total": 4336,
+  "counts": {
+    "pass": 4290,
+    "fail": 40,
+    "skip": 0,
+    "timeout": 6,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "pass_percentage": 98.93911439114392,
+  "limitations": [
+    "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
+  ],
+  "new_passes": 24,
+  "lost_passes": 0,
+  "source_base": "14405582ffb8afb520447bc3119390fa253e9d72",
+  "source_patch_sha256": "63f35dc34b7f90a6890e68e482bacc5ed88414614d25f10b9c8d3a4c1ca52ad8",
+  "note": "Frozen numeric-key implementation only; excludes subsequent require-new and buffer coercion fixes."
+}

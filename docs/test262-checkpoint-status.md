@@ -109,6 +109,8 @@ Logical Array lengths subsequently pass **9,027 / 9,037** selected Array and pro
 
 Core constructor metadata subsequently passes **12,255 / 12,261** selected Array, String, Number, Boolean, and property-reflection variants, gaining **14 passes with zero losses**. Object, Array, String, Number, and Boolean share ordered own length/name metadata; Array unscopables excludes with. All **6,117 / 6,117** Array variants pass. All 369 core tests, 107 integration tests, strict workspace Clippy, and formatting pass. This remains outside the completed full snapshot. See the [core constructor continuation](test262-core-constructor-metadata-continuation.md).
 
+TypedArray numeric keys subsequently pass **4,290 / 4,336** selected TypedArray and constructor variants, gaining **24 passes with zero losses**. Forty failures and six unchanged timeouts remain. Noncanonical numeric-looking keys use ordinary property semantics. This remains outside the completed full snapshot. See the [numeric-key continuation](test262-typed-array-numeric-keys-continuation.md).
+
 
 ## Historical checkpoint
 

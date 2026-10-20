@@ -5,5 +5,6 @@
     "crates/napi-vm-core/tests/typed_array_numeric_keys.rs"
   ],
   "source_patch_sha256": "63f35dc34b7f90a6890e68e482bacc5ed88414614d25f10b9c8d3a4c1ca52ad8",
-  "baseline_engine_sha256": "6ea1c131c0500c96451704f41e9e076fddb234e641e2f3b23e33d9dd040f2fc9"
+  "baseline_engine_sha256": "6ea1c131c0500c96451704f41e9e076fddb234e641e2f3b23e33d9dd040f2fc9",
+  "engine_sha256": "e484dcea160a75d64e3c4f7e2207a38d5fadbc6a20c9db82f42263e58c38f94c"
 }

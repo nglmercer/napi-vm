@@ -16,6 +16,8 @@ passes before and after. Both tests now pass across numeric and BigInt typed
 arrays. All 369 core tests and strict workspace Clippy pass. Formatting passes.
 Evidence is in the [archive](../tools/test262/evidence/typed-array-numeric-keys-2026-10-20/).
 
-Release comparisons for built-ins/TypedArrayConstructors and built-ins/TypedArray
-are pending under artifacts/test262/typed-array-keys-{before,after}.json.
-No release conformance gains are claimed until those reports are complete.
+The frozen release passes **4,290 / 4,336** TypedArray and constructor variants,
+gaining **24 passes with zero losses**. There are 40 failures and six timeouts,
+with no skips, crashes, or harness errors. All six timeout outcomes are unchanged.
+This worker excludes the subsequent require-new and buffer-coercion fixes.
+See the [release evidence](../tools/test262/evidence/typed-array-numeric-keys-2026-10-20/summary.json).
