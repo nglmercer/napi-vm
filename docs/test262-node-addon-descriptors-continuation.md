@@ -26,3 +26,9 @@ No release Test262 gain is claimed for these host-bridge changes.
 Later validation: [iterative host JSON input conversion](json-host-conversion-depth.md)
 fixes the excessive-depth stack overflow. The complete core-library suite now
 passes 368 tests with no exclusions; earlier exclusions above are historical.
+
+Current follow-up: [snapshot reference ordering](node-addon-snapshot-reference-order.md)
+fixes both own-property/prototype ordering and persistent snapshot-root lookup.
+The complete core suite now passes 369 tests without exclusions, and three
+additional isolated addon runs pass. Earlier failure observations remain
+historical validation evidence.

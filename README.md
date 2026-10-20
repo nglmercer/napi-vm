@@ -207,7 +207,8 @@ also cross into addons. Their supported `get`, `set`, `has`, `deleteProperty`,
 `ownKeys`, `apply`, and `construct` traps run back on the interpreter thread.
 Guest-side and native-side object changes are synchronized at synchronous
 callback checkpoints, so a native call can observe a target change made by a
-guest trap. Unsupported proxy traps are ignored to match napi-vm's proxy
+guest trap. Shared snapshot children preserve identity across own properties,
+prototype graphs, and previously retained callback graphs. Unsupported proxy traps are ignored to match napi-vm's proxy
 model, and cyclic graphs that pass through a guest proxy fail clearly.
 Mutations to plain guest objects and arrays are written back to the original
 VM values after native calls, including calls that throw. Writeback includes

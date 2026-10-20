@@ -1,0 +1,18 @@
+{
+  "domain": "host bridge",
+  "source_base": "a6cc25676c37f80c8f01f851157fd89b0152bcec",
+  "implementation_patch_sha256": "45d8fb5238dbe6d498fdff05562cd5403d0bb33a55b4d6ede18696229491028c",
+  "node_version": "v26.11.1",
+  "validation": {
+    "prototype_order_regression": "fails before fix; passes after fix in complete addon fixture",
+    "persistent_root_regression": "fails before fix; passes after fix",
+    "core_library_tests": 369,
+    "core_library_failures": 0,
+    "core_library_exclusions": 0,
+    "final_isolated_addon_repeats": 3,
+    "final_isolated_addon_failures": 0,
+    "strict_workspace_clippy": "pass",
+    "format": "pass"
+  },
+  "note": "Host-only fix; no Test262 score gain claimed. The default-export naming worker excludes this source patch."
+}

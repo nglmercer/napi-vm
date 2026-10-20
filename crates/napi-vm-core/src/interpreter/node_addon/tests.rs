@@ -8,6 +8,50 @@ use std::process::Command as ProcessCommand;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[test]
+fn snapshots_resolve_persistent_roots_before_decoding_shared_children() {
+    let part = |start, end| {
+        NODE_BRIDGE
+            .split(start)
+            .nth(1)
+            .unwrap()
+            .split(end)
+            .next()
+            .unwrap()
+    };
+    let script = format!(
+        "const types=require('node:util').types;const guestGraphNodes=new Map();function setGraphNode{}function decode{}function applyGuestSnapshots{}{}",
+        part("  function setGraphNode", "  function newDecodeGraph"),
+        part("  function decode", "  function descriptorState"),
+        part(
+            "  function applyGuestSnapshots",
+            "  function captureMutableState"
+        ),
+        r#"
+const a={},b={};guestGraphNodes.set('g:a',a);guestGraphNodes.set('g:b',b);
+const graph=new Map([['g:b',b]]);
+const child={t:'object',id:'g:child',v:[['value',{t:'number',v:'9'},true,true,true]],prototype:{t:'defaultPrototype'},extensible:true};
+applyGuestSnapshots([
+ {t:'object',id:'g:a',v:[['child',child,true,true,true]]},
+ {t:'object',id:'g:b',v:[['child',{t:'ref',v:'g:child'},true,true,true]]}
+],graph);
+if(a.child!==b.child||a.child.value!==9||graph.get('g:a')!==a)throw new Error('persistent snapshot root was not synchronized');
+let threw=false;try{applyGuestSnapshots([{t:'object',id:'g:missing',v:[]}],graph);}catch(e){if(!(e instanceof TypeError))throw e;threw=true;}
+if(!threw)throw new Error('unknown snapshot root was silently skipped');
+"#
+    );
+    let output = ProcessCommand::new("node")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn immutable_snapshot_slots_preserve_mirrors_and_mutable_slots_refresh() {
     let script = NODE_BRIDGE
         .split("  function applyGuestSnapshots(snapshots,graph){")
@@ -17,7 +61,7 @@ fn immutable_snapshot_slots_preserve_mirrors_and_mutable_slots_refresh() {
         .next()
         .unwrap();
     let script = format!(
-        "const types=require('node:util').types;const decode=(value)=>value;function applyGuestSnapshots(snapshots,graph){{{script}{}",
+        "const types=require('node:util').types;const decode=(value,_depth,graph)=>value&&value.t==='ref'?graph.get(value.v):value;function applyGuestSnapshots(snapshots,graph){{{script}{}",
         r#"
 const original={value:1}, otherMirror={value:1};
 const object={mutable:original};
@@ -1213,6 +1257,10 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         package_result.get_prop("guestErrorText"),
         Some(Value::String(ref value)) if value == "TypeError: bridge"
     ));
+    let snapshot_order = interpreter.eval_source(
+        "var snapshotTarget={read(){var shared={value:9};this.shared=shared;Object.setPrototypeOf(this,{shared});return 9;}};var snapshotValue=packageAddon.callInherited(snapshotTarget);snapshotValue===9&&packageAddon.sameObject(snapshotTarget.shared,Object.getPrototypeOf(snapshotTarget).shared)===1;"
+    ).unwrap();
+    assert!(matches!(snapshot_order, Value::Bool(true)));
     let class_result = interpreter
             .eval_source(
                 "class Box { static value = 2; constructor(value) { this.value = value; } read() { return this.value + Box.value; } } const direct = packageAddon.constructAndRead(Box, 40); for(let repeat=0;repeat<8;repeat++){if(packageAddon.constructAndRead(Box,40)!==42)throw new Error('class mirror drift');} const proxiedBox = new Proxy(Box, {construct:(target,args) => Reflect.construct(target,args)}); const proxied = packageAddon.constructAndRead(proxiedBox, 40); const classStatic = packageAddon.readProperty(Box); const classWriteRead = packageAddon.writeThenRead(Box, 23); ({direct, proxied, classStatic, classWriteRead, classValue: Box.value});",

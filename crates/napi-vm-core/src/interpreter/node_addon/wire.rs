@@ -456,14 +456,6 @@ pub(super) fn guest_graph_node_snapshot(
                 ));
             }
             let meta = props.meta.borrow();
-            let prototype = if meta.uses_default_prototype {
-                json!({"t":"defaultPrototype"})
-            } else {
-                match meta.proto.as_deref() {
-                    Some(prototype) => sidecar.guest_to_wire_with_context(prototype, 0, graph)?,
-                    None => json!({"t":"null"}),
-                }
-            };
             let mut wire = Vec::with_capacity(entries.len());
             for (key, item) in &entries {
                 let wire_key = if let Some(symbol) = meta.symbol_key(key) {
@@ -521,6 +513,17 @@ pub(super) fn guest_graph_node_snapshot(
                     ]));
                 }
             }
+            // Node decodes own properties before the prototype. Register new
+            // graph nodes in that same order so shared children never become
+            // forward references to a not-yet-decoded prototype graph.
+            let prototype = if meta.uses_default_prototype {
+                json!({"t":"defaultPrototype"})
+            } else {
+                match meta.proto.as_deref() {
+                    Some(prototype) => sidecar.guest_to_wire_with_context(prototype, 0, graph)?,
+                    None => json!({"t":"null"}),
+                }
+            };
             json!({
                 "t":"object",
                 "id":format!("g:{node_id}"),

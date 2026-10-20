@@ -29,3 +29,9 @@ identity, and the source patch are archived in
 [default export-name evidence](../tools/test262/evidence/default-export-names-2026-10-20/).
 The latest full Test262 score separately measures a528b02 at 101,895 / 102,956;
 this change and the following host snapshot-order fix are outside that snapshot.
+
+Current follow-up: [snapshot reference ordering](node-addon-snapshot-reference-order.md)
+fixes both own-property/prototype ordering and persistent snapshot-root lookup.
+The complete core suite now passes 369 tests without exclusions, and three
+additional isolated addon runs pass. Earlier failure observations remain
+historical validation evidence.

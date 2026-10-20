@@ -234,7 +234,9 @@ function addonWorkerMain() {
   }
   function applyGuestSnapshots(snapshots,graph){
     for(const snapshot of snapshots){
-      const object=graph.get(snapshot.id);if(!object||types.isProxy(object))continue;
+      // A callback can retain several earlier wire graphs. Resolve roots
+      // through the persistent registry just like property references.
+      const object=decode({t:'ref',v:snapshot.id},0,graph);if(types.isProxy(object))continue;
       if(snapshot.t==='array'){
         for(const key of Reflect.ownKeys(object))if(key!=='length')Reflect.deleteProperty(object,key);
         object.length=0;
