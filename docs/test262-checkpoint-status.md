@@ -14,6 +14,11 @@ bridge/JSON work, var destructuring, and optional chains are outside this score.
 Reports, comparison, source identity, and triage are archived in
 [full empty-accessor evidence](../tools/test262/evidence/full-empty-accessors-2026-10-19/).
 
+A fresh full pinned run is in progress on clean source `ffc10c7` (worker
+`2c59c922…`). It includes default-export names and snapshot graph fixes;
+the later namespace descriptor TDZ work is outside that worker. The completed
+score above remains authoritative until the new report finishes.
+
 Later static import attributes pass 17 / 17, dynamic attributes pass 44 / 44,
 and deferred imports pass 109 / 109 in the combined 170-variant selection.
 The neighboring module-code and dynamic-import selection passes 2,454 / 2,502.

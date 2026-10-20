@@ -54,6 +54,11 @@ bridge/JSON work, var destructuring, and optional chains are outside this score.
 Reports, comparison, source identity, and triage are archived in
 [full empty-accessor evidence](evidence/full-empty-accessors-2026-10-19/).
 
+A fresh full pinned run is in progress on clean source `ffc10c7` (worker
+`2c59c922…`). It includes default-export names and snapshot graph fixes;
+the later namespace descriptor TDZ work is outside that worker. The completed
+score above remains authoritative until the new report finishes.
+
 That full snapshot includes Object integrity and `Object.fromEntries`, deferred
 imports, and the earlier dynamic-import attributes implementation. Their
 historical focused reports remain available under

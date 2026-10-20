@@ -1257,5 +1257,15 @@
     },
     "note": "Host-only fix; no Test262 score gain claimed. The default-export naming worker excludes this source patch.",
     "evidence": "evidence/node-addon-snapshot-order-2026-10-20/summary.json"
+  },
+  "running_full": {
+    "status": "running",
+    "source_base": "ffc10c7d740e2a55dbf6843f8024143bc1491508",
+    "engine_sha256": "2c59c9227c3364c836f9687d0b8b098e9fe6e7beca9bd66d1c22cad4cc85f694",
+    "started_utc": "2026-10-20T13:57:05.898022+00:00",
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "local_checkpoint": "artifacts/test262/full-after-default-export-names-2026-10-20.checkpoint.jsonl",
+    "local_output": "artifacts/test262/full-after-default-export-names-2026-10-20.json",
+    "note": "Frozen clean source ffc10c7 includes default-export naming and native snapshot graph fixes; excludes subsequent namespace descriptor TDZ changes. Last completed full score above is unchanged."
   }
 }
