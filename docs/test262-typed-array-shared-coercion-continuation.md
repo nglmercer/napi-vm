@@ -14,3 +14,8 @@ pass. See the [native evidence](../tools/test262/evidence/typed-array-shared-coe
 
 Release measurement is pending. The active calls/buffer frozen release run
 excludes this subsequent SharedArrayBuffer change.
+
+Optimized measurement on `93131ed` passes **4,530 / 4,544** selected TypedArray,
+constructor, and SharedArrayBuffer variants, with eight failures and six timeouts.
+This selection adds SharedArrayBuffer and has no matching baseline; no gain count
+is inferred. See the [release evidence](../tools/test262/evidence/typed-array-shared-coercion-2026-10-20/release-summary.json).
