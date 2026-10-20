@@ -489,6 +489,23 @@ impl ArrayCell {
         }
     }
 
+    /// Finish a fresh template object without observing mutable guest globals.
+    pub(crate) fn finish_template(&self, raw: Value) {
+        if let Value::Array(array) = &raw {
+            array.set_integrity(true);
+        }
+        self.set_named("raw".into(), raw);
+        self.meta.borrow_mut().set_attrs(
+            "raw",
+            PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: false,
+            },
+        );
+        self.set_integrity(true);
+    }
+
     /// Apply an integrity level to array indices, named properties, and the
     /// special `length` property using the same descriptor metadata consumed
     /// by guest writes and Node-API property reflection.

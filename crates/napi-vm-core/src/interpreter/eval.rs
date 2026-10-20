@@ -3502,10 +3502,11 @@ impl Interpreter {
                         .map(|part| part.map(Value::String).unwrap_or(Value::Undefined))
                         .collect(),
                 );
-                strings.set_prop(
-                    "raw".to_string(),
-                    Value::array(raw.iter().cloned().map(Value::String).collect()),
-                )?;
+                if let Value::Array(array) = &strings {
+                    array.finish_template(Value::array(
+                        raw.iter().cloned().map(Value::String).collect(),
+                    ));
+                }
                 let mut args = vec![strings];
                 for expr in exprs {
                     args.push(self.eval_expr(expr)?);

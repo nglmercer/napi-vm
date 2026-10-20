@@ -4360,13 +4360,9 @@ impl<'a> Compiler<'a> {
             dst: raw_parts,
             tmpl,
         });
-        let key = self.intern_string("raw")?;
-        let key = self.load_const(key)?;
-        self.emit(Instr::SetProp {
-            cache: 0,
-            obj: parts,
-            key,
-            val: raw_parts,
+        self.emit(Instr::FreezeTemplate {
+            cooked: parts,
+            raw: raw_parts,
         });
 
         let start = self.alloc_regs(1 + values.len())?;

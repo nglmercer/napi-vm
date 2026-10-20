@@ -1096,6 +1096,13 @@ fn run_loop(
                     };
                     frame.registers[dst as usize] = build_object(interp, frame, &template)?;
                 }
+                Instr::FreezeTemplate { cooked, raw } => {
+                    let raw = frame.registers[raw as usize].clone();
+                    let Value::Array(array) = &frame.registers[cooked as usize] else {
+                        return Err(internal("template object is not an array"));
+                    };
+                    array.finish_template(raw);
+                }
                 Instr::NewArray { dst, args, argc } => {
                     let items = take_range(frame, args, argc)?;
                     frame.registers[dst as usize] = Value::checked_array(items)?;

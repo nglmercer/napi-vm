@@ -294,6 +294,10 @@ pub enum Instr {
         key: Reg,
     },
     /// `obj[key] = val` through the full assignment path.
+    FreezeTemplate {
+        cooked: Reg,
+        raw: Reg,
+    },
     SetProp {
         cache: u32,
         obj: Reg,
@@ -703,6 +707,7 @@ pub enum Opcode {
     ReturnUndefined,
     Throw,
     GetProp,
+    FreezeTemplate,
     SetProp,
     DirectEval,
     DirectEvalSpread,
@@ -816,6 +821,7 @@ impl Instr {
             Instr::ReturnUndefined => Opcode::ReturnUndefined,
             Instr::Throw { .. } => Opcode::Throw,
             Instr::GetProp { .. } => Opcode::GetProp,
+            Instr::FreezeTemplate { .. } => Opcode::FreezeTemplate,
             Instr::SetProp { .. } => Opcode::SetProp,
             Instr::DirectEval { .. } => Opcode::DirectEval,
             Instr::DirectEvalSpread { .. } => Opcode::DirectEvalSpread,
@@ -1050,6 +1056,7 @@ impl fmt::Display for Instr {
             Instr::ReturnUndefined => write!(f, "RETURN_UNDEFINED"),
             Instr::Throw { src } => write!(f, "THROW r{src}"),
             Instr::GetProp { dst, obj, key, .. } => write!(f, "GET_PROP r{dst}, r{obj}, r{key}"),
+            Instr::FreezeTemplate { cooked, raw } => write!(f, "FREEZE_TEMPLATE r{cooked}, r{raw}"),
             Instr::SetProp { obj, key, val, .. } => write!(f, "SET_PROP r{obj}, r{key}, r{val}"),
             Instr::DirectEval {
                 dst,

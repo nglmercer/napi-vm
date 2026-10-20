@@ -556,6 +556,10 @@ impl Checker<'_> {
                 self.check_reg(address, *obj)?;
                 self.check_reg(address, *key)?;
             }
+            Instr::FreezeTemplate { cooked, raw } => {
+                self.check_reg(address, *cooked)?;
+                self.check_reg(address, *raw)?;
+            }
             Instr::SetProp {
                 obj,
                 key,
