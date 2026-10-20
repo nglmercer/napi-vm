@@ -616,10 +616,25 @@ impl Interpreter {
             // trap needs to call guest code, so it is applied in `Object.keys`
             // and `for…in`, which have `&mut self`.
             Value::Proxy(proxy) => self.keys(&proxy.target_for_inspection()),
-            Value::Array(i) => (0..i.borrow().len())
-                .filter(|index| i.has_index(*index))
-                .map(|x| x.to_string())
-                .collect(),
+            Value::Array(i) => {
+                let mut keys = (0..i.borrow().len())
+                    .filter(|index| i.has_index(*index))
+                    .map(|index| index.to_string())
+                    .collect::<Vec<_>>();
+                keys.extend(
+                    i.named
+                        .borrow()
+                        .iter()
+                        .filter(|(key, _)| {
+                            !is_internal_key(key) && i.meta.borrow().attrs_of(key).enumerable
+                        })
+                        .map(|(key, _)| key.clone()),
+                );
+                keys.sort_by_key(|key| {
+                    crate::value::array_index(key).map_or((1, 0), |index| (0, index))
+                });
+                keys
+            }
             Value::RealmGlobal(global) => global
                 .borrow()
                 .global_property_keys()

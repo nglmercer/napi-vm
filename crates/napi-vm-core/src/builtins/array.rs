@@ -995,11 +995,14 @@ fn array_species_create(
     length: f64,
 ) -> Result<Value, VmErr> {
     let default = || {
-        if length > crate::value::MAX_ARRAY_LEN as f64 {
-            return Err(crate::value::limit_err("Maximum array length exceeded"));
+        if length > u32::MAX as f64 {
+            return Err(crate::value::limit_err("Invalid array length"));
         }
-        let length = length as usize;
-        Value::checked_array_with_presence(vec![Value::Undefined; length], vec![false; length])
+        let result = Value::array(vec![]);
+        if let Value::Array(array) = &result {
+            array.set_length(length as usize);
+        }
+        Ok(result)
     };
     if !array_is_array(interp, Value::Undefined, vec![original.clone()])?.is_truthy() {
         return default();

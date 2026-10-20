@@ -352,10 +352,7 @@ pub(super) fn napi_array_set_property(
         let Value::Number(length) = value else {
             return Err(NAPI_INVALID_ARG);
         };
-        if !length.is_finite()
-            || length < 0.0
-            || length.fract() != 0.0
-            || length > crate::value::MAX_ARRAY_LEN as f64
+        if !length.is_finite() || length < 0.0 || length.fract() != 0.0 || length > u32::MAX as f64
         {
             return Err(NAPI_INVALID_ARG);
         }
@@ -365,24 +362,15 @@ pub(super) fn napi_array_set_property(
         return Ok(());
     }
     if let Some(index) = crate::value::array_index(key) {
-        if index >= crate::value::MAX_ARRAY_LEN {
-            return Err(NAPI_GENERIC_FAILURE);
-        }
-        let old_length = array.borrow().len();
-        let exists = index < old_length && array.has_index(index);
+        let old_length = array.array_length();
+        let exists = array.has_index(index);
         if (exists && !array.meta.borrow().attrs_of(key).writable)
             || (!exists && array.meta.borrow().non_extensible)
             || (index >= old_length && !array.meta.borrow().attrs_of("length").writable)
         {
             return Ok(());
         }
-        if index >= old_length {
-            let new_length = index + 1;
-            array.borrow_mut().resize(new_length, Value::Undefined);
-            array.resize_presence(old_length, new_length, false);
-        }
-        array.borrow_mut()[index] = value;
-        array.set_index_presence(index, true);
+        array.store_index(index, value);
         return Ok(());
     }
     let exists = array.named_prop(key).is_some();
@@ -510,11 +498,13 @@ pub(super) fn napi_direct_delete_property(object: &Value, key: &Value) -> Result
                 return Ok(false);
             }
             if let Some(index) = crate::value::array_index(&key) {
-                if index < array.borrow().len() && array.has_index(index) {
+                if array.has_index(index) {
                     if !array.meta.borrow().attrs_of(&key).configurable {
                         return Ok(false);
                     }
-                    array.borrow_mut()[index] = Value::Undefined;
+                    if index < array.borrow().len() {
+                        array.borrow_mut()[index] = Value::Undefined;
+                    }
                     array.set_index_presence(index, false);
                 }
             } else {

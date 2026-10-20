@@ -996,12 +996,13 @@ impl Interpreter {
                     return Ok(Value::Bool(false));
                 }
                 if let Some(index) = crate::value::array_index(&property) {
-                    let items_len = items.borrow().len();
-                    if index < items_len && items.has_index(index) {
+                    if items.has_index(index) {
                         if !items.meta.borrow().attrs_of(&property).configurable {
                             return Ok(Value::Bool(false));
                         }
-                        items.borrow_mut()[index] = Value::Undefined;
+                        if index < items.borrow().len() {
+                            items.borrow_mut()[index] = Value::Undefined;
+                        }
                         items.set_index_presence(index, false);
                         let companion = format!("__setter:{}__", property);
                         items
@@ -1814,15 +1815,12 @@ impl Interpreter {
                 if !i.is_finite() || *i < 0.0 || i.fract() != 0.0 {
                     return Err(VmErr::Msg("TypeError: Invalid array index".to_string()));
                 }
-                if *i >= crate::value::MAX_ARRAY_LEN as f64 {
-                    return Err(crate::value::limit_err("Maximum array length exceeded"));
-                }
                 let idx = *i as usize;
-                let old_length = items.borrow().len();
-                let exists = idx < old_length && items.has_index(idx);
+                let old_length = items.array_length();
+                let exists = items.has_index(idx);
                 let key = idx.to_string();
                 if exists && items.meta.borrow().has_accessors {
-                    let current = items.borrow().get(idx).cloned();
+                    let current = items.index_value(idx);
                     if let Some(setter) = array_property_setter(items, &key, current.as_ref()) {
                         self.call_this(&setter, obj.clone(), vec![val])?;
                         return Ok(true);
@@ -1835,23 +1833,7 @@ impl Interpreter {
                 {
                     return Ok(false);
                 }
-                let mut items = items.borrow_mut();
-                if idx < items.len() {
-                    items[idx] = val;
-                } else {
-                    // `resize` performs the bounded growth without a
-                    // guest-visible native loop or an unchecked index.
-                    items.resize(idx, Value::Undefined);
-                    items.push(val);
-                }
-                let new_length = items.len();
-                drop(items);
-                if let Value::Array(cell) = obj {
-                    if idx >= old_length {
-                        cell.resize_presence(old_length, new_length, false);
-                    }
-                    cell.set_index_presence(idx, true);
-                }
+                items.store_index(idx, val);
                 Ok(true)
             }
             _ => {

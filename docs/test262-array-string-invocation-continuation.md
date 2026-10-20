@@ -25,7 +25,7 @@ Clippy and formatting. The release passes **755 / 763** selected variants, gaini
 with zero losses**. All eight remaining failures are unchanged Proxy cases.
 All selected Array, Object, join, and typed-array string cases pass. See the
 [archived evidence](../tools/test262/evidence/array-string-invocation-2026-10-20/summary.json). The baseline passes 753 / 763 selected variants;
-the active full snapshot 1bffdb8 excludes this continuation.
+the completed full snapshot `1bffdb8` excludes this continuation.
 
 Full-run tracking update: the completed `1bffdb8` run excludes this change.
 The active frozen `daadb9b` full run includes it; its final score is pending.

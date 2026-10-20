@@ -14,9 +14,8 @@ identity, boxing, and subclass construction ignoring the value argument.
 Both integration tests, all 369 core-library tests without exclusions, strict
 workspace Clippy, and formatting pass. The release comparison passes **7,984 / 8,001** selected Object, Function, and
 Reflect variants, gaining **12 passes with zero losses**. See the
-[archived evidence](../tools/test262/evidence/object-constructor-metadata-2026-10-20/summary.json). The active full worker freezes
-1bffdb8 and excludes this continuation; the completed full score remains
-102,050 / 102,956 on 75c6857.
+[archived evidence](../tools/test262/evidence/object-constructor-metadata-2026-10-20/summary.json). The completed full snapshot `1bffdb8` excludes this continuation; its score is
+102,079 / 102,956.
 
 See [Properties of the Object Constructor](https://tc39.es/ecma262/multipage/fundamental-objects.html#sec-properties-of-the-object-constructor).
 

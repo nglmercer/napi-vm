@@ -1174,16 +1174,11 @@ impl Interpreter {
                     .unwrap_or(Value::Undefined))
             }
             (Value::Array(items), Value::Number(i)) => {
-                let items = items.borrow();
                 if !i.is_finite() || *i < 0.0 || i.fract() != 0.0 {
                     Ok(Value::Undefined)
                 } else {
                     let idx = *i as usize;
-                    if idx < items.len() {
-                        Ok(items[idx].clone())
-                    } else {
-                        Ok(Value::Undefined)
-                    }
+                    Ok(items.index_value(idx).unwrap_or(Value::Undefined))
                 }
             }
             (Value::String(s), Value::Number(i)) => {
@@ -1367,12 +1362,7 @@ impl Interpreter {
                 if k == "length" {
                     Ok(Value::Number(items.array_length() as f64))
                 } else if let Some(idx) = crate::value::array_index(k) {
-                    let items = items.borrow();
-                    if idx < items.len() {
-                        Ok(items[idx].clone())
-                    } else {
-                        Ok(Value::Undefined)
-                    }
+                    Ok(items.index_value(idx).unwrap_or(Value::Undefined))
                 } else if let Some(value) = items.named_prop(k) {
                     Ok(value)
                 } else {

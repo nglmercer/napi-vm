@@ -403,10 +403,7 @@ fn own_slot(v: &Value, key: &str) -> Option<Value> {
             return Some(Value::Number(array.array_length() as f64));
         }
         if let Some(index) = crate::value::array_index(key) {
-            return array
-                .has_index(index)
-                .then(|| array.borrow().get(index).cloned())
-                .flatten();
+            return array.index_value(index);
         }
         return array.named_prop(key);
     }
@@ -1643,10 +1640,7 @@ fn array_property_value(array: &crate::value::ArrayCell, key: &str) -> Option<Va
         return Some(Value::Number(array.array_length() as f64));
     }
     if let Some(index) = crate::value::array_index(key) {
-        return array
-            .has_index(index)
-            .then(|| array.borrow().get(index).cloned())
-            .flatten();
+        return array.index_value(index);
     }
     array.named_prop(key)
 }
@@ -1660,17 +1654,7 @@ fn array_store_property(
         return Err(type_err("Invalid array length property definition"));
     }
     if let Some(index) = crate::value::array_index(key) {
-        if index >= crate::value::MAX_ARRAY_LEN {
-            return Err(crate::value::limit_err("Maximum array length exceeded"));
-        }
-        let old_length = array.borrow().len();
-        if index >= old_length {
-            let new_length = index + 1;
-            array.borrow_mut().resize(new_length, Value::Undefined);
-            array.resize_presence(old_length, new_length, false);
-        }
-        array.borrow_mut()[index] = value;
-        array.set_index_presence(index, true);
+        array.store_index(index, value);
     } else {
         array.set_named(key.to_owned(), value);
     }
@@ -1765,9 +1749,6 @@ fn define_array_property(
     }
 
     let index = crate::value::array_index(key);
-    if index.is_some_and(|index| index >= crate::value::MAX_ARRAY_LEN) {
-        return Err(crate::value::limit_err("Maximum array length exceeded"));
-    }
     let old_accessor_kind = if array.meta.borrow().is_empty_accessor(key) {
         Some("empty")
     } else {
@@ -2171,19 +2152,19 @@ pub(crate) fn descriptor_for_key_in(
 fn descriptor_for(target: &Value, key: &str) -> Value {
     if let Value::Array(items) = target {
         let array = items;
-        let items = array.borrow();
         if let Some(index) = crate::value::array_index(key)
-            && index < items.len()
-            && array.has_index(index)
+            && let Some(value) = array.index_value(index)
         {
-            let value = items[index].clone();
             let attrs = array.meta.borrow().attrs_of(key);
             return descriptor_for_array_value(array, key, value, attrs);
         }
         if key == "length" {
             let attrs = array.meta.borrow().attrs_of("length");
             return Value::descriptor_record(vec![
-                ("value".to_string(), Value::Number(items.len() as f64)),
+                (
+                    "value".to_string(),
+                    Value::Number(array.array_length() as f64),
+                ),
                 ("writable".to_string(), Value::Bool(attrs.writable)),
                 ("enumerable".to_string(), Value::Bool(attrs.enumerable)),
                 ("configurable".to_string(), Value::Bool(attrs.configurable)),

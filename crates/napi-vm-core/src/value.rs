@@ -18,8 +18,8 @@ use crate::error::VmErr;
 use crate::interpreter::{Env, Interpreter};
 use crate::parser::Statement;
 
-/// Hard cap on array length. Guest code that grows an array past this gets a
-/// catchable `RangeError` instead of exhausting host memory (which would
+/// Hard cap on dense array storage. Larger indexed slots stay sparse;
+/// operations materializing more entries return `RangeError` rather than exhausting host memory (which would
 /// abort the process — Rust's allocator does not return errors, it dies).
 /// `Value` is 32 bytes, and arrays of arrays multiply that: 262k slots of
 /// 8-element inner arrays is already ~290MB, so the cap is sized to keep
@@ -538,6 +538,36 @@ impl ArrayCell {
                 }
             }
         }
+        let sparse_blocker = self
+            .named
+            .borrow()
+            .iter()
+            .filter_map(|(key, _)| array_index(key).filter(|index| *index >= requested))
+            .filter(|index| !self.meta.borrow().attrs_of(&index.to_string()).configurable)
+            .max();
+        if let Some(index) = sparse_blocker {
+            length = length.max(index + 1);
+        }
+        let removed = self
+            .named
+            .borrow()
+            .iter()
+            .filter_map(|(key, _)| {
+                array_index(key)
+                    .filter(|index| *index >= length)
+                    .map(|_| key.clone())
+            })
+            .collect::<Vec<_>>();
+        let removed_slots = removed
+            .iter()
+            .flat_map(|key| [key.clone(), format!("__setter:{key}__")])
+            .collect::<std::collections::HashSet<_>>();
+        self.named
+            .borrow_mut()
+            .retain(|(key, _)| !removed_slots.contains(key));
+        for key in removed {
+            self.meta.borrow_mut().forget(&key);
+        }
         if length > MAX_ARRAY_LEN {
             *self.length_override.borrow_mut() = Some(length);
             return;
@@ -575,7 +605,39 @@ impl ArrayCell {
             })
     }
 
+    /// Read an own indexed slot from dense or sparse storage.
+    pub fn index_value(&self, index: usize) -> Option<Value> {
+        if index >= MAX_ARRAY_LEN {
+            return self.named_prop(&index.to_string());
+        }
+        self.has_index(index)
+            .then(|| self.elements.borrow().get(index).cloned())
+            .flatten()
+    }
+
+    /// Store a canonical array index without allocating intervening holes.
+    pub fn store_index(&self, index: usize, value: Value) {
+        if index >= MAX_ARRAY_LEN {
+            self.set_named(index.to_string(), value);
+            let length = self.array_length().max(index + 1);
+            *self.length_override.borrow_mut() = Some(length);
+            return;
+        }
+        let old_length = self.elements.borrow().len();
+        if index >= old_length {
+            self.elements
+                .borrow_mut()
+                .resize(index + 1, Value::Undefined);
+            self.resize_presence(old_length, index + 1, false);
+        }
+        self.elements.borrow_mut()[index] = value;
+        self.set_index_presence(index, true);
+    }
+
     pub fn has_index(&self, index: usize) -> bool {
+        if index >= MAX_ARRAY_LEN {
+            return self.named_prop(&index.to_string()).is_some();
+        }
         let elements = self.elements.borrow();
         if index >= elements.len() {
             return false;
@@ -589,6 +651,14 @@ impl ArrayCell {
     }
 
     pub fn set_index_presence(&self, index: usize, present: bool) {
+        if index >= MAX_ARRAY_LEN {
+            if !present {
+                let key = index.to_string();
+                self.named.borrow_mut().retain(|(name, _)| name != &key);
+                self.meta.borrow_mut().forget(&key);
+            }
+            return;
+        }
         let length = self.elements.borrow().len();
         let mut presence = self.present.borrow_mut();
         if present && presence.is_none() {
@@ -3471,16 +3541,12 @@ impl Value {
                 }
             }
             Value::Array(cell) => {
-                let items = cell.borrow();
                 if key == "length" {
-                    return Some(Value::Number(items.len() as f64));
+                    return Some(Value::Number(cell.array_length() as f64));
                 }
-                if let Some(idx) = array_index(key)
-                    && idx < items.len()
-                {
-                    return Some(items[idx].clone());
+                if let Some(index) = array_index(key) {
+                    return cell.index_value(index);
                 }
-                drop(items);
                 cell.named_prop(key)
             }
             Value::String(s) => {
@@ -3517,7 +3583,11 @@ impl Value {
         }
         match self {
             Value::Array(cell) => {
-                cell.set_named(key, val);
+                if let Some(index) = array_index(&key) {
+                    cell.store_index(index, val);
+                } else {
+                    cell.set_named(key, val);
+                }
                 Ok(())
             }
             Value::Object { props } => set_cell_prop(props, key, val),

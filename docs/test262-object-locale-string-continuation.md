@@ -15,7 +15,7 @@ and accessor/proxy error identity. All 369 core-library tests, strict workspace
 Clippy, and formatting pass without exclusions. The release passes **122 / 122** selected locale-string variants, gaining
 **two passes with zero losses**: Object and Array primitive-receiver getter
 cases. The baseline passes 120 / 122. See the
-[archived evidence](../tools/test262/evidence/object-locale-string-2026-10-20/summary.json). The active full worker freezes 1bffdb8 and excludes this change.
+[archived evidence](../tools/test262/evidence/object-locale-string-2026-10-20/summary.json). The completed full snapshot `1bffdb8` excludes this change.
 
 Full-run tracking update: the completed `1bffdb8` run excludes this change.
 The active frozen `daadb9b` full run includes it; its final score is pending.

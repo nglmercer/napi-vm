@@ -150,6 +150,9 @@ Object locale-string invocation subsequently passes **122 / 122** selected Objec
 
 Array string invocation subsequently passes **755 / 763** selected string and Proxy variants, gaining **two passes with zero losses**. All selected Array, Object, join, and typed-array string cases pass; eight Proxy failures are unchanged. Join accessors, intrinsic fallback, and proxy brand handling are corrected. This is included in the active full run and remains outside the completed full score. See the [array string continuation](../../docs/test262-array-string-invocation-continuation.md).
 
+Sparse array indices subsequently pass **9,005 / 9,037** selected Array and property-reflection variants, gaining **30 passes with zero losses**. Large indices use traced sparse storage; logical length, descriptors, deletion, truncation, host writes, and map species results share the updated paths. All 369 core tests, 95 integration tests, strict workspace Clippy, and formatting pass. This remains outside the completed and active full snapshots. See the [sparse array continuation](../../docs/test262-sparse-array-indices-continuation.md).
+
+
 Full reports, status transitions, measured source patches, source hashes,
 build environment, and validation logs are archived in `evidence/`, including
 the [2026-10-18 final run](evidence/shadow-realm-2026-10-18/). See the
