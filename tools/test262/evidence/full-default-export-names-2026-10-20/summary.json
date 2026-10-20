@@ -1,0 +1,22 @@
+{
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "engine_sha256": "2c59c9227c3364c836f9687d0b8b098e9fe6e7beca9bd66d1c22cad4cc85f694",
+  "total": 102956,
+  "counts": {
+    "pass": 101973,
+    "fail": 860,
+    "skip": 0,
+    "timeout": 123,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "pass_percentage": 99.04522320214461,
+  "source_commit": "ffc10c7d740e2a55dbf6843f8024143bc1491508",
+  "gains": 130,
+  "losses": 52,
+  "lost_statuses": {
+    "timeout": 52
+  },
+  "baseline": "../full-empty-accessors-2026-10-19/final-full.json.gz",
+  "note": "All 52 lost passes are measured timeouts, retained without reclassification. Frozen clean source ffc10c7 includes default-export names and native snapshot fixes; excludes subsequent namespace TDZ, export resolution, export patterns, harness classification, dynamic defer, async cycle, and byte module changes."
+}

@@ -154,16 +154,7 @@ impl Interpreter {
                 "TypeError: Module not found: {canonical}"
             )));
         };
-        let loaded = loader.load_with_attributes(&canonical, attributes)?;
-        if loaded.id != canonical {
-            return Err(VmErr::Msg(
-                "module loader changed canonical identity".into(),
-            ));
-        }
-        if canonical.starts_with("file:") {
-            self.define_module_file_url(&key, canonical);
-        }
-        self.define_module(&key, loaded.source);
+        self.load_host_module(&loader, &key, &canonical, attributes)?;
         Ok(key)
     }
     fn record_async_cycle(&self, ancestors: &[String], dependency: &str) {

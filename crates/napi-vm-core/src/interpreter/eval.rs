@@ -1145,6 +1145,7 @@ impl Interpreter {
         default: Option<&str>,
         named: &[(String, String)],
         namespace: Option<&str>,
+        attributes: &[(String, crate::JsString)],
     ) -> Result<Value, VmErr> {
         // Linking has already installed import bindings for an ESM graph.
         // Executing the declaration itself must not make a deferred edge eager.
@@ -1152,7 +1153,11 @@ impl Interpreter {
             return Ok(Value::Undefined);
         }
         let module = Self::host_module_specifier(module)?;
-        let resolved_module = self.resolve_module_request(&module)?;
+        let resolved_module = if attributes.is_empty() {
+            self.resolve_module_request(&module)?
+        } else {
+            Some(self.load_module_with_attributes(&module, attributes)?)
+        };
         if let Some(name) = resolved_module.as_ref() {
             let name = name.clone();
             if phase == crate::parser::ImportPhase::Deferred {
@@ -1816,13 +1821,14 @@ impl Interpreter {
                 default,
                 named,
                 namespace,
-                ..
+                attributes,
             } => self.stmt_import(
                 module,
                 *phase,
                 default.as_deref(),
                 named,
                 namespace.as_deref(),
+                attributes,
             ),
             Statement::Empty => Ok(Value::Undefined),
         }

@@ -9,11 +9,30 @@ pub struct ModuleSource {
     pub source: String,
 }
 
+/// Raw bytes returned by a host without text decoding.
+#[derive(Debug, Clone)]
+pub struct ModuleBytes {
+    pub id: String,
+    pub bytes: Vec<u8>,
+}
+
 /// Resolve identities separately from loading text. Implementations are
 /// owner-local and must enforce their capabilities before accessing resources.
 pub trait ModuleLoader {
     fn resolve(&self, specifier: &str, referrer: Option<&str>) -> Result<String, VmErr>;
     fn load(&self, id: &str) -> Result<ModuleSource, VmErr>;
+
+    /// Load a resource for `type: "bytes"`, without UTF-8 decoding. Binary
+    /// support is an explicit host capability; text-only loaders may reject it.
+    fn load_bytes(
+        &self,
+        _id: &str,
+        _attributes: &[(String, crate::JsString)],
+    ) -> Result<ModuleBytes, VmErr> {
+        Err(VmErr::Msg(
+            "TypeError: Module loader does not support byte modules".into(),
+        ))
+    }
 
     /// Load a static or dynamic module request with its import attributes.
     /// Hosts that do not assign meaning to attributes can keep using `load`.
@@ -30,13 +49,21 @@ pub trait ModuleLoader {
 #[derive(Default)]
 pub struct VirtualLoader {
     sources: RefCell<HashMap<String, String>>,
+    bytes: RefCell<HashMap<String, Vec<u8>>>,
 }
 impl VirtualLoader {
     pub fn new() -> Self {
         Self::default()
     }
     pub fn insert(&self, id: impl Into<String>, source: impl Into<String>) {
-        self.sources.borrow_mut().insert(id.into(), source.into());
+        let id = id.into();
+        self.bytes.borrow_mut().remove(&id);
+        self.sources.borrow_mut().insert(id, source.into());
+    }
+    pub fn insert_bytes(&self, id: impl Into<String>, bytes: impl Into<Vec<u8>>) {
+        let id = id.into();
+        self.sources.borrow_mut().remove(&id);
+        self.bytes.borrow_mut().insert(id, bytes.into());
     }
 }
 impl ModuleLoader for VirtualLoader {
@@ -63,13 +90,43 @@ impl ModuleLoader for VirtualLoader {
         } else {
             specifier.into()
         };
-        if self.sources.borrow().contains_key(&id) {
+        if self.sources.borrow().contains_key(&id) || self.bytes.borrow().contains_key(&id) {
             Ok(id)
         } else {
             Err(VmErr::Msg(format!("Module not found: {id}")))
         }
     }
+    fn load_bytes(
+        &self,
+        id: &str,
+        _attributes: &[(String, crate::JsString)],
+    ) -> Result<ModuleBytes, VmErr> {
+        let bytes = self
+            .bytes
+            .borrow()
+            .get(id)
+            .cloned()
+            .or_else(|| {
+                self.sources
+                    .borrow()
+                    .get(id)
+                    .map(|source| source.as_bytes().to_vec())
+            })
+            .ok_or_else(|| VmErr::Msg(format!("Module not found: {id}")))?;
+        Ok(ModuleBytes {
+            id: id.into(),
+            bytes,
+        })
+    }
     fn load(&self, id: &str) -> Result<ModuleSource, VmErr> {
+        if let Some(bytes) = self.bytes.borrow().get(id) {
+            return Ok(ModuleSource {
+                id: id.into(),
+                source: String::from_utf8(bytes.clone()).map_err(|_| {
+                    VmErr::Msg("TypeError: Module source is not valid UTF-8".into())
+                })?,
+            });
+        }
         let source = self
             .sources
             .borrow()
@@ -202,5 +259,19 @@ impl ModuleLoader for CompositeLoader {
     }
     fn load(&self, id: &str) -> Result<ModuleSource, VmErr> {
         self.loader(id, None).load(id)
+    }
+    fn load_with_attributes(
+        &self,
+        id: &str,
+        attributes: &[(String, crate::JsString)],
+    ) -> Result<ModuleSource, VmErr> {
+        self.loader(id, None).load_with_attributes(id, attributes)
+    }
+    fn load_bytes(
+        &self,
+        id: &str,
+        attributes: &[(String, crate::JsString)],
+    ) -> Result<ModuleBytes, VmErr> {
+        self.loader(id, None).load_bytes(id, attributes)
     }
 }

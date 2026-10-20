@@ -20,5 +20,5 @@ and multiple asynchronous branches that start together and finish separately.
 All 30 module integration tests, 369 core-library tests without exclusions,
 19 worker tests, strict workspace Clippy, and formatting pass. The release comparison passes **2,625 / 2,637** selected variants,
 gaining **four passes with zero losses**. All four previously failing dynamic
-deferred-import cases now pass. See the [archived evidence](../tools/test262/evidence/dynamic-defer-2026-10-20/summary.json). The running full snapshot ffc10c7 excludes
+deferred-import cases now pass. See the [archived evidence](../tools/test262/evidence/dynamic-defer-2026-10-20/summary.json). The completed full snapshot ffc10c7 excludes
 this continuation.

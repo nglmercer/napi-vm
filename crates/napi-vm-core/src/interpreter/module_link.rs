@@ -203,6 +203,64 @@ impl Interpreter {
         self.republish_roots();
         result
     }
+    pub(super) fn load_host_module(
+        &mut self,
+        loader: &Rc<dyn crate::ModuleLoader>,
+        key: &str,
+        canonical: &str,
+        attributes: &[(String, crate::JsString)],
+    ) -> Result<(), VmErr> {
+        if attributes
+            .iter()
+            .any(|(name, value)| name == "type" && value == "bytes")
+        {
+            let loaded = loader.load_bytes(canonical, attributes)?;
+            if loaded.id != canonical {
+                return Err(VmErr::Msg(
+                    "module loader changed canonical identity".into(),
+                ));
+            }
+            if loaded.bytes.len() > crate::value::MAX_ARRAY_LEN * 8 {
+                return Err(crate::value::limit_err("Maximum byte module size exceeded"));
+            }
+            let _allocation =
+                super::realm::AllocationRealm::enter(Some(self.persistent_global.clone()));
+            let length = loaded.bytes.len();
+            let buffer = crate::value::Buffer::immutable(loaded.bytes);
+            let view = Value::TypedArray(Rc::new(crate::value::TypedArrayData {
+                properties: Value::instance_properties(),
+                kind: crate::value::TypedKind::Uint8,
+                buffer: buffer.into(),
+                byte_offset: 0,
+                length,
+                length_tracking: false,
+                is_buffer: false,
+            }));
+            self.modules.borrow_mut().insert(
+                key.into(),
+                Module {
+                    namespace: Rc::new(RefCell::new(None)),
+                    deferred_namespace: Rc::new(RefCell::new(None)),
+                    exports: HashMap::new(),
+                    default: Some(view),
+                    scope: None,
+                },
+            );
+        } else {
+            let loaded = loader.load_with_attributes(canonical, attributes)?;
+            if loaded.id != canonical {
+                return Err(VmErr::Msg(
+                    "module loader changed canonical identity".into(),
+                ));
+            }
+            if canonical.starts_with("file:") {
+                self.define_module_file_url(key, canonical.into());
+            }
+            self.define_module(key, loaded.source);
+        }
+        Ok(())
+    }
+
     fn discover_module(
         &mut self,
         name: &str,
@@ -226,16 +284,10 @@ impl Interpreter {
                 return Ok(false);
             };
             let canonical = self.canonical_module_id(name);
-            let loaded = loader.load_with_attributes(&canonical, attributes)?;
-            if loaded.id != canonical {
-                return Err(VmErr::Msg(
-                    "module loader changed canonical identity".into(),
-                ));
+            self.load_host_module(&loader, name, &canonical, attributes)?;
+            if self.modules.borrow().contains_key(name) {
+                return Ok(true);
             }
-            if canonical.starts_with("file:") {
-                self.define_module_file_url(name, canonical);
-            }
-            self.define_module(name, loaded.source);
         }
         let source = self
             .module_sources

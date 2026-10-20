@@ -20,5 +20,5 @@ correct namespace identity on success, overlapping cycles, and independent
 acyclic dependencies. All 33 module integration tests pass. All 369 core-library tests without exclusions, 19 worker tests, strict workspace
 Clippy, and formatting pass. The release comparison passes **2,627 / 2,637** selected variants, gaining
 **two passes with zero losses**. All **1,900 / 1,900** dynamic-import variants
-now pass. See the [archived evidence](../tools/test262/evidence/async-cycle-2026-10-20/summary.json). The running
+now pass. See the [archived evidence](../tools/test262/evidence/async-cycle-2026-10-20/summary.json). The completed
 full snapshot ffc10c7 excludes this continuation.

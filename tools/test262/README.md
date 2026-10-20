@@ -42,22 +42,21 @@ Resume rejects changes to the corpus revision, worker digest, selection, skips,
 worker count, or timeout. An interrupted final journal write is rerun. The final
 report still contains all selected outcomes and records the restored file count.
 
-The latest completed full pinned Test262 run (archived 2026-10-19, corpus
-`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `a528b02`)
-passes **101,895 / 102,956 variants (98.9695%)**, with 951 failures,
-110 timeouts, and zero skips, crashes, or harness errors. It gains 61 passes
-and loses 55 against the previous full run on `997b476`; all 55 losses are
-measured timeouts. Outcomes are retained without reclassification. This snapshot
-includes with bindings, empty accessor descriptors, and the duplicate-parameter
-initialization fix. Later async delegation, numeric keys, class layout, host
-bridge/JSON work, var destructuring, and optional chains are outside this score.
-Reports, comparison, source identity, and triage are archived in
-[full empty-accessor evidence](evidence/full-empty-accessors-2026-10-19/).
+The latest completed full pinned Test262 run (archived 2026-10-20, corpus
+`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `ffc10c7`)
+passes **101,973 / 102,956 variants (99.0452%)**, with 860 failures,
+123 timeouts, and zero skips, crashes, or harness errors. It gains 130 passes
+and loses 52 against the previous full run on `a528b02`; all 52 losses are
+measured timeouts, retained without reclassification. The frozen worker
+`2c59c922…` includes async delegation, numeric keys, class layout, host bridge/JSON,
+var destructuring, optional chains, super receiver order, default-export names,
+and native snapshot fixes. Reports, comparison, source identity, and triage are
+archived in [full default-export evidence](evidence/full-default-export-names-2026-10-20/).
 
-A fresh full pinned run is in progress on clean source `ffc10c7` (worker
-`2c59c922…`). It includes default-export names and snapshot graph fixes;
-the later namespace descriptor TDZ work is outside that worker. The completed
-score above remains authoritative until the new report finishes.
+This full snapshot excludes subsequent namespace TDZ, export resolution,
+exported destructuring, harness classification, dynamic deferred-import,
+async cycle, and byte-module changes. Their focused results below remain
+separate measurements.
 
 That full snapshot includes Object integrity and `Object.fromEntries`, deferred
 imports, and the earlier dynamic-import attributes implementation. Their
@@ -106,35 +105,37 @@ Mapped arguments subsequently pass **13,621 / 13,661** selected variants, gainin
 
 With and Proxy binding resolution subsequently passes **14,466 / 14,502** selected variants, gaining **6 passes with zero losses**. See the [with-binding continuation](../../docs/test262-with-bindings-continuation.md).
 
-Empty accessor metadata and duplicate-parameter initialization subsequently pass **14,615 / 14,639** selected variants, gaining **21 passes with zero losses** against the completed full-run projection. Six gains overlap the prior with-binding work. These changes remain outside the full score. See the [descriptor continuation](../../docs/test262-empty-accessors-continuation.md).
+Empty accessor metadata and duplicate-parameter initialization subsequently pass **14,615 / 14,639** selected variants, gaining **21 passes with zero losses** against the completed full-run projection. Six gains overlap the prior with-binding work. These changes are included in the completed full score. See the [descriptor continuation](../../docs/test262-empty-accessors-continuation.md).
 
-Async generator delegation subsequently passes **2,858 / 2,858** selected variants, gaining **4 passes with zero losses**. These changes remain outside the completed full score. See the [async delegation continuation](../../docs/test262-async-delegation-continuation.md).
+Async generator delegation subsequently passes **2,858 / 2,858** selected variants, gaining **4 passes with zero losses**. These changes are included in the completed full score. See the [async delegation continuation](../../docs/test262-async-delegation-continuation.md).
 
-Canonical numeric property keys subsequently pass **2,702 / 2,729** selected variants, gaining **10 passes with zero losses**. All 2,252 object-expression variants pass. These changes remain outside the completed full score. See the [numeric key continuation](../../docs/test262-numeric-property-keys-continuation.md).
+Canonical numeric property keys subsequently pass **2,702 / 2,729** selected variants, gaining **10 passes with zero losses**. All 2,252 object-expression variants pass. These changes are included in the completed full score. See the [numeric key continuation](../../docs/test262-numeric-property-keys-continuation.md).
 
-Class property layout subsequently passes **18,986 / 19,037** selected variants, gaining **38 passes with zero losses**. All computed-name and object-expression variants pass. This remains outside the completed full score. See the [class layout continuation](../../docs/test262-class-property-layout-continuation.md).
+Class property layout subsequently passes **18,986 / 19,037** selected variants, gaining **38 passes with zero losses**. All computed-name and object-expression variants pass. This is included in the completed full score. See the [class layout continuation](../../docs/test262-class-property-layout-continuation.md).
 
-Var destructuring reference order subsequently passes **528 / 528** selected variants, gaining **one pass with zero losses**. All 368 core-library tests pass without exclusions. This remains outside the completed full score. See the [var destructuring continuation](../../docs/test262-var-destructuring-continuation.md).
+Var destructuring reference order subsequently passes **528 / 528** selected variants, gaining **one pass with zero losses**. All 368 core-library tests pass without exclusions. This is included in the completed full score. See the [var destructuring continuation](../../docs/test262-var-destructuring-continuation.md).
 
-Optional-chain references subsequently pass **16,722 / 16,765** selected variants, gaining **12 passes with zero losses**. All 76 optional-chaining expression variants pass. This remains outside the completed full score. See the [optional-chain continuation](../../docs/test262-optional-chain-references-continuation.md).
+Optional-chain references subsequently pass **16,722 / 16,765** selected variants, gaining **12 passes with zero losses**. All 76 optional-chaining expression variants pass. This is included in the completed full score. See the [optional-chain continuation](../../docs/test262-optional-chain-references-continuation.md).
 
-Public hash-named keys subsequently pass **31,739 / 31,860** selected variants, gaining **two passes with zero losses**. This remains outside the completed full score. See the [public hash-key continuation](../../docs/test262-public-hash-keys-continuation.md).
+Public hash-named keys subsequently pass **31,739 / 31,860** selected variants, gaining **two passes with zero losses**. This is included in the completed full score. See the [public hash-key continuation](../../docs/test262-public-hash-keys-continuation.md).
 
-Super reference receiver order subsequently passes **19,080 / 19,125** selected variants, gaining **ten passes with zero losses**. This remains outside the completed full score. See the [super receiver-order continuation](../../docs/test262-super-reference-order-continuation.md).
+Super reference receiver order subsequently passes **19,080 / 19,125** selected variants, gaining **ten passes with zero losses**. This is included in the completed full score. See the [super receiver-order continuation](../../docs/test262-super-reference-order-continuation.md).
 
-Default export names subsequently pass **18,120 / 18,184** selected variants, gaining **seven passes with zero losses**. This remains outside the completed full score. See the [default export-name continuation](../../docs/test262-default-export-names-continuation.md).
+Default export names subsequently pass **18,120 / 18,184** selected variants, gaining **seven passes with zero losses**. This is included in the completed full score. See the [default export-name continuation](../../docs/test262-default-export-names-continuation.md).
 
-Namespace descriptor TDZ fixes subsequently pass **7,887 / 7,916** selected variants, gaining **six passes with zero losses**; deferred imports remain **109 / 109**. This continuation is excluded from the running full snapshot. See the [namespace continuation](../../docs/test262-namespace-tdz-continuation.md).
+Namespace descriptor TDZ fixes subsequently pass **7,887 / 7,916** selected variants, gaining **six passes with zero losses**; deferred imports remain **109 / 109**. This continuation is excluded from the completed full snapshot. See the [namespace continuation](../../docs/test262-namespace-tdz-continuation.md).
 
-Cyclic and ambiguous export resolution subsequently passes **2,618 / 2,637** module/import variants, gaining **two passes with zero losses**. This remains outside the running full snapshot. See the [export resolution continuation](../../docs/test262-export-resolution-continuation.md).
+Cyclic and ambiguous export resolution subsequently passes **2,618 / 2,637** module/import variants, gaining **two passes with zero losses**. This remains outside the completed full snapshot. See the [export resolution continuation](../../docs/test262-export-resolution-continuation.md).
 
-Exported destructuring bindings subsequently pass **3,486 / 3,504** selected variants, gaining **one pass with zero losses**. All **253 / 253** top-level-await variants pass. This remains outside the running full snapshot. See the [export patterns continuation](../../docs/test262-export-patterns-continuation.md).
+Exported destructuring bindings subsequently pass **3,486 / 3,504** selected variants, gaining **one pass with zero losses**. All **253 / 253** top-level-await variants pass. This remains outside the completed full snapshot. See the [export patterns continuation](../../docs/test262-export-patterns-continuation.md).
 
-Harness-error classification subsequently passes **2,621 / 2,637** selected module/import variants, correcting **two passes with zero losses**. This is a worker measurement correction, excluded from the running full snapshot. See the [harness error continuation](../../docs/test262-harness-error-continuation.md).
+Harness-error classification subsequently passes **2,621 / 2,637** selected module/import variants, correcting **two passes with zero losses**. This is a worker measurement correction, excluded from the completed full snapshot. See the [harness error continuation](../../docs/test262-harness-error-continuation.md).
 
-Dynamic deferred imports subsequently pass **2,625 / 2,637** selected module/import variants, gaining **four passes with zero losses** by awaiting asynchronous dependencies through internal reactions. This remains outside the running full snapshot. See the [dynamic defer continuation](../../docs/test262-dynamic-defer-continuation.md).
+Dynamic deferred imports subsequently pass **2,625 / 2,637** selected module/import variants, gaining **four passes with zero losses** by awaiting asynchronous dependencies through internal reactions. This remains outside the completed full snapshot. See the [dynamic defer continuation](../../docs/test262-dynamic-defer-continuation.md).
 
-Async cycle outcomes subsequently pass **2,627 / 2,637** selected module/import variants, gaining **two passes with zero losses**. All **1,900 / 1,900** dynamic-import variants pass. This remains outside the running full snapshot. See the [async cycle continuation](../../docs/test262-async-cycle-continuation.md).
+Async cycle outcomes subsequently pass **2,627 / 2,637** selected module/import variants, gaining **two passes with zero losses**. All **1,900 / 1,900** dynamic-import variants pass. This remains outside the completed full snapshot. See the [async cycle continuation](../../docs/test262-async-cycle-continuation.md).
+
+Immutable byte modules subsequently pass **4,334 / 4,341** selected variants, gaining **five passes with zero losses**; all **5 / 5** import-bytes variants pass. Two pre-existing ArrayBuffer timeouts remain measured. The engine and explicit binary loader API are enabled; runtime adapter integration follows. This remains outside the completed full snapshot. See the [byte module continuation](../../docs/test262-byte-modules-continuation.md).
 
 Full reports, status transitions, measured source patches, source hashes,
 build environment, and validation logs are archived in `evidence/`, including

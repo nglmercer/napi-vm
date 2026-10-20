@@ -15,7 +15,7 @@ pub mod lang;
 pub mod lexer;
 pub mod module_loader;
 pub use module_loader::{
-    CompositeLoader, DataUrlLoader, ModuleLoader, ModuleSource, VirtualLoader,
+    CompositeLoader, DataUrlLoader, ModuleBytes, ModuleLoader, ModuleSource, VirtualLoader,
 };
 pub mod parser;
 pub mod runtime;

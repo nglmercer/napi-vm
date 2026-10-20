@@ -53,3 +53,6 @@ python3 tools/test262/run.py .napi-vm/test262 \
   --path language/expressions/dynamic-import \
   --output artifacts/test262/module-async-regression.json
 ```
+
+Byte requests now use the explicit binary `load_bytes` hook before any text
+decoding; see [immutable byte modules](test262-byte-modules-continuation.md).

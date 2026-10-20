@@ -1391,6 +1391,7 @@ fn run_loop(
                         template.default.as_deref(),
                         &template.named,
                         template.namespace.as_deref(),
+                        &[],
                     )?;
                 }
                 Instr::ExportDefault { src } => {

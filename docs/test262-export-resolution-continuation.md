@@ -20,5 +20,5 @@ or side effects. Before the change, the cycle and nested-ambiguity tests fail;
 after it, all 25 module integration tests pass. All 369 core-library tests pass without exclusions, as do strict workspace
 Clippy and formatting. The final release passes **2,618 / 2,637** module/import variants, gaining
 **two passes with zero losses**. This includes all 109 deferred-import cases.
-See the [archived evidence](../tools/test262/evidence/export-resolution-2026-10-20/summary.json). The running full snapshot
+See the [archived evidence](../tools/test262/evidence/export-resolution-2026-10-20/summary.json). The completed full snapshot
 ffc10c7 excludes this continuation and the preceding namespace TDZ fix.

@@ -370,3 +370,27 @@ fn harness_errors_are_identified_by_prototype_without_guest_stringification() {
         worker(json!({"source":"throw new (function Test262Error(){})();","harness":harness}));
     assert_eq!(report["error_type"], "EngineError");
 }
+
+#[test]
+fn worker_loads_raw_byte_modules_within_its_explicit_root() {
+    let root = std::env::temp_dir().join(format!("napi-vm-test262-bytes-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("payload.bin"), [0, 255, 128, 13, 10]).unwrap();
+    let report = worker(
+        json!({"id":"test.js","corpus_root":root,"module":true,"asynchronous":true,"source":r#"
+        import bytes from './payload.bin' with {type:'bytes'};
+        if (!(bytes instanceof Uint8Array) || !bytes.buffer.immutable || bytes.length!==5 || bytes[1]!==255 || bytes[2]!==128 || bytes[3]!==13 || bytes[4]!==10) throw new Error('binary contents');
+        import('./payload.bin',{with:{type:'bytes'}}).then(ns=>{if(ns.default!==bytes) $DONE(new Error('identity'));else $DONE();},$DONE);
+    "#}),
+    );
+    assert_eq!(report["status"], "ok", "{report}");
+    let outside = root.with_extension("outside.bin");
+    std::fs::write(&outside, [255]).unwrap();
+    let denied = worker(
+        json!({"id":"test.js","corpus_root":root,"module":true,"source":format!("import bytes from {} with {{type:'bytes'}};",serde_json::to_string(&outside.to_string_lossy()).unwrap())}),
+    );
+    assert_eq!(denied["status"], "error", "{denied}");
+    assert_eq!(denied["phase"], "resolution", "{denied}");
+    std::fs::remove_file(outside).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}

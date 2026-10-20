@@ -6,7 +6,7 @@
     "."
   ],
   "groups": [],
-  "engine_sha256": "08ca2b0cd9c3d5ba53827b227641ad9497cdb093b584f4911b60738c73757578",
+  "engine_sha256": "2c59c9227c3364c836f9687d0b8b098e9fe6e7beca9bd66d1c22cad4cc85f694",
   "skip_features": [],
   "denominator": "all selected variants, including skips and errors",
   "worker_jobs": 2,
@@ -14,21 +14,21 @@
   "resumed_files": 0,
   "total": 102956,
   "counts": {
-    "pass": 101895,
-    "fail": 951,
+    "pass": 101973,
+    "fail": 860,
     "skip": 0,
-    "timeout": 110,
+    "timeout": 123,
     "crash": 0,
     "harness_error": 0
   },
-  "pass_percentage": 98.96946268308793,
+  "pass_percentage": 99.04522320214461,
   "limitations": [
     "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
   ],
-  "source_base": "a528b0273051f934dc8e0ed2380e7a72526d5ee6",
-  "source_state": "All 55 lost passes are measured timeouts. Outcomes are retained without reclassification. Includes with-binding, empty-accessor, and duplicate-parameter initialization fixes; excludes later async delegation, numeric keys, class layout, host bridge, host JSON, var destructuring, and optional-chain changes.",
-  "evidence": "evidence/full-empty-accessors-2026-10-19/final-full.json.gz",
-  "note": "Latest completed full pinned run: 101,895 / 102,956 (98.9695%) on source a528b02. 61 gains and 55 losses versus 997b476; all losses are measured timeouts. All 55 lost passes are measured timeouts. Outcomes are retained without reclassification. Includes with-binding, empty-accessor, and duplicate-parameter initialization fixes; excludes later async delegation, numeric keys, class layout, host bridge, host JSON, var destructuring, and optional-chain changes.",
+  "source_base": "ffc10c7d740e2a55dbf6843f8024143bc1491508",
+  "source_state": "clean committed frozen snapshot; All 52 lost passes are measured timeouts, retained without reclassification. Frozen clean source ffc10c7 includes default-export names and native snapshot fixes; excludes subsequent namespace TDZ, export resolution, export patterns, harness classification, dynamic defer, async cycle, and byte module changes.",
+  "evidence": "evidence/full-default-export-names-2026-10-20/final-full.json.gz",
+  "note": "Latest completed full pinned run: 101,973 / 102,956 (99.0452%) on ffc10c7. All 52 lost passes are measured timeouts, retained without reclassification. Frozen clean source ffc10c7 includes default-export names and native snapshot fixes; excludes subsequent namespace TDZ, export resolution, export patterns, harness classification, dynamic defer, async cycle, and byte module changes.",
   "current_focused": {
     "selection": [
       "built-ins/Object/fromEntries",
@@ -360,24 +360,6 @@
     },
     "evidence": "evidence/control-flow-completion-2026-10-18/summary.json",
     "implementation_patch_sha256": "3399f8e1eafb678cd133cfd2a934e5f08a12635146890ca9e24a14924afa0986"
-  },
-  "full_refresh_comparison": {
-    "worker_jobs": 2,
-    "timeout_seconds": 5.0,
-    "new_passes": 175,
-    "lost_passes": 2,
-    "lost_variants": [
-      {
-        "test": "staging/sm/String/string-upper-lower-mapping.js",
-        "variant": "script",
-        "status": "timeout"
-      },
-      {
-        "test": "staging/sm/String/string-upper-lower-mapping.js",
-        "variant": "strict",
-        "status": "timeout"
-      }
-    ]
   },
   "tail_calls_focused": {
     "selection": [
@@ -1095,7 +1077,7 @@
       "strict_workspace_clippy": "pass",
       "format": "pass"
     },
-    "note": "Latest completed full score still measures 997b476; focused results are not added to that score.",
+    "note": "At this focused checkpoint, the latest completed full score still measured 997b476; focused results are not added to that score.",
     "evidence": "evidence/var-destructuring-2026-10-18/focused.json.gz"
   },
   "optional_chain_references_focused": {
@@ -1128,7 +1110,7 @@
       "format": "pass"
     },
     "limitations": [
-      "Latest full score measures a528b02 and excludes this continuation.",
+      "At this focused checkpoint, the latest full score measured a528b02 and excludes this continuation.",
       "Subsequent public hash-key enumeration changes are excluded from this worker and implementation patch."
     ],
     "evidence": "evidence/optional-chain-references-2026-10-19/focused.json.gz"
@@ -1163,7 +1145,7 @@
       "format": "pass"
     },
     "limitations": [
-      "Latest full score measures a528b02 and excludes this continuation.",
+      "At this focused checkpoint, the latest full score measured a528b02 and excludes this continuation.",
       "Subsequent super receiver-order changes are excluded from this worker and patch."
     ],
     "evidence": "evidence/public-hash-keys-2026-10-19/focused.json.gz"
@@ -1197,7 +1179,7 @@
       "strict_workspace_clippy": "pass",
       "format": "pass"
     },
-    "note": "Latest full score measures a528b02 and excludes this continuation.",
+    "note": "At this focused checkpoint, the latest full score measured a528b02 and excludes this continuation.",
     "evidence": "evidence/super-reference-order-2026-10-19/focused.json.gz"
   },
   "default_export_names_focused": {
@@ -1234,7 +1216,7 @@
       }
     },
     "limitations": [
-      "Latest completed full score measures a528b02 and excludes this continuation.",
+      "At this focused checkpoint, the latest completed full score measured a528b02 and excludes this continuation.",
       "Worker and implementation patch exclude the subsequent native-addon snapshot ordering fix."
     ],
     "evidence": "evidence/default-export-names-2026-10-20/focused.json.gz"
@@ -1257,16 +1239,6 @@
     },
     "note": "Host-only fix; no Test262 score gain claimed. The default-export naming worker excludes this source patch.",
     "evidence": "evidence/node-addon-snapshot-order-2026-10-20/summary.json"
-  },
-  "running_full": {
-    "status": "running",
-    "source_base": "ffc10c7d740e2a55dbf6843f8024143bc1491508",
-    "engine_sha256": "2c59c9227c3364c836f9687d0b8b098e9fe6e7beca9bd66d1c22cad4cc85f694",
-    "started_utc": "2026-10-20T13:57:05.898022+00:00",
-    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
-    "local_checkpoint": "artifacts/test262/full-after-default-export-names-2026-10-20.checkpoint.jsonl",
-    "local_output": "artifacts/test262/full-after-default-export-names-2026-10-20.json",
-    "note": "Frozen clean source ffc10c7 includes default-export naming and native snapshot graph fixes; excludes subsequent namespace descriptor TDZ changes. Last completed full score above is unchanged."
   },
   "namespace_tdz_focused": {
     "source_base": "de317bf5b930ab866539dc59c0f495d25e2c41dd",
@@ -1296,7 +1268,7 @@
       "strict_workspace_clippy": "pass",
       "format": "pass"
     },
-    "note": "Preliminary comparison retained: six gains and one deletion regression, corrected in final worker. Running full snapshot ffc10c7 excludes this change.",
+    "note": "Preliminary comparison retained: six gains and one deletion regression, corrected in final worker. Completed full snapshot ffc10c7 excludes this change.",
     "evidence": "evidence/namespace-tdz-2026-10-20/focused.json.gz"
   },
   "export_resolution_focused": {
@@ -1327,7 +1299,7 @@
       "strict_workspace_clippy": "pass",
       "format": "pass"
     },
-    "note": "Running full snapshot ffc10c7 excludes this continuation. Baseline is namespace TDZ worker 627cc3b3.",
+    "note": "Completed full snapshot ffc10c7 excludes this continuation. Baseline is namespace TDZ worker 627cc3b3.",
     "evidence": "evidence/export-resolution-2026-10-20/focused.json.gz"
   },
   "export_patterns_focused": {
@@ -1365,7 +1337,7 @@
         "total": 253
       }
     },
-    "note": "Running full snapshot ffc10c7 excludes this continuation. Baseline worker 2915ae8a contains preceding export resolution fix.",
+    "note": "Completed full snapshot ffc10c7 excludes this continuation. Baseline worker 2915ae8a contains preceding export resolution fix.",
     "evidence": "evidence/export-patterns-2026-10-20/focused.json.gz"
   },
   "harness_error_measurement": {
@@ -1396,7 +1368,7 @@
       "strict_workspace_clippy": "pass",
       "format": "pass"
     },
-    "note": "Corrected harness exception classification, not an ECMAScript feature gain. Running full snapshot ffc10c7 excludes this correction; its outcomes are not rewritten.",
+    "note": "Corrected harness exception classification, not an ECMAScript feature gain. Completed full snapshot ffc10c7 excludes this correction; its outcomes are not rewritten.",
     "evidence": "evidence/harness-error-2026-10-20/focused.json.gz"
   },
   "dynamic_deferred_async_focused": {
@@ -1428,7 +1400,7 @@
       "strict_workspace_clippy": "pass",
       "format": "pass"
     },
-    "note": "Running full snapshot ffc10c7 excludes this continuation. All four dynamic deferred-import failures in this selection now pass.",
+    "note": "Completed full snapshot ffc10c7 excludes this continuation. All four dynamic deferred-import failures in this selection now pass.",
     "evidence": "evidence/dynamic-defer-2026-10-20/focused.json.gz"
   },
   "async_cycle_focused": {
@@ -1464,7 +1436,105 @@
         "total": 1900
       }
     },
-    "note": "Running full snapshot ffc10c7 excludes this continuation. Dynamic imports now all pass in this pinned corpus selection.",
+    "note": "Completed full snapshot ffc10c7 excludes this continuation. Dynamic imports now all pass in this pinned corpus selection.",
     "evidence": "evidence/async-cycle-2026-10-20/focused.json.gz"
+  },
+  "previous_full_snapshots": [
+    {
+      "source_base": "a528b0273051f934dc8e0ed2380e7a72526d5ee6",
+      "engine_sha256": "08ca2b0cd9c3d5ba53827b227641ad9497cdb093b584f4911b60738c73757578",
+      "total": 102956,
+      "counts": {
+        "pass": 101895,
+        "fail": 951,
+        "skip": 0,
+        "timeout": 110,
+        "crash": 0,
+        "harness_error": 0
+      },
+      "pass_percentage": 98.96946268308793,
+      "evidence": "evidence/full-empty-accessors-2026-10-19/final-full.json.gz",
+      "note": "Latest completed full pinned run: 101,895 / 102,956 (98.9695%) on source a528b02. 61 gains and 55 losses versus 997b476; all losses are measured timeouts. All 55 lost passes are measured timeouts. Outcomes are retained without reclassification. Includes with-binding, empty-accessor, and duplicate-parameter initialization fixes; excludes later async delegation, numeric keys, class layout, host bridge, host JSON, var destructuring, and optional-chain changes."
+    }
+  ],
+  "historical_full_refresh_comparison": {
+    "worker_jobs": 2,
+    "timeout_seconds": 5.0,
+    "new_passes": 175,
+    "lost_passes": 2,
+    "lost_variants": [
+      {
+        "test": "staging/sm/String/string-upper-lower-mapping.js",
+        "variant": "script",
+        "status": "timeout"
+      },
+      {
+        "test": "staging/sm/String/string-upper-lower-mapping.js",
+        "variant": "strict",
+        "status": "timeout"
+      }
+    ]
+  },
+  "full_refresh_comparison": {
+    "baseline_source": "a528b0273051f934dc8e0ed2380e7a72526d5ee6",
+    "worker_jobs": 2,
+    "timeout_seconds": 5,
+    "new_passes": 130,
+    "lost_passes": 52,
+    "lost_statuses": {
+      "timeout": 52
+    },
+    "evidence": "evidence/full-default-export-names-2026-10-20/comparison.json.gz"
+  },
+  "last_full_run": {
+    "status": "complete",
+    "source_base": "ffc10c7d740e2a55dbf6843f8024143bc1491508",
+    "engine_sha256": "2c59c9227c3364c836f9687d0b8b098e9fe6e7beca9bd66d1c22cad4cc85f694",
+    "started_utc": "2026-10-20T13:57:05.898022+00:00",
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "local_checkpoint": "artifacts/test262/full-after-default-export-names-2026-10-20.checkpoint.jsonl",
+    "local_output": "artifacts/test262/full-after-default-export-names-2026-10-20.json",
+    "note": "All 52 lost passes are measured timeouts, retained without reclassification. Frozen clean source ffc10c7 includes default-export names and native snapshot fixes; excludes subsequent namespace TDZ, export resolution, export patterns, harness classification, dynamic defer, async cycle, and byte module changes.",
+    "evidence": "evidence/full-default-export-names-2026-10-20/final-full.json.gz"
+  },
+  "byte_modules_focused": {
+    "source_base": "3042060595c4b8d1bd23a01002095b5e6749bce1",
+    "worker_sha256": "3613dfa4451eb240bde6804502828ca01ed81629187a190d2c302dcde5cc8440",
+    "working_tree_changes": true,
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "selection": [
+      "language/module-code",
+      "language/import",
+      "language/expressions/dynamic-import",
+      "built-ins/ArrayBuffer",
+      "built-ins/Uint8Array",
+      "built-ins/DataView"
+    ],
+    "implementation_patch_sha256": "b9dbd755857a8bd72d7f8e4db9b2d7fbaf1a83758fe068ef3d1cf427e558b8ff",
+    "total": 4341,
+    "counts": {
+      "pass": 4334,
+      "fail": 5,
+      "skip": 0,
+      "timeout": 2,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "gains": 5,
+    "losses": 0,
+    "validation": {
+      "byte_module_tests": 4,
+      "module_integration_tests": 33,
+      "core_library_tests": 369,
+      "worker_integration_tests": 20,
+      "strict_workspace_clippy": "pass",
+      "format": "pass",
+      "import_bytes_selection": {
+        "pass": 5,
+        "total": 5
+      }
+    },
+    "note": "Completed full snapshot ffc10c7 excludes this continuation. Both measured ArrayBuffer timeouts are preserved; binary capability is opt-in for host loaders. Runtime file/network/package adapters are a subsequent continuation.",
+    "evidence": "evidence/byte-modules-2026-10-20/focused.json.gz"
   }
 }

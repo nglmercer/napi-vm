@@ -76,6 +76,27 @@ impl ModuleLoader for CorpusLoader {
     fn load(&self, id: &str) -> Result<ModuleSource, VmErr> {
         self.load_corpus_module(id, None)
     }
+    fn load_bytes(
+        &self,
+        id: &str,
+        attributes: &[(String, napi_vm::JsString)],
+    ) -> Result<napi_vm::ModuleBytes, VmErr> {
+        if let Ok(bytes) = self.virtual_loader.load_bytes(id, attributes) {
+            return Ok(bytes);
+        }
+        let path = self.path(id)?;
+        let metadata = path.metadata().map_err(|e| VmErr::Msg(e.to_string()))?;
+        if metadata.len() > 32 * 1024 * 1024 {
+            return Err(VmErr::Msg(
+                "ResourceLimit: Module source size exceeded".into(),
+            ));
+        }
+        let bytes = std::fs::read(&path).map_err(|e| VmErr::Msg(e.to_string()))?;
+        Ok(napi_vm::ModuleBytes {
+            id: id.into(),
+            bytes,
+        })
+    }
     fn load_with_attributes(
         &self,
         id: &str,

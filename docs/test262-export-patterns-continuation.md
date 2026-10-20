@@ -16,4 +16,4 @@ Clippy and formatting. The final release passes **3,486 / 3,504** selected varia
 **one pass with zero losses**. All **253 / 253** top-level-await variants
 now pass: the remaining failure used a destructured export. See the
 [archived evidence](../tools/test262/evidence/export-patterns-2026-10-20/summary.json). The
-running full snapshot ffc10c7 excludes this continuation.
+completed full snapshot ffc10c7 excludes this continuation.

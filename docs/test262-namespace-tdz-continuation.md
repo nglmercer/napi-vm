@@ -15,7 +15,7 @@ flags are checked again after initialization.
 
 All 22 module integration tests and 369 core-library tests pass without
 exclusions. Strict workspace Clippy passes. The frozen baseline passes
-7,881 / 7,916 variants across module code, Object, Reflect, and for-in; the final release passes **7,887 / 7,916**, gaining **six passes with zero losses**. The separately running full suite freezes
+7,881 / 7,916 variants across module code, Object, Reflect, and for-in; the final release passes **7,887 / 7,916**, gaining **six passes with zero losses**. The completed full suite freezes
 ffc10c7 and excludes this continuation.
 
 The first focused run found six gains and a deletion regression. Namespace
