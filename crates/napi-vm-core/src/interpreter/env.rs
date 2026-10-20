@@ -290,6 +290,7 @@ pub struct Environment {
     parameter_scope: bool,
     property_attributes: HashMap<String, crate::value::PropAttrs>,
     intrinsics: HashMap<String, Value>,
+    pub(crate) template_objects: HashMap<u64, Value>,
     pub(crate) regexp_legacy: Option<Rc<RefCell<crate::builtins::regexp::LegacyState>>>,
 }
 
@@ -707,6 +708,7 @@ impl Environment {
             resources: Vec::new(),
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
+            template_objects: HashMap::new(),
             regexp_legacy: None,
         }
     }
@@ -737,6 +739,7 @@ impl Environment {
             resources: Vec::new(),
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
+            template_objects: HashMap::new(),
             regexp_legacy: None,
         }
     }
@@ -771,6 +774,7 @@ impl Environment {
             resources: Vec::new(),
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
+            template_objects: HashMap::new(),
             regexp_legacy: None,
         }
     }
@@ -824,6 +828,7 @@ impl Environment {
             resources: Vec::new(),
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
+            template_objects: HashMap::new(),
             regexp_legacy: None,
         }
     }
@@ -1370,6 +1375,7 @@ impl Environment {
         values.extend(self.new_target.iter().cloned());
         values.extend(self.constructor_this.iter().flatten().cloned());
         values.extend(self.intrinsics.values().cloned());
+        values.extend(self.template_objects.values().cloned());
         values.extend(
             self.private_instance_elements
                 .iter()
@@ -1394,6 +1400,7 @@ impl Environment {
         self.resources.clear();
         self.property_attributes.clear();
         self.intrinsics.clear();
+        self.template_objects.clear();
         self.regexp_legacy = None;
         self.new_target = None;
         self.constructor_this = None;
@@ -1416,6 +1423,7 @@ impl Environment {
                     work.extend(env.new_target.take());
                     work.extend(env.constructor_this.take().flatten());
                     work.extend(env.intrinsics.drain().map(|(_, value)| value));
+                    work.extend(env.template_objects.drain().map(|(_, value)| value));
                     work.extend(
                         env.private_instance_elements
                             .take()

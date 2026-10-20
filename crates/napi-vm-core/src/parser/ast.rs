@@ -153,6 +153,7 @@ pub enum Expr {
     /// `` tag`a${x}b` ``: the tag is called with the array of literal chunks
     /// (carrying a `raw` companion array) followed by the interpolated values.
     TaggedTemplate {
+        site: u64,
         tag: Box<Expr>,
         cooked: Vec<Option<crate::JsString>>,
         raw: Vec<crate::JsString>,

@@ -295,6 +295,7 @@ pub enum Instr {
     },
     /// `obj[key] = val` through the full assignment path.
     FreezeTemplate {
+        site: u64,
         cooked: Reg,
         raw: Reg,
     },
@@ -1056,7 +1057,9 @@ impl fmt::Display for Instr {
             Instr::ReturnUndefined => write!(f, "RETURN_UNDEFINED"),
             Instr::Throw { src } => write!(f, "THROW r{src}"),
             Instr::GetProp { dst, obj, key, .. } => write!(f, "GET_PROP r{dst}, r{obj}, r{key}"),
-            Instr::FreezeTemplate { cooked, raw } => write!(f, "FREEZE_TEMPLATE r{cooked}, r{raw}"),
+            Instr::FreezeTemplate { cooked, raw, .. } => {
+                write!(f, "FREEZE_TEMPLATE r{cooked}, r{raw}")
+            }
             Instr::SetProp { obj, key, val, .. } => write!(f, "SET_PROP r{obj}, r{key}, r{val}"),
             Instr::DirectEval {
                 dst,

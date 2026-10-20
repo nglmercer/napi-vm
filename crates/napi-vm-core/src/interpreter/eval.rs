@@ -253,6 +253,24 @@ pub(crate) const HOME_OBJECT: &str = "__home object__";
 pub(crate) const SUPER_CONSTRUCTOR_HOME: &str = "__super constructor home__";
 
 impl Interpreter {
+    /// A template site belongs to a parsed source node; arrays belong to its
+    /// executing realm and must survive function recreation and collection.
+    pub(crate) fn cache_template_object(&mut self, site: u64, cooked: Value, raw: Value) -> Value {
+        let realm =
+            super::realm::allocation_global().unwrap_or_else(|| self.persistent_global.clone());
+        if let Some(existing) = realm.borrow().template_objects.get(&site).cloned() {
+            return existing;
+        }
+        if let Value::Array(array) = &cooked {
+            array.finish_template(raw);
+        }
+        realm
+            .borrow_mut()
+            .template_objects
+            .insert(site, cooked.clone());
+        cooked
+    }
+
     /// IteratorClose preserves an original throw, including errors raised by
     /// retrieving return. Other abrupt completions may be replaced by close.
     pub(crate) fn close_guest_iterator_for_abrupt(
@@ -3487,6 +3505,7 @@ impl Interpreter {
             // `` tag`a${x}b` ``: the tag receives the literal chunks as an
             // array carrying a `raw` companion, then the interpolated values.
             Expr::TaggedTemplate {
+                site,
                 tag,
                 cooked,
                 raw,
@@ -3502,11 +3521,11 @@ impl Interpreter {
                         .map(|part| part.map(Value::String).unwrap_or(Value::Undefined))
                         .collect(),
                 );
-                if let Value::Array(array) = &strings {
-                    array.finish_template(Value::array(
-                        raw.iter().cloned().map(Value::String).collect(),
-                    ));
-                }
+                let strings = self.cache_template_object(
+                    *site,
+                    strings,
+                    Value::array(raw.iter().cloned().map(Value::String).collect()),
+                );
                 let mut args = vec![strings];
                 for expr in exprs {
                     args.push(self.eval_expr(expr)?);

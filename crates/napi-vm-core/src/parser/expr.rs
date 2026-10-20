@@ -709,6 +709,7 @@ impl Parser {
                     self.adv();
                     let (quasis, exprs) = self.template_body()?;
                     e = Expr::TaggedTemplate {
+                        site: next_template_site(),
                         tag: Box::new(e),
                         cooked: quasis
                             .iter()
@@ -734,4 +735,10 @@ impl Parser {
         }
         Some(e)
     }
+}
+
+static NEXT_TEMPLATE_SITE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn next_template_site() -> u64 {
+    NEXT_TEMPLATE_SITE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }

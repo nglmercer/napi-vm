@@ -3679,11 +3679,12 @@ impl<'a> Compiler<'a> {
                 body,
             ),
             Expr::TaggedTemplate {
+                site,
                 tag,
                 cooked,
                 raw,
                 exprs,
-            } => self.compile_tagged(tag, cooked, raw, exprs),
+            } => self.compile_tagged(*site, tag, cooked, raw, exprs),
             Expr::Super => self.raise_bare_super(),
             Expr::Spread(inner) => self.compile_expr(inner),
             Expr::DynamicImport {
@@ -4296,6 +4297,7 @@ impl<'a> Compiler<'a> {
     /// Resolve the tag before substitutions, matching the evaluator.
     fn compile_tagged(
         &mut self,
+        site: u64,
         tag: &'a Expr,
         cooked: &'a [Option<crate::JsString>],
         raw: &'a [crate::JsString],
@@ -4361,6 +4363,7 @@ impl<'a> Compiler<'a> {
             tmpl,
         });
         self.emit(Instr::FreezeTemplate {
+            site,
             cooked: parts,
             raw: raw_parts,
         });
