@@ -1557,19 +1557,19 @@ fn new_typed_array(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Resu
             ))
         }
         Some(Value::SharedArrayBuffer(buffer)) => {
-            let byte_offset = constructor_index(interp, a.get(1))? as f64;
-            if !byte_offset.is_finite() || byte_offset < 0.0 {
-                return Err(range_err("Invalid typed array offset"));
+            let byte_offset = constructor_index(interp, a.get(1))?;
+            if !byte_offset.is_multiple_of(size) {
+                return Err(range_err("Start offset is not aligned"));
             }
-            let byte_offset = byte_offset as usize;
+            let explicit_length = match a.get(2) {
+                Some(Value::Undefined) | None => None,
+                Some(value) => Some(constructor_index(interp, Some(value))?),
+            };
             let available = buffer.len();
-            if byte_offset > available || !byte_offset.is_multiple_of(size) {
+            if byte_offset > available {
                 return Err(range_err("Start offset is outside the buffer"));
             }
-            let length = match a.get(2) {
-                Some(Value::Undefined) | None => (available - byte_offset) / size,
-                Some(v) => constructor_index(interp, Some(v))?,
-            };
+            let length = explicit_length.unwrap_or((available - byte_offset) / size);
             if length
                 .checked_mul(size)
                 .and_then(|length| byte_offset.checked_add(length))
