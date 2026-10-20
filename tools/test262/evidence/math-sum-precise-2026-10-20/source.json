@@ -1,0 +1,9 @@
+{
+  "source_base": "93131edf8c6a3a425210d3e0894c4014df7a11b8",
+  "implementation_paths": [
+    "crates/napi-vm-core/src/builtins/math.rs",
+    "crates/napi-vm-core/tests/math_sum_precise.rs"
+  ],
+  "source_patch_sha256": "7806b2408e5f65f5136b37b27d5c395affcdac6d50c80e97968b79a0c5c3ae7f",
+  "debug_engine_sha256": "7fa7218fc78fefee71c0ce3f1b763839ab19c6d6074b604244827eea784fc12a"
+}

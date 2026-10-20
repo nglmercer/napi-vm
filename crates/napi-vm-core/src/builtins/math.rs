@@ -56,6 +56,7 @@ pub(super) fn install(e: &mut Environment) {
 fn math_methods(prototype: Option<Value>) -> Vec<(String, Value)> {
     let table: Vec<(&str, NativeFn)> = vec![
         ("abs", math_abs),
+        ("sumPrecise", math_sum_precise),
         ("floor", math_floor),
         ("ceil", math_ceil),
         ("round", math_round),
@@ -286,4 +287,101 @@ fn math_random(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, Vm
     x ^= x << 17;
     SEED.store(x, Ordering::Relaxed);
     Ok(Value::Number((x >> 11) as f64 / (1u64 << 53) as f64))
+}
+
+/// Accumulate finite binary64 values exactly in units of 2^-1074. The largest
+/// finite input needs only 2098 bits, so cancellation cannot overflow f64.
+fn math_sum_precise(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    use crate::bigint::BigInt;
+    let source = args.first().cloned().unwrap_or(Value::Undefined);
+    let iterator = interp.iterator_for(&source)?;
+    let next = interp.get_prop_value_str(&iterator, "next")?;
+    let mut sum = BigInt::zero();
+    let mut negative_zero = true;
+    let mut positive_infinity = false;
+    let mut negative_infinity = false;
+    let mut nan = false;
+    loop {
+        interp.consume_loop()?;
+        let result = interp.call_this(&next, iterator.clone(), vec![])?;
+        let (done, value) = interp.iterator_result_fields(&result)?;
+        if done {
+            break;
+        }
+        let Value::Number(number) = value else {
+            let error = VmErr::Msg("TypeError: Math.sumPrecise requires Number elements".into());
+            interp.close_guest_iterator_for_abrupt(&iterator, false, &error)?;
+            return Err(error);
+        };
+        if number != 0.0 || !number.is_sign_negative() {
+            negative_zero = false;
+        }
+        if number.is_nan() {
+            nan = true;
+            continue;
+        }
+        if number.is_infinite() {
+            if number.is_sign_negative() {
+                negative_infinity = true;
+            } else {
+                positive_infinity = true;
+            }
+            continue;
+        }
+        let bits = number.to_bits();
+        let exponent = ((bits >> 52) & 0x7ff) as i64;
+        let fraction = bits & ((1_u64 << 52) - 1);
+        let significand = if exponent == 0 {
+            fraction
+        } else {
+            fraction | (1_u64 << 52)
+        };
+        let term = BigInt::from_words(number.is_sign_negative(), &[significand])
+            .shl(&BigInt::from_i64((exponent - 1).max(0)))
+            .map_err(VmErr::Msg)?;
+        sum = sum.add(&term).map_err(VmErr::Msg)?;
+    }
+    let number = if nan || (positive_infinity && negative_infinity) {
+        f64::NAN
+    } else if positive_infinity {
+        f64::INFINITY
+    } else if negative_infinity {
+        f64::NEG_INFINITY
+    } else if sum.is_zero() {
+        if negative_zero { -0.0 } else { 0.0 }
+    } else {
+        rounded_binary64_sum(&sum)
+    };
+    Ok(Value::Number(number))
+}
+
+/// Round the magnitude once to nearest, ties to even, then restore its sign.
+fn rounded_binary64_sum(sum: &crate::bigint::BigInt) -> f64 {
+    let (negative, words) = sum.to_words();
+    let mut highest = (words.len() - 1) * 64 + 63 - words.last().unwrap().leading_zeros() as usize;
+    let bit = |index: usize| (words[index / 64] >> (index % 64)) & 1;
+    let sign = if negative { 1_u64 << 63 } else { 0 };
+    if highest < 52 {
+        return f64::from_bits(sign | words[0]);
+    }
+    let shift = highest - 52;
+    let mut significand = 0_u64;
+    for index in (shift..=highest).rev() {
+        significand = (significand << 1) | bit(index);
+    }
+    if shift > 0
+        && bit(shift - 1) != 0
+        && (significand & 1 != 0 || (0..shift - 1).any(|index| bit(index) != 0))
+    {
+        significand += 1;
+        if significand == 1_u64 << 53 {
+            significand >>= 1;
+            highest += 1;
+        }
+    }
+    let exponent = highest - 51;
+    if exponent >= 0x7ff {
+        return f64::from_bits(sign | (0x7ff_u64 << 52));
+    }
+    f64::from_bits(sign | ((exponent as u64) << 52) | (significand & ((1_u64 << 52) - 1)))
 }
