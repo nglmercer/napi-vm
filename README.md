@@ -537,8 +537,9 @@ This later change is excluded from the active full run. See the
 [Function/Proxy continuation](docs/test262-function-proxy-metadata-continuation.md).
 
 Bound functions now retain intermediate target identities and resolve deep
-call, construction, and instanceof chains iteratively; optimized measurement
-is pending. The subsequent primitive-operand ordering fix passes **107 / 107**
+call, construction, and instanceof chains iteratively. Isolated optimized
+verification passes **1,831 / 1,837**, with **two gains and zero lost passes**.
+The subsequent primitive-operand ordering fix passes **107 / 107**
 focused debug instanceof variants, gaining **four passes with zero losses**.
 Both changes are excluded from the active full run. See the
 [bound-chain continuation](docs/test262-bound-function-chains-continuation.md) and

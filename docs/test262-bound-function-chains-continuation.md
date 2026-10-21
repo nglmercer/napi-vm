@@ -26,3 +26,8 @@ score update. The live detached f708e0c full run excludes this change.
 
 Remaining semantic failures are computed-method source strings and instanceof
 primitive-left-hand-side ordering. Evidence: [archive](../tools/test262/evidence/bound-function-chains-2026-10-20/).
+
+The isolated optimized worker at a68b1a1 passes **1,831 / 1,837**, with six
+failures and zero timeouts: **two gains, zero lost passes** against the same
+baseline. Both debug timeout variants pass in release. The checkout was checked
+clean before and after the build; its manifest and report are archived above.
