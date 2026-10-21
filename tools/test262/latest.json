@@ -2252,5 +2252,16 @@
     "source_commit": "157ade0",
     "evidence": "tools/test262/evidence/function-proxy-metadata-2026-10-20",
     "note": "Isolated clean release source; focused score only; excluded from active f708e0c full run."
+  },
+  "bound_function_chains_debug": {
+    "pass": 1829,
+    "total": 1837,
+    "fail": 6,
+    "timeout": 2,
+    "new_passes": 2,
+    "lost_passes": 2,
+    "lost_status": "timeout only",
+    "evidence": "tools/test262/evidence/bound-function-chains-2026-10-20",
+    "note": "Debug against isolated release; optimized verification pending; excluded from active full run."
   }
 }

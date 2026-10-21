@@ -248,14 +248,15 @@ pub(crate) fn function_method(name: &str) -> Option<Value> {
     })
 }
 
-#[cfg(all(
-    feature = "node-api-host",
-    any(target_os = "linux", target_os = "macos", target_os = "windows")
-))]
 pub(crate) fn is_default_has_instance_method(value: &Value) -> bool {
     let expected: super::NativeFn = function_has_instance;
-    matches!(value, Value::NativeFunction { callable, .. }
-        if std::ptr::fn_addr_eq(*callable, expected))
+    match value {
+        Value::NativeFunction { callable, .. } => std::ptr::fn_addr_eq(*callable, expected),
+        Value::Function(function) => function
+            .native
+            .is_some_and(|callable| std::ptr::fn_addr_eq(callable, expected)),
+        _ => false,
+    }
 }
 
 // The VM retains parsed bodies rather than original source text. The standard
@@ -297,47 +298,30 @@ pub(super) fn function_bind(
         _ => String::new(),
     };
 
-    let (bound_target, bound_this, mut bound_arguments) = match &target {
-        Value::Function(function) => match &function.bound {
-            Some(bound) => (
-                bound.target.clone(),
-                bound.this_value.clone(),
-                bound.arguments.as_ref().clone(),
-            ),
-            None => (target.clone(), bound_this, Vec::new()),
-        },
-        _ => (target.clone(), bound_this, Vec::new()),
-    };
-    if bound_arguments.len().saturating_add(new_arguments.len()) > crate::value::MAX_ARRAY_LEN {
-        return Err(crate::value::limit_err("Maximum argument count exceeded"));
-    }
-    bound_arguments.extend(new_arguments);
+    // Retain each immediate target: [[Construct]] compares newTarget with
+    // every bound function while delegating through the chain.
+    let bound_target = target;
+    let bound_arguments = new_arguments;
 
     let properties = FunctionData::properties_with_default_prototype(&interp.persistent_global);
     properties.set_proto((!matches!(prototype, Value::Null)).then(|| Rc::new(prototype)));
+    properties
+        .borrow_mut()
+        .push(("length".into(), Value::Number(bound_length)));
     properties.borrow_mut().push((
         "name".into(),
         Value::String((format!("bound {target_name}")).into()),
     ));
-    properties.meta.borrow_mut().set_attrs(
-        "name",
-        crate::value::PropAttrs {
-            writable: false,
-            enumerable: false,
-            configurable: true,
-        },
-    );
-    properties
-        .borrow_mut()
-        .push(("length".into(), Value::Number(bound_length)));
-    properties.meta.borrow_mut().set_attrs(
-        "length",
-        crate::value::PropAttrs {
-            writable: false,
-            enumerable: false,
-            configurable: true,
-        },
-    );
+    for key in ["length", "name"] {
+        properties.meta.borrow_mut().set_attrs(
+            key,
+            crate::value::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
+    }
 
     Ok(Value::Function(Rc::new(FunctionData {
         strict: false,

@@ -26,10 +26,6 @@ pub(crate) use symbol::is_registered as symbol_is_registered;
 
 pub(crate) use function::function_method;
 pub(crate) use function::is_constructor;
-#[cfg(all(
-    feature = "node-api-host",
-    any(target_os = "linux", target_os = "macos", target_os = "windows")
-))]
 pub(crate) use function::is_default_has_instance_method;
 pub(crate) use promise::promise_method;
 

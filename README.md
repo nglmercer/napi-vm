@@ -531,6 +531,11 @@ results remain separate from this full score. A new full run is active on detach
 `8dab6498…`), including the verified built-in and tagged-constructor fixes.
 The completed full score remains authoritative until that report finishes.
 
+Function/Proxy metadata and inheritance now pass **1,624 / 1,628** focused
+variants in an isolated optimized build: **12 gains, zero lost passes**.
+This later change is excluded from the active full run. See the
+[Function/Proxy continuation](docs/test262-function-proxy-metadata-continuation.md).
+
 The current deferred-import implementation passes its pinned 109-variant
 Test262 selection. Static import attributes pass 17 / 17 variants and dynamic
 import attributes pass 44 / 44. The neighboring module-code and dynamic-import

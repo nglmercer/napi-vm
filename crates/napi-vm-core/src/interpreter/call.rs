@@ -305,23 +305,32 @@ impl Interpreter {
     ) -> Result<Value, VmErr> {
         let symbol = crate::builtins::well_known("hasInstance")
             .expect("Symbol.hasInstance is a well-known symbol");
-        let method = self.get_prop_value(constructor, &symbol)?;
-        if !matches!(method, Value::Undefined | Value::Null) {
-            if !is_callable_value(&method) {
+        let mut constructor = constructor.clone();
+        loop {
+            let method = self.get_prop_value(&constructor, &symbol)?;
+            if !matches!(method, Value::Undefined | Value::Null) {
+                if !is_callable_value(&method) {
+                    return Err(VmErr::Msg(
+                        "TypeError: Symbol.hasInstance is not callable".into(),
+                    ));
+                }
+                if !crate::builtins::is_default_has_instance_method(&method) {
+                    let result = self.call_this(&method, constructor, vec![object.clone()])?;
+                    return Ok(Value::Bool(self.truthy(&result)));
+                }
+            } else if !is_callable_value(&constructor) {
                 return Err(VmErr::Msg(
-                    "TypeError: Symbol.hasInstance is not callable".into(),
+                    "TypeError: Right-hand side of instanceof is not callable".into(),
                 ));
             }
-            let result = self.call_this(&method, constructor.clone(), vec![object.clone()])?;
-            return Ok(Value::Bool(self.truthy(&result)));
+            if let Value::Function(function) = &constructor
+                && let Some(bound) = &function.bound
+            {
+                constructor = bound.target.clone();
+                continue;
+            }
+            return self.ordinary_instance_of(object, &constructor);
         }
-        if !is_callable_value(constructor) {
-            return Err(VmErr::Msg(
-                "TypeError: Right-hand side of instanceof is not callable".into(),
-            ));
-        }
-
-        self.ordinary_instance_of(object, constructor)
     }
 
     /// Perform the ordinary prototype-based `instanceof` check without
@@ -2117,6 +2126,51 @@ impl Interpreter {
         self.resolve_tail_calls(result)
     }
 
+    // Resolve bound chains without consuming one host stack frame per bind.
+    // Arguments are accumulated in segments to avoid quadratic copying.
+    fn resolve_bound_chain(
+        &mut self,
+        mut target: Value,
+        mut receiver: Value,
+        args: Vec<Value>,
+        mut new_target: Value,
+        construct: bool,
+    ) -> Result<(Value, Value, Vec<Value>, Value), VmErr> {
+        let mut segments = Vec::new();
+        let mut count = args.len();
+        while let Value::Function(function) = &target {
+            self.execution.check()?;
+            let Some(bound) = &function.bound else { break };
+            if !construct && crate::builtins::shadow_realm::is_wrapped_state(&bound.this_value) {
+                break;
+            }
+            if construct && !function.is_constructor {
+                return Err(VmErr::Msg(
+                    "TypeError: function is not a constructor".into(),
+                ));
+            }
+            count = count.saturating_add(bound.arguments.len());
+            if count > crate::value::MAX_ARRAY_LEN {
+                return Err(crate::value::limit_err("Maximum argument count exceeded"));
+            }
+            if construct && crate::interpreter::strict_equals(&new_target, &target) {
+                new_target = bound.target.clone();
+            }
+            receiver = bound.this_value.clone();
+            segments.push(bound.arguments.clone());
+            target = bound.target.clone();
+        }
+        if segments.is_empty() {
+            return Ok((target, receiver, args, new_target));
+        }
+        let mut arguments = Vec::with_capacity(count);
+        for segment in segments.into_iter().rev() {
+            arguments.extend(segment.iter().cloned());
+        }
+        arguments.extend(args);
+        Ok((target, receiver, arguments, new_target))
+    }
+
     #[doc(hidden)]
     fn call_this_once(
         &mut self,
@@ -2124,6 +2178,9 @@ impl Interpreter {
         this_val: Value,
         args: Vec<Value>,
     ) -> Result<Value, VmErr> {
+        let (target, this_val, args, _) =
+            self.resolve_bound_chain(f.clone(), this_val, args, Value::Undefined, false)?;
+        let f = &target;
         if matches!(f, Value::Proxy(_)) {
             // Proxy internal methods execute in the caller's context.
             // A trap or target call enters its own realm.
@@ -2637,6 +2694,9 @@ impl Interpreter {
         args: Vec<Value>,
         new_target: Value,
     ) -> Result<Value, VmErr> {
+        let (target, this_val, args, new_target) =
+            self.resolve_bound_chain(f.clone(), this_val, args, new_target, true)?;
+        let f = &target;
         match f {
             Value::Class(c) => self.invoke_constructor_with_new_target(
                 c.constructor.as_ref(),
@@ -2780,6 +2840,9 @@ impl Interpreter {
         args: Vec<Value>,
         new_target: Value,
     ) -> Result<Value, VmErr> {
+        let (target, _, args, new_target) =
+            self.resolve_bound_chain(f.clone(), Value::Undefined, args, new_target, true)?;
+        let f = &target;
         // Proxy [[Construct]] runs in its caller's context; delegation enters
         // the target's realm. Native prototype lookup is part of construction,
         // so it must enter that realm before any observable newTarget access.
