@@ -113,6 +113,8 @@ TypedArray numeric keys subsequently pass **4,290 / 4,336** selected TypedArray 
 
 Exact Math.sumPrecise subsequently brings the full Math selection to **654 / 654**, gaining **20 passes with zero losses**. Finite numbers accumulate exactly before one ties-to-even rounding; iterator closing, signed zero, and non-number rejection are verified. All 369 core tests, four native regressions, strict workspace Clippy, and formatting pass. This remains outside the completed full snapshot. See the [Math continuation](test262-math-sum-precise-continuation.md).
 
+A detached clean checkout of `a5a2362` verifies **13,800 / 13,808** selected built-in and tagged-template variants, gaining **76 passes with zero losses** against an earlier measured worker. Array, String, Math, SharedArrayBuffer, TypedArrayConstructors, and the targeted capture-name regression all pass. Two tagged-constructor failures are fixed by subsequent `9d58dce`; six TypedArray timeouts remain. This source-verified focused result stays separate from the full score. See the [verified built-ins continuation](test262-verified-builtins-continuation.md).
+
 
 ## Historical checkpoint
 
