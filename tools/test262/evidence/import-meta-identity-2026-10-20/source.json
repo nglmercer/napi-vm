@@ -1,0 +1,16 @@
+{
+  "source_base": "9ef80d2a7ad7e0128e1985edae30082397bfb02e",
+  "implementation_paths": [
+    "crates/napi-vm-core/src/builtins/function.rs",
+    "crates/napi-vm-core/src/heap.rs",
+    "crates/napi-vm-core/src/interpreter/env.rs",
+    "crates/napi-vm-core/src/interpreter/eval.rs",
+    "crates/napi-vm-core/src/interpreter/mod.rs",
+    "crates/napi-vm-core/src/interpreter/module_link.rs",
+    "crates/napi-vm-core/tests/weak_gc.rs",
+    "crates/napi-vm-core/tests/import_meta_identity.rs"
+  ],
+  "source_patch_sha256": "825b1ea9ff241984c27b29d52b8796cea080cc3c330c4bb0c962fb5039e6348c",
+  "debug_engine_sha256": "e089c5570af507096608005d8fdcfb8cc43c9638d8215b98c2912a897351a6b2",
+  "baseline_engine_sha256": "8dab6498fa2bb2ac51be3c00aa489804720956f9557c1e988883ae130f9c2734"
+}

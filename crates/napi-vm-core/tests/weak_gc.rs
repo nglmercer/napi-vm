@@ -211,6 +211,7 @@ fn live_module_maps_are_roots_across_interpreters_without_snapshot_updates() {
     value.set_prop("self".into(), value.clone()).unwrap();
     let record = napi_vm_core::interpreter::Module {
         source_object: None,
+        import_meta: None,
         namespace: Default::default(),
         deferred_namespace: Default::default(),
         exports: std::collections::HashMap::from([("value".into(), value.clone())]),
@@ -429,6 +430,7 @@ fn cached_source_objects_are_traced_and_released_with_module_records() {
         "source-only".into(),
         napi_vm_core::interpreter::Module {
             source_object: Some(source.clone()),
+            import_meta: None,
             namespace: Default::default(),
             deferred_namespace: Default::default(),
             exports: Default::default(),

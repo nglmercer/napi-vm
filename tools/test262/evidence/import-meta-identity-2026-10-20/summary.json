@@ -1,0 +1,35 @@
+{
+  "domain": "ECMAScript",
+  "suite": "Test262",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "selection": [
+    "language/expressions/import.meta"
+  ],
+  "groups": [],
+  "engine_sha256": "e089c5570af507096608005d8fdcfb8cc43c9638d8215b98c2912a897351a6b2",
+  "skip_features": [],
+  "denominator": "all selected variants, including skips and errors",
+  "worker_jobs": 2,
+  "timeout_seconds": 5.0,
+  "resumed_files": 0,
+  "total": 27,
+  "counts": {
+    "pass": 27,
+    "fail": 0,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "pass_percentage": 100.0,
+  "limitations": [
+    "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
+  ],
+  "source_base": "9ef80d2a7ad7e0128e1985edae30082397bfb02e",
+  "source_patch_sha256": "825b1ea9ff241984c27b29d52b8796cea080cc3c330c4bb0c962fb5039e6348c",
+  "new_passes": 11,
+  "lost_passes": 0,
+  "core_tests": 369,
+  "integration_tests": 58,
+  "note": "Debug worker; neighboring constructor selection preserves 1013 passes, with two pre-existing failures becoming timeouts. Optimized verification pending; active full f708e0c excludes this patch."
+}

@@ -575,7 +575,7 @@ fn parse_dynamic_function(
     let mut parser =
         crate::Parser::new_with_spans(crate::Lexer::from_js_string(&source).tokenize_with_spans());
     let mut parsed = parser
-        .parse_program()
+        .parse_program_with_goal(crate::parser::ParseGoal::Script)
         .map_err(|error| VmErr::Msg(format!("SyntaxError: {}", error.message)))?;
     if parsed.len() != 1 {
         return Err(VmErr::Msg(

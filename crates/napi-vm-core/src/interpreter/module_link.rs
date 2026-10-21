@@ -245,6 +245,7 @@ impl Interpreter {
             .entry(key.into())
             .or_insert_with(|| Module {
                 source_object: None,
+                import_meta: None,
                 namespace: Rc::new(RefCell::new(None)),
                 deferred_namespace: Rc::new(RefCell::new(None)),
                 exports: HashMap::new(),
@@ -294,6 +295,7 @@ impl Interpreter {
                 key.into(),
                 Module {
                     source_object,
+                    import_meta: None,
                     namespace: Rc::new(RefCell::new(None)),
                     deferred_namespace: Rc::new(RefCell::new(None)),
                     exports: HashMap::new(),
@@ -380,6 +382,7 @@ impl Interpreter {
             name.into(),
             Module {
                 source_object,
+                import_meta: None,
                 namespace: Rc::new(RefCell::new(None)),
                 deferred_namespace: Rc::new(RefCell::new(None)),
                 exports: HashMap::new(),

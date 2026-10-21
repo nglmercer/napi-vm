@@ -1488,6 +1488,7 @@ impl Interpreter {
                 name.clone(),
                 Module {
                     source_object: None,
+                    import_meta: None,
                     namespace: Rc::new(RefCell::new(None)),
                     deferred_namespace: Rc::new(RefCell::new(None)),
                     exports: std::collections::HashMap::new(),
@@ -2623,6 +2624,7 @@ impl Interpreter {
             name.to_string(),
             Module {
                 source_object: None,
+                import_meta: None,
                 namespace: Rc::new(RefCell::new(None)),
                 deferred_namespace: Rc::new(RefCell::new(None)),
                 exports: HashMap::new(),

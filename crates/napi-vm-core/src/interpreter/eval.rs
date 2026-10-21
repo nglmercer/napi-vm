@@ -1442,6 +1442,10 @@ impl Interpreter {
 
     /// Shared `import.meta`: the current module's URL and main flag.
     pub(crate) fn eval_import_meta(&mut self) -> Result<Value, VmErr> {
+        let cached = self.current_module().import_meta.clone();
+        if let Some(value) = cached {
+            return Ok(value);
+        }
         let url = self
             .cur_mod
             .as_ref()
@@ -1451,7 +1455,9 @@ impl Interpreter {
             ("url".to_string(), Value::String((url).into())),
             ("main".to_string(), Value::Bool(self.is_main)),
         ];
-        Ok(Value::object(o))
+        let meta = Value::object_with_proto(o, None);
+        self.current_module().import_meta = Some(meta.clone());
+        Ok(meta)
     }
 
     pub(crate) fn instantiate_function_declaration(

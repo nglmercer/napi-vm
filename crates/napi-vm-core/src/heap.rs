@@ -293,6 +293,9 @@ impl Marker {
                 if let Some(value) = &module.default {
                     self.mark_value(value);
                 }
+                if let Some(value) = &module.import_meta {
+                    self.mark_value(value);
+                }
                 if let Some(value) = &module.source_object {
                     self.mark_value(value);
                 }

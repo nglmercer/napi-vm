@@ -1473,6 +1473,8 @@ impl Environment {
 pub struct Module {
     /// Host module-source object, shared with evaluation-phase records.
     pub source_object: Option<Value>,
+    /// Lazily initialized, per-module import.meta identity.
+    pub import_meta: Option<Value>,
     /// Shared namespace identity, also shared by cloned export records.
     pub namespace: Rc<RefCell<Option<Value>>>,
     /// Deferred namespace identity is distinct from the ordinary namespace.
