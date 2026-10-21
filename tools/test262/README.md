@@ -56,7 +56,9 @@ Reports and comparison are archived in [full Array-string evidence](evidence/ful
 
 This snapshot excludes subsequent sparse indices, logical Array lengths,
 core constructor metadata/unscopables, and String semantic fixes. Focused
-results remain separate from this full score. No newer full run is active.
+results remain separate from this full score. A new full run is active on detached clean source `f708e0c` (worker
+`8dab6498…`), including the verified built-in and tagged-constructor fixes.
+The completed full score remains authoritative until that report finishes.
 
 That full snapshot includes Object integrity and `Object.fromEntries`, deferred
 imports, and the earlier dynamic-import attributes implementation. Their

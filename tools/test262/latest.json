@@ -2183,5 +2183,17 @@
     "lost_passes": 0,
     "note": "Detached checkout validates exact current source. Baseline is an earlier measured worker without exact clean-source attribution. The two tagged-constructor failures are fixed by subsequent 9d58dce; six TypedArray timeouts remain measured. No focused gains are added to full score.",
     "evidence": "evidence/verified-builtins-2026-10-20/focused.json.gz"
+  },
+  "running_full": {
+    "status": "running",
+    "source_base": "f708e0cf73f453ce9444bcc50aeedc8f8fa2bdac",
+    "source_tree": "29597ee74326ae1f17e18423521af1155d3afc57",
+    "engine_sha256": "8dab6498fa2bb2ac51be3c00aa489804720956f9557c1e988883ae130f9c2734",
+    "started_utc": "2026-10-21T00:07:34.361410+00:00",
+    "runner_pid": 1855979,
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "local_checkpoint": "artifacts/test262/full-verified-builtins-2026-10-20.checkpoint.jsonl",
+    "local_output": "artifacts/test262/full-verified-builtins-2026-10-20.json",
+    "note": "Detached clean checkout verified before and after build; immutable worker hash verified. Includes cache, tagged-constructor, numeric, String and TypedArray fixes; excludes subsequent import.meta changes. Completed full score remains unchanged."
   }
 }

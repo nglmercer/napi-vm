@@ -1,0 +1,27 @@
+{
+  "source_commit": "f708e0cf73f453ce9444bcc50aeedc8f8fa2bdac",
+  "source_tree": "29597ee74326ae1f17e18423521af1155d3afc57",
+  "source_state": "detached clean checkout validated before and after build",
+  "checkout": "/tmp/node-vm-full-f708e0c",
+  "started_utc": "2026-10-21T00:07:34.361410+00:00",
+  "engine_sha256": "8dab6498fa2bb2ac51be3c00aa489804720956f9557c1e988883ae130f9c2734",
+  "worker": "/tmp/node-vm-full-f708e0c-worker",
+  "command": [
+    "python3",
+    "tools/test262/run.py",
+    ".napi-vm/test262",
+    "--engine",
+    "/tmp/node-vm-full-f708e0c-worker",
+    "--revision",
+    "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "--jobs",
+    "2",
+    "--timeout",
+    "5",
+    "--checkpoint",
+    "/home/meme/Documentos/Default Project/node-vm/artifacts/test262/full-verified-builtins-2026-10-20.checkpoint.jsonl",
+    "--output",
+    "/home/meme/Documentos/Default Project/node-vm/artifacts/test262/full-verified-builtins-2026-10-20.json"
+  ],
+  "runner_pid": 1855979
+}

@@ -16,7 +16,9 @@ Reports and comparison are archived in [full Array-string evidence](../tools/tes
 
 This snapshot excludes subsequent sparse indices, logical Array lengths,
 core constructor metadata/unscopables, and String semantic fixes. Focused
-results remain separate from this full score. No newer full run is active.
+results remain separate from this full score. A new full run is active on detached clean source `f708e0c` (worker
+`8dab6498…`), including the verified built-in and tagged-constructor fixes.
+The completed full score remains authoritative until that report finishes.
 
 Later static import attributes pass 17 / 17, dynamic attributes pass 44 / 44,
 and deferred imports pass 109 / 109 in the combined 170-variant selection.
