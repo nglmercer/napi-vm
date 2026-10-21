@@ -350,14 +350,15 @@ impl Interpreter {
             return self.instance_of(object, &bound.target);
         }
 
+        if !is_js_object(object) {
+            return Ok(Value::Bool(false));
+        }
+
         let prototype = self.get_prop_value_str(constructor, "prototype")?;
         if !is_js_object(&prototype) {
             return Err(VmErr::Msg(
                 "TypeError: Function has non-object prototype in instanceof check".into(),
             ));
-        }
-        if !is_js_object(object) {
-            return Ok(Value::Bool(false));
         }
 
         let mut current = self.get_prototype_of(object)?;

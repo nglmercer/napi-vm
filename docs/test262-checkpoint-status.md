@@ -25,6 +25,14 @@ variants in an isolated optimized build: **12 gains, zero lost passes**.
 This later change is excluded from the active full run. See the
 [Function/Proxy continuation](test262-function-proxy-metadata-continuation.md).
 
+Bound functions now retain intermediate target identities and resolve deep
+call, construction, and instanceof chains iteratively; optimized measurement
+is pending. The subsequent primitive-operand ordering fix passes **107 / 107**
+focused debug instanceof variants, gaining **four passes with zero losses**.
+Both changes are excluded from the active full run. See the
+[bound-chain continuation](test262-bound-function-chains-continuation.md) and
+[instanceof ordering continuation](test262-instanceof-primitive-order-continuation.md).
+
 Later static import attributes pass 17 / 17, dynamic attributes pass 44 / 44,
 and deferred imports pass 109 / 109 in the combined 170-variant selection.
 The neighboring module-code and dynamic-import selection passes 2,454 / 2,502.
