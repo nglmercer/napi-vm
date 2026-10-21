@@ -11,7 +11,8 @@ Four failures and two timeouts remain. All 369 core tests, 89 related integratio
 tests, strict workspace Clippy, and formatting pass. All three new regression
 tests failed before the patch and pass afterward.
 
-These focused results do not update the full-suite score. Optimized verification
-is pending. The live detached f708e0c full run excludes these changes.
+These focused results do not update the full-suite score. The isolated optimized worker passes **1,624 / 1,628**, with four failures and
+zero timeouts: **12 gains, zero lost passes** against the same baseline. Its
+source checkout at 157ade0 was checked clean before and after compilation. The live detached f708e0c full run excludes these changes.
 
 Evidence: [archive](../tools/test262/evidence/function-proxy-metadata-2026-10-20/).

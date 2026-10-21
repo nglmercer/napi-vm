@@ -2241,5 +2241,16 @@
     "lost_passes": 0,
     "evidence": "tools/test262/evidence/function-proxy-metadata-2026-10-20",
     "note": "Debug measurement; release verification pending; excluded from active f708e0c full run."
+  },
+  "function_proxy_metadata_release": {
+    "pass": 1624,
+    "total": 1628,
+    "fail": 4,
+    "timeout": 0,
+    "new_passes": 12,
+    "lost_passes": 0,
+    "source_commit": "157ade0",
+    "evidence": "tools/test262/evidence/function-proxy-metadata-2026-10-20",
+    "note": "Isolated clean release source; focused score only; excluded from active f708e0c full run."
   }
 }
