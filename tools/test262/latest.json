@@ -2282,5 +2282,16 @@
     "source_commit": "a68b1a1",
     "evidence": "tools/test262/evidence/bound-function-chains-2026-10-20",
     "note": "Isolated clean optimized worker; debug timeout variants pass; excludes subsequent primitive instanceof fix."
+  },
+  "import_meta_release": {
+    "pass": 1040,
+    "total": 1048,
+    "fail": 8,
+    "timeout": 0,
+    "new_passes": 11,
+    "lost_passes": 0,
+    "source_commit": "c306dee",
+    "evidence": "tools/test262/evidence/import-meta-identity-2026-10-20",
+    "note": "Isolated optimized combined selection; baseline is explicit disjoint union of identical-worker reports."
   }
 }

@@ -22,3 +22,10 @@ and two timeouts remain. Those timeouts were previously failures, not lost passe
 See the [archive](../tools/test262/evidence/import-meta-identity-2026-10-20/).
 These are debug measurements, separate from optimized release and full-suite
 scores. The active detached full run on f708e0c excludes this patch.
+
+An isolated clean optimized build at c306dee subsequently passes **1,040 / 1,048**
+combined import.meta and function-constructor variants, with eight failures and
+zero timeouts: **11 gains, zero lost passes** against the disjoint union of the
+two frozen-worker baseline selections. The union uses identical baseline worker
+hashes and contains no duplicate variants. Its derivation, isolated source
+manifest, full report, and comparison are archived above.
