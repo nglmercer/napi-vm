@@ -2231,5 +2231,15 @@
     "integration_tests": 58,
     "note": "Debug worker; neighboring constructor selection preserves 1013 passes, with two pre-existing failures becoming timeouts. Optimized verification pending; active full f708e0c excludes this patch.",
     "evidence": "evidence/import-meta-identity-2026-10-20/debug-focused.json.gz"
+  },
+  "function_proxy_metadata_debug": {
+    "pass": 1622,
+    "total": 1628,
+    "fail": 4,
+    "timeout": 2,
+    "new_passes": 10,
+    "lost_passes": 0,
+    "evidence": "tools/test262/evidence/function-proxy-metadata-2026-10-20",
+    "note": "Debug measurement; release verification pending; excluded from active f708e0c full run."
   }
 }

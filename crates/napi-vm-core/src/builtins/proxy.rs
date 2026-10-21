@@ -14,10 +14,15 @@ use crate::value::{ProxyData, Value};
 
 pub(super) fn install(e: &mut Environment) {
     if let Some(namespace) = e.get("Proxy") {
+        super::install_constructor_metadata(&namespace, "Proxy", 2);
         super::make_callable(&namespace, super::require_new, Some(new_proxy));
         let prototype = e
             .get("Function")
             .and_then(|function| function.get_prop("prototype"));
+        namespace
+            .property_cell()
+            .expect("Proxy constructor")
+            .set_proto(prototype.clone().map(Rc::new));
         super::object::define_property(
             &namespace,
             "revocable",

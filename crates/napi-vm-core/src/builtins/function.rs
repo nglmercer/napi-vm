@@ -16,23 +16,8 @@ pub(super) fn install(e: &mut Environment) {
     let Some(namespace) = e.get("Function") else {
         return;
     };
+    super::install_constructor_metadata(&namespace, "Function", 1);
     super::make_callable(&namespace, new_function, None);
-    namespace
-        .set_prop("length".into(), Value::Number(1.))
-        .unwrap();
-    namespace
-        .property_cell()
-        .unwrap()
-        .meta
-        .borrow_mut()
-        .set_attrs(
-            "length",
-            crate::value::PropAttrs {
-                writable: false,
-                enumerable: false,
-                configurable: true,
-            },
-        );
 
     let object_prototype = e
         .get("Object")
@@ -194,13 +179,8 @@ pub(super) fn install(e: &mut Environment) {
             new_async_generator_function as super::NativeFn,
         ),
     ] {
-        let constructor = Value::object_with_proto(
-            vec![
-                ("name".into(), Value::String(name.into())),
-                ("length".into(), Value::Number(1.0)),
-            ],
-            Some(Rc::new(namespace.clone())),
-        );
+        let constructor = Value::object_with_proto(Vec::new(), Some(Rc::new(namespace.clone())));
+        super::install_constructor_metadata(&constructor, name, 1);
         super::make_callable(&constructor, callable, None);
         let kind_prototype = Value::object_with_proto(
             vec![("constructor".into(), constructor.clone())],
@@ -210,16 +190,6 @@ pub(super) fn install(e: &mut Environment) {
             .set_prop("prototype".into(), kind_prototype.clone())
             .expect("function-kind prototype");
         if let Value::Object { props } = &constructor {
-            for key in ["name", "length"] {
-                props.meta.borrow_mut().set_attrs(
-                    key,
-                    crate::value::PropAttrs {
-                        writable: false,
-                        enumerable: false,
-                        configurable: true,
-                    },
-                );
-            }
             props.meta.borrow_mut().set_attrs(
                 "prototype",
                 crate::value::PropAttrs {
