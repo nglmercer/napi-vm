@@ -1,0 +1,15 @@
+{
+  "source_base": "a5a2362cba0237b10b354637bb5016b9e015c0b9",
+  "implementation_paths": [
+    "crates/napi-vm-core/src/parser/expr.rs",
+    "crates/napi-vm-core/src/parser/primary.rs",
+    "crates/napi-vm-core/src/interpreter/eval.rs",
+    "crates/napi-vm-core/src/bytecode/compiler.rs",
+    "crates/napi-vm-core/src/bytecode/opcode.rs",
+    "crates/napi-vm-core/src/bytecode/verify.rs",
+    "crates/napi-vm-core/src/bytecode/vm.rs",
+    "crates/napi-vm-core/tests/tagged_template_construction.rs"
+  ],
+  "source_patch_sha256": "604d695f8c03815bf7562d1444db93ebea15ae666b4ae897ddff8b98f08db546",
+  "debug_engine_sha256": "c1e688510b37cb6d96d5f23db45c20bc480bce62b9c53ad0f998f9bd0e2c20b6"
+}

@@ -4323,6 +4323,9 @@ impl<'a> Compiler<'a> {
             self.patch_jump(end, self.here())?;
         }
         let receiver = Some(this);
+        let parts = self.alloc_reg()?;
+        self.emit(Instr::LoadTemplate { dst: parts, site });
+        let cached = self.emit_jump(|target| Instr::JumpIfNotNullish { src: parts, target });
         let mut template = Vec::with_capacity(cooked.len());
         for part in cooked {
             let constant = part
@@ -4338,12 +4341,7 @@ impl<'a> Compiler<'a> {
                 reg,
             });
         }
-        let mut values = Vec::with_capacity(exprs.len());
-        for expr in exprs {
-            values.push(self.compile_expr(expr)?);
-        }
         let tmpl = self.push_const(Constant::SpreadTemplate(template))?;
-        let parts = self.alloc_reg()?;
         self.emit(Instr::BuildArray { dst: parts, tmpl });
         let mut raw_template = Vec::with_capacity(raw.len());
         for part in raw {
@@ -4368,6 +4366,11 @@ impl<'a> Compiler<'a> {
             raw: raw_parts,
         });
 
+        self.patch_jump(cached, self.here())?;
+        let mut values = Vec::with_capacity(exprs.len());
+        for expr in exprs {
+            values.push(self.compile_expr(expr)?);
+        }
         let start = self.alloc_regs(1 + values.len())?;
         self.emit(Instr::Mov {
             dst: start,

@@ -253,6 +253,12 @@ pub(crate) const HOME_OBJECT: &str = "__home object__";
 pub(crate) const SUPER_CONSTRUCTOR_HOME: &str = "__super constructor home__";
 
 impl Interpreter {
+    pub(crate) fn cached_template_object(&self, site: u64) -> Option<Value> {
+        let realm =
+            super::realm::allocation_global().unwrap_or_else(|| self.persistent_global.clone());
+        realm.borrow().template_objects.get(&site).cloned()
+    }
+
     /// A template site belongs to a parsed source node; arrays belong to its
     /// executing realm and must survive function recreation and collection.
     pub(crate) fn cache_template_object(&mut self, site: u64, cooked: Value, raw: Value) -> Value {
@@ -3514,18 +3520,19 @@ impl Interpreter {
                 let (tag_fn, this_val) = self
                     .evaluate_call_reference(tag)?
                     .unwrap_or((Value::Undefined, Value::Undefined));
-                let strings = Value::array(
-                    cooked
-                        .iter()
-                        .cloned()
-                        .map(|part| part.map(Value::String).unwrap_or(Value::Undefined))
-                        .collect(),
-                );
-                let strings = self.cache_template_object(
-                    *site,
-                    strings,
-                    Value::array(raw.iter().cloned().map(Value::String).collect()),
-                );
+                let strings = if let Some(cached) = self.cached_template_object(*site) {
+                    cached
+                } else {
+                    let cooked = Value::array(
+                        cooked
+                            .iter()
+                            .cloned()
+                            .map(|part| part.map(Value::String).unwrap_or(Value::Undefined))
+                            .collect(),
+                    );
+                    let raw = Value::array(raw.iter().cloned().map(Value::String).collect());
+                    self.cache_template_object(*site, cooked, raw)
+                };
                 let mut args = vec![strings];
                 for expr in exprs {
                     args.push(self.eval_expr(expr)?);

@@ -556,6 +556,9 @@ impl Checker<'_> {
                 self.check_reg(address, *obj)?;
                 self.check_reg(address, *key)?;
             }
+            Instr::LoadTemplate { dst, .. } => {
+                self.check_reg(address, *dst)?;
+            }
             Instr::FreezeTemplate { cooked, raw, .. } => {
                 self.check_reg(address, *cooked)?;
                 self.check_reg(address, *raw)?;

@@ -488,7 +488,7 @@ impl Parser {
     }
 
     /// Parses the callee of a `new` expression: a primary expression followed
-    /// by member access (dot / computed), but stopping before call arguments so
+    /// by member access or tagged templates, but stopping before call arguments so
     /// that `new Foo(1, 2)` treats `(1, 2)` as the constructor's arguments.
     fn new_callee(&mut self) -> Option<Expr> {
         let direct_import = matches!(self.cur(), Token::KwImport);
@@ -516,6 +516,9 @@ impl Parser {
                         property: Box::new(p),
                         computed: true,
                     };
+                }
+                Token::Backtick => {
+                    e = self.tagged_template(e)?;
                 }
                 _ => break,
             }

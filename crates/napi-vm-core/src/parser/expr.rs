@@ -600,6 +600,22 @@ impl Parser {
         }
     }
 
+    /// Tagged templates are MemberExpressions, including inside a new callee.
+    pub(super) fn tagged_template(&mut self, tag: Expr) -> Option<Expr> {
+        self.expect(&Token::Backtick);
+        let (quasis, exprs) = self.template_body()?;
+        Some(Expr::TaggedTemplate {
+            site: next_template_site(),
+            tag: Box::new(tag),
+            cooked: quasis
+                .iter()
+                .map(|q| (!q.invalid_escape).then(|| q.cooked.clone()))
+                .collect(),
+            raw: quasis.into_iter().map(|q| q.raw).collect(),
+            exprs,
+        })
+    }
+
     fn postfix(&mut self) -> Option<Expr> {
         let mut e = self.primary()?;
         loop {
@@ -706,18 +722,7 @@ impl Parser {
                 // *tagged* template: the tag receives the literal chunks and
                 // the interpolated values as separate arguments.
                 Token::Backtick => {
-                    self.adv();
-                    let (quasis, exprs) = self.template_body()?;
-                    e = Expr::TaggedTemplate {
-                        site: next_template_site(),
-                        tag: Box::new(e),
-                        cooked: quasis
-                            .iter()
-                            .map(|q| (!q.invalid_escape).then(|| q.cooked.clone()))
-                            .collect(),
-                        raw: quasis.into_iter().map(|q| q.raw).collect(),
-                        exprs,
-                    };
+                    e = self.tagged_template(e)?;
                 }
                 Token::Arrow => {
                     if self.line_break_before_current() {

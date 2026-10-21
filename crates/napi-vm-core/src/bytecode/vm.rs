@@ -1096,6 +1096,11 @@ fn run_loop(
                     };
                     frame.registers[dst as usize] = build_object(interp, frame, &template)?;
                 }
+                Instr::LoadTemplate { dst, site } => {
+                    frame.registers[dst as usize] = interp
+                        .cached_template_object(site)
+                        .unwrap_or(Value::Undefined);
+                }
                 Instr::FreezeTemplate { site, cooked, raw } => {
                     let raw = frame.registers[raw as usize].clone();
                     let value = frame.registers[cooked as usize].clone();
