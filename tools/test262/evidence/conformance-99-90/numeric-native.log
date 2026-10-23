@@ -1,0 +1,10 @@
+   Compiling napi-vm-core v0.1.5 (/workspace/scratch/2e6f496376db/napi-vm/crates/napi-vm-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.92s
+     Running tests/numeric_rounding.rs (target/debug/deps/numeric_rounding-afafb5e30e933ece)
+
+running 2 tests
+test bigint_number_rounding_retains_a_low_sticky_bit ... ok
+test inverse_hyperbolic_tangent_is_accurate_and_odd_at_the_boundary ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+

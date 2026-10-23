@@ -112,3 +112,18 @@ passes and zero lost passes, failures, timeouts, crashes, harness errors or
 skips. Together the two follow-up blocks add 52 passes over `f6b780c`; the
 complete Temporal/DateTimeFormat continuation adds 210 over its 13,548-pass
 matched baseline. These are focused measurements, not a new full-suite score.
+
+## Staging baseline and binary64 rounding
+
+The same release worker passes 2,480/2,631 staging/sm variants, with 131
+semantic failures and 20 measured timeouts, and no crashes, harness errors or
+skips. The raw baseline is archived; timeouts remain nonpassing outcomes.
+
+BigInt-to-Number now extracts a binary64 significand and rounds once using
+guard/sticky bits and ties to even, including overflow. Two native unit tests
+check 10,000 deterministic u128 casts with both signs, sticky bits, and overflow
+boundaries. Math.atanh evaluates the positive magnitude and restores its sign
+to avoid cancellation near -1. Two embedding regressions pass through prepared
+and AST evaluation, and Clippy passes with warnings denied. A matched baseline
+for Number/BigInt/atanh passes 852/856; all 371 core library tests pass.
+Release comparison is pending.
