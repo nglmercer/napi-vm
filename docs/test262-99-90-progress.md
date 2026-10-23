@@ -79,4 +79,6 @@ Only boolean coercion, typeof, and loose null/undefined comparisons change;
 strict equality, object operations, nullish checks, inheritance and proxies
 retain ordinary object semantics. Three native regressions pass in AST and
 prepared modes. The matched baseline selects 84 variants and passes 30, with
-54 failures. Release verification is pending.
+54 failures. The clean `2a56bc8` release passes all 84 variants: 54 new
+passes and zero lost passes, failures, timeouts, crashes, harness errors or
+skips. Both reports and their comparison are archived.
