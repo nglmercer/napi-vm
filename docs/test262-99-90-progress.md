@@ -38,7 +38,23 @@ and formatting checks pass. A release build of clean commit `e50d4c3` passes the
 same four BMP variants with the same one-worker/10-second configuration. Peak
 RSS falls from 5,328,296 KiB to 37,688 KiB (99.29% lower). The report and memory
 measurement are archived alongside the before report. Broader two-worker
-conformance verification remains pending.
+conformance verification passes 842/852 selected RegExp/String variants with
+two workers and 10-second timeouts, with ten semantic failures and zero crashes,
+timeouts, skips, or harness errors. Its raw compressed report is archived.
+
+## Temporal locale formatting
+
+The unchanged release baseline for `intl402/Temporal`, `intl402/DateTimeFormat`,
+and `built-ins/Temporal` passes 13,548/13,758 variants, with 210 failures and no
+other nonpassing outcomes. The compressed baseline is archived with its worker
+digest and configuration.
+
+Temporal locale methods now use the existing Intl date/time and duration
+formatters instead of ISO serialization, including receiver brands, calendar
+compatibility, style conflicts, and ZonedDateTime's own time zone. Numeric hour
+formatting retains the locale pattern's leading zero rather than stripping it
+from 24-hour clock output. Four new native regressions pass through both AST
+and prepared evaluation. Release Test262 comparison for this block is pending.
 
 ## Remaining gates
 

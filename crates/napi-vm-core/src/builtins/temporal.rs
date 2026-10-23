@@ -56,6 +56,27 @@ fn duration(value: &Value) -> Result<Duration, VmErr> {
         _ => vm_err("TypeError: Temporal.Duration receiver required"),
     }
 }
+macro_rules! locale_method {
+    ($($name:ident => $brand:ident),+ $(,)?) => {$(
+        fn $name(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+            $brand(&t)?;
+            super::intl::datetime::temporal_to_locale(i, t, a)
+        }
+    )+};
+}
+locale_method!(
+    time_locale => time,
+    date_locale => date,
+    datetime_locale => datetime,
+    yearmonth_locale => yearmonth,
+    monthday_locale => monthday,
+    instant_locale => instant,
+    zoned_locale => zoned,
+);
+fn duration_locale(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    duration(&t)?;
+    super::intl::duration::temporal_to_locale(i, t, a)
+}
 fn method(target: &Value, name: &str, length: usize, f: NativeFn, fp: &Option<Value>) {
     target
         .set_prop(name.into(), native_method(name, length, f, fp.clone()))
@@ -207,7 +228,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("equals", 1, time_equals),
                 ("toString", 0, time_string),
                 ("toJSON", 0, time_json),
-                ("toLocaleString", 0, time_json),
+                ("toLocaleString", 0, time_locale),
                 ("valueOf", 0, value_of),
             ]
         } else if name == "PlainDate" {
@@ -225,7 +246,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("equals", 1, date_equals),
                 ("toString", 0, date_string),
                 ("toJSON", 0, date_json),
-                ("toLocaleString", 0, date_json),
+                ("toLocaleString", 0, date_locale),
                 ("valueOf", 0, value_of),
             ]
         } else if name == "PlainYearMonth" {
@@ -239,7 +260,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("equals", 1, yearmonth_equals),
                 ("toString", 0, yearmonth_string),
                 ("toJSON", 0, yearmonth_json),
-                ("toLocaleString", 0, yearmonth_json),
+                ("toLocaleString", 0, yearmonth_locale),
                 ("valueOf", 0, value_of),
             ]
         } else if name == "PlainMonthDay" {
@@ -248,7 +269,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("equals", 1, monthday_equals),
                 ("toString", 0, monthday_string),
                 ("toJSON", 0, monthday_json),
-                ("toLocaleString", 0, monthday_json),
+                ("toLocaleString", 0, monthday_locale),
                 ("toPlainDate", 1, monthday_to_date),
                 ("valueOf", 0, value_of),
             ]
@@ -263,7 +284,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("equals", 1, datetime_equals),
                 ("toString", 0, datetime_string),
                 ("toJSON", 0, datetime_json),
-                ("toLocaleString", 0, datetime_json),
+                ("toLocaleString", 0, datetime_locale),
                 ("valueOf", 0, value_of),
                 ("round", 1, datetime_round),
                 ("withPlainTime", 0, datetime_with_time),
@@ -282,7 +303,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("equals", 1, zoned_equals),
                 ("toString", 0, zoned_string),
                 ("toJSON", 0, zoned_json),
-                ("toLocaleString", 0, zoned_json),
+                ("toLocaleString", 0, zoned_locale),
                 ("valueOf", 0, value_of),
                 ("round", 1, zoned_round),
                 ("withPlainTime", 0, zoned_with_time),
@@ -304,7 +325,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("equals", 1, instant_equals),
                 ("toString", 0, instant_string),
                 ("toJSON", 0, instant_json),
-                ("toLocaleString", 0, instant_json),
+                ("toLocaleString", 0, instant_locale),
                 ("valueOf", 0, value_of),
                 ("toZonedDateTimeISO", 1, instant_to_zoned),
             ]
@@ -319,7 +340,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("abs", 0, duration_abs),
                 ("toString", 0, duration_string),
                 ("toJSON", 0, duration_json),
-                ("toLocaleString", 0, duration_json),
+                ("toLocaleString", 0, duration_locale),
                 ("valueOf", 0, value_of),
             ]
         };

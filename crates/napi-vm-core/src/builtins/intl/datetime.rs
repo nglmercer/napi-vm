@@ -1532,6 +1532,7 @@ fn collect_parts(s: &Slots, m: &Moment) -> Result<Vec<(String, String)>, VmErr> 
         }
         if let Some((_, width)) = widths.iter().find(|(k, _)| k == kind)
             && let Some(width) = width
+            && (kind != "hour" || *width == "2-digit")
         {
             *text = pad2(text, *width == "2-digit", zero);
         }
@@ -1628,6 +1629,92 @@ pub(crate) enum DateLocaleKind {
     DateOnly,
     TimeOnly,
 }
+pub(crate) fn temporal_to_locale(
+    i: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    use super::super::temporal::Slots as Temporal;
+    let temporal = this
+        .property_cell()
+        .and_then(|p| p.meta.borrow().temporal.clone())
+        .ok_or_else(error)?;
+    let requested = locale_list(i, arg(&args, 0))?;
+    let options = match arg(&args, 1) {
+        Value::Undefined => Value::object_with_proto(vec![], None),
+        value => super::super::object::to_object_receiver(&value)?,
+    };
+    let mut raw = read_raw_options(i, &options)?;
+    if matches!(&temporal, Temporal::Time(_)) && raw.date_style.is_some()
+        || matches!(
+            &temporal,
+            Temporal::Date(_) | Temporal::YearMonth(_) | Temporal::MonthDay(_)
+        ) && raw.time_style.is_some()
+    {
+        return Err(VmErr::Msg(
+            "TypeError: style cannot format this Temporal type".into(),
+        ));
+    }
+    if let Temporal::Zoned(zoned) = &temporal {
+        if raw.time_zone.is_some() {
+            return Err(VmErr::Msg(
+                "TypeError: timeZone option is not allowed for ZonedDateTime".into(),
+            ));
+        }
+        raw.time_zone = Some(
+            zoned
+                .time_zone()
+                .identifier_with_provider(&*temporal_rs::provider::COMPILED_TZ_PROVIDER)
+                .map_err(|e| VmErr::Msg(e.to_string()))?,
+        );
+        let no_fields = raw.weekday.is_none()
+            && raw.year.is_none()
+            && raw.month.is_none()
+            && raw.day.is_none()
+            && raw.day_period.is_none()
+            && raw.hour.is_none()
+            && raw.minute.is_none()
+            && raw.second.is_none()
+            && raw.fractional.is_none();
+        if no_fields
+            && raw.date_style.is_none()
+            && raw.time_style.is_none()
+            && raw.time_zone_name.is_none()
+        {
+            raw.time_zone_name = Some("short".into());
+        }
+    }
+    let s = resolve_parts(&requested, raw, false, false)?;
+    let calendar = match &temporal {
+        Temporal::Date(value) => Some(value.calendar().identifier()),
+        Temporal::DateTime(value) => Some(value.calendar().identifier()),
+        Temporal::YearMonth(value) => Some(value.calendar().identifier()),
+        Temporal::MonthDay(value) => Some(value.calendar().identifier()),
+        Temporal::Zoned(value) => Some(value.calendar().identifier()),
+        _ => None,
+    };
+    if let Some(calendar) = calendar {
+        let iso_allowed = !matches!(&temporal, Temporal::YearMonth(_) | Temporal::MonthDay(_));
+        if canonical_calendar(calendar) != s.calendar && !(iso_allowed && calendar == "iso8601") {
+            return Err(VmErr::Msg(
+                "RangeError: Temporal calendar does not match formatter calendar".into(),
+            ));
+        }
+    }
+    let mut moment = if let Temporal::Zoned(value) = &temporal {
+        let mut moment = epoch_moment(&s, value.epoch_milliseconds())?;
+        moment.tclass = Some(TemporalClass::Instant);
+        moment
+    } else {
+        resolve_moment(i, &s, this)?
+    };
+    // ISO plain values may be rendered in the locale's chosen calendar.
+    moment.kind = s.calendar_kind;
+    Ok(Value::String(
+        join_parts(&collect_parts(&s, &moment)?).into(),
+    ))
+}
+
 pub(crate) fn date_to_locale(
     i: &mut Interpreter,
     this: Value,
