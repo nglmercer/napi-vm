@@ -1,0 +1,6 @@
+{
+  "source": "e50d4c34f526b38c05e49eaaa41f70c576dcfdf1",
+  "exit_code": 0,
+  "max_rss_kib": 37688,
+  "measurement": "resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss after the focused runner (Linux KiB)"
+}

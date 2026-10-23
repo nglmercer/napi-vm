@@ -34,8 +34,11 @@ The registry now periodically drops dead Weak registrations, whose Rc allocation
 otherwise remain resident. It never clears live cells or runs the cycle collector
 during execution. The pruning interval scales with the retained live registry.
 The regression, heap root/barrier tests, iterative-drop tests, capture-limit test,
-and formatting checks pass. Release memory and focused conformance verification
-of this registry change remain pending.
+and formatting checks pass. A release build of clean commit `e50d4c3` passes the
+same four BMP variants with the same one-worker/10-second configuration. Peak
+RSS falls from 5,328,296 KiB to 37,688 KiB (99.29% lower). The report and memory
+measurement are archived alongside the before report. Broader two-worker
+conformance verification remains pending.
 
 ## Remaining gates
 
