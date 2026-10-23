@@ -1166,7 +1166,11 @@ fn build_input(
     let date = iso.to_calendar(AnyCalendar::new(m.kind));
     let time = Time::try_new(m.hour, m.minute, m.second, m.ms as u32 * 1_000_000)
         .map_err(|_| time_range())?;
-    let zone_id = computation_zone(&s.time_zone);
+    let zone_id = if parse_offset_zone(&s.time_zone).is_some_and(|(minutes, _)| minutes == 0) {
+        "Etc/GMT".into()
+    } else {
+        computation_zone(&s.time_zone)
+    };
     let offset = zone_offset(&s.time_zone, m.stamp * 1000).unwrap_or(0);
     let zone = TimeZone::from_iana_id(&zone_id)
         .with_offset(Some(
@@ -1796,22 +1800,9 @@ fn format_to_parts(i: &mut Interpreter, this: Value, args: Vec<Value>) -> Result
     let moment = resolve_moment(i, &s, arg(&args, 0))?;
     parts_array(&collect_parts(&s, &moment)?, None)
 }
-/// Calendar-field ranks for range collapsing: larger ranks collapse first.
-fn field_ranks(m: &Moment) -> [i64; 6] {
-    [
-        m.year as i64,
-        m.month as i64,
-        m.day as i64,
-        m.hour as i64,
-        m.minute as i64,
-        m.second as i64,
-    ]
-}
 fn collapse_range(
     start: &[(String, String)],
     end: &[(String, String)],
-    start_fields: [i64; 6],
-    end_fields: [i64; 6],
 ) -> Vec<(String, String, &'static str)> {
     // Identical sides collapse to a single shared date.
     if start == end {
@@ -1844,9 +1835,6 @@ fn collapse_range(
     // Largest differing field rank drives the per-side window: fields from
     // that rank down to the smallest shown field render on both sides, while
     // larger (equal) fields stay shared.
-    let diff_rank = [0, 1, 2, 3, 4, 5]
-        .into_iter()
-        .find(|rank| start_fields[*rank] != end_fields[*rank]);
     let rank_of = |kind: &str| match kind {
         "year" | "era" | "relatedYear" | "yearName" => Some(0),
         "month" => Some(1),
@@ -1856,6 +1844,17 @@ fn collapse_range(
         "second" | "fractionalSecond" => Some(5),
         _ => None,
     };
+    // Compare the fields actually displayed, including day periods and
+    // fractional seconds, rather than raw ISO fields hidden by the pattern.
+    let diff_rank = start
+        .iter()
+        .zip(end)
+        .filter_map(
+            |((kind, a), (_, b))| {
+                if a != b { rank_of(kind) } else { None }
+            },
+        )
+        .min();
     let max_rank = start.iter().filter_map(|(kind, _)| rank_of(kind)).max();
     let (Some(diff_rank), Some(max_rank)) = (diff_rank, max_rank) else {
         return start
@@ -1957,15 +1956,10 @@ fn format_range(i: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Va
     let end_parts = collect_parts(&s, &end)?;
     Ok(Value::String(
         join_parts(
-            &collapse_range(
-                &start_parts,
-                &end_parts,
-                field_ranks(&start),
-                field_ranks(&end),
-            )
-            .into_iter()
-            .map(|(kind, text, _)| (kind, text))
-            .collect::<Vec<_>>(),
+            &collapse_range(&start_parts, &end_parts)
+                .into_iter()
+                .map(|(kind, text, _)| (kind, text))
+                .collect::<Vec<_>>(),
         )
         .into(),
     ))
@@ -1985,12 +1979,7 @@ fn format_range_to_parts(
     check_range_pair(&start, &end, "formatRangeToParts")?;
     let start_parts = collect_parts(&s, &start)?;
     let end_parts = collect_parts(&s, &end)?;
-    let collapsed = collapse_range(
-        &start_parts,
-        &end_parts,
-        field_ranks(&start),
-        field_ranks(&end),
-    );
+    let collapsed = collapse_range(&start_parts, &end_parts);
     let mut items = Vec::new();
     for (kind, text, source) in collapsed {
         items.push(Value::object_with_proto(
@@ -2122,7 +2111,17 @@ fn finish(mut p: Parts) -> Result<Slots, VmErr> {
     } else {
         None
     };
-    builder.zone_style = p.time_zone_name.as_deref().map(zone_style);
+    builder.zone_style = p.time_zone_name.as_deref().map(|name| {
+        if parse_offset_zone(&p.time_zone).is_some_and(|(minutes, _)| minutes != 0) {
+            if name.starts_with("long") {
+                ZoneStyle::LocalizedOffsetLong
+            } else {
+                ZoneStyle::LocalizedOffsetShort
+            }
+        } else {
+            zone_style(name)
+        }
+    });
     // ICU cannot pair month-only or year-only dates with time: pad the
     // fieldset up to a buildable combo and drop the padding afterwards.
     let (omit_day, omit_month, omit_year) = if builder.time_precision.is_some() {

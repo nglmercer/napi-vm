@@ -1014,21 +1014,15 @@ fn relative_to(i: &mut Interpreter, opts: &Value) -> Result<Option<RelativeTo>, 
     if !crate::interpreter::call::is_js_object(&value) {
         return vm_err("TypeError: relativeTo must be an object or string");
     }
-    let cal = i.get_prop_value_str(&value, "calendar")?;
-    let calendar = if matches!(cal, Value::Undefined) {
-        Calendar::ISO
-    } else {
-        let Value::String(text) = &cal else {
-            return vm_err("TypeError: calendar must be a string");
-        };
-        Calendar::try_from_utf8(text.to_string().as_bytes()).map_err(err)?
-    };
+    let calendar = calendar(i, &value)?;
     let mut date = PartialDate::new().with_calendar(calendar.clone());
     let mut time = PartialTime::new();
     let mut offset = None;
     let mut timezone = None;
     for key in [
         "day",
+        "era",
+        "eraYear",
         "hour",
         "microsecond",
         "millisecond",
@@ -1041,15 +1035,18 @@ fn relative_to(i: &mut Interpreter, opts: &Value) -> Result<Option<RelativeTo>, 
         "timeZone",
         "year",
     ] {
+        if matches!(key, "era" | "eraYear")
+            && matches!(calendar.identifier(), "iso8601" | "chinese" | "dangi")
+        {
+            continue;
+        }
         let field = i.get_prop_value_str(&value, key)?;
         if matches!(field, Value::Undefined) {
             continue;
         }
         match key {
-            "monthCode" => {
-                let code = i.ecmascript_to_string(&field)?;
-                date.calendar_fields.month_code =
-                    Some(MonthCode::try_from_utf8(code.to_string().as_bytes()).map_err(err)?);
+            "day" | "era" | "eraYear" | "month" | "monthCode" | "year" => {
+                read_date_field(i, &mut date.calendar_fields, key, &field)?;
             }
             "offset" => {
                 let primitive = i.coerce_object_to_primitive(&field, "string")?;
@@ -1066,24 +1063,6 @@ fn relative_to(i: &mut Interpreter, opts: &Value) -> Result<Option<RelativeTo>, 
             }
             _ => {
                 let n = integer(i, &field, false)?;
-                if key == "year" {
-                    if n < i32::MIN as f64 || n > i32::MAX as f64 {
-                        return vm_err("RangeError: year out of range");
-                    };
-                    date.calendar_fields.year = Some(n as i32);
-                    continue;
-                }
-                if matches!(key, "month" | "day") {
-                    if n <= 0. {
-                        return vm_err("RangeError: month and day must be positive");
-                    };
-                    if key == "month" {
-                        date.calendar_fields.month = Some(n.min(255.) as u8)
-                    } else {
-                        date.calendar_fields.day = Some(n.min(255.) as u8)
-                    };
-                    continue;
-                }
                 let n = n.clamp(0., 65535.) as u16;
                 match key {
                     "hour" => time.hour = Some(n.min(255) as u8),

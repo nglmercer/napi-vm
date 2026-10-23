@@ -1,6 +1,14 @@
 use napi_vm_core::{Interpreter, Value, parser::parse_cached};
 
 fn yes(source: &str) {
+    let script =
+        Interpreter::compile_with_goal(source, napi_vm_core::parser::ParseGoal::Script).unwrap();
+    let mut vm = Interpreter::with_builtins();
+    vm.eval_source("").unwrap();
+    assert!(
+        matches!(vm.execute(&script).unwrap(), Value::Bool(true)),
+        "script: {source}"
+    );
     let mut prepared = Interpreter::with_builtins();
     assert!(
         matches!(prepared.eval_source(source).unwrap(), Value::Bool(true)),
@@ -62,5 +70,29 @@ fn default_hour_cycles_keep_midnight_and_calendar_reference_dates() {
 fn formatting_keeps_temporal_dates_outside_date_time_clip() {
     yes(
         "var f=new Intl.DateTimeFormat('en',{calendar:'iso8601'});f.format(new Temporal.PlainDate(-271821,4,19)).includes('271822') && f.format(new Temporal.PlainYearMonth(-271821,4)).includes('271822')",
+    );
+}
+
+#[test]
+fn duration_relative_dates_use_calendar_slots_and_validate_era_fields() {
+    yes(
+        "var calendar=new Temporal.PlainDate(2000,1,1);Object.defineProperty(calendar,'calendarId',{get(){throw 1;}});Temporal.Duration.compare({years:1},{months:12},{relativeTo:{year:2000,month:1,day:1,calendar}})===0",
+    );
+    yes(
+        "var d=Temporal.Duration.from({years:1});var caught=0;for(var n of [Infinity,-Infinity]){try{d.round({smallestUnit:'days',relativeTo:{calendar:'gregory',era:'ad',eraYear:n,month:1,day:1}});}catch(e){if(e instanceof RangeError)caught++;}}caught===2 && d.total({unit:'days',relativeTo:{calendar:'gregory',era:'ad',eraYear:2000,month:1,day:1}})===366",
+    );
+}
+
+#[test]
+fn ranges_keep_differing_days_and_hours() {
+    yes(
+        "let dtf=new Intl.DateTimeFormat('en-US');const a=new Date('2019-01-03T00:00:00Z');const b=new Date('2019-01-05T00:00:00Z');dtf.formatRange(a,b);dtf=new Intl.DateTimeFormat('en-US',{year:'numeric',month:'short',day:'numeric'});dtf.formatRange(a,a);dtf.formatRange(a,b)==='Jan 3–5, 2019'",
+    );
+}
+
+#[test]
+fn fixed_offset_zones_use_localized_gmt_names() {
+    yes(
+        "new Temporal.ZonedDateTime(0n,'+00:00').toLocaleString('en').includes('GMT') && !new Temporal.ZonedDateTime(0n,'+00:00').toLocaleString('en').includes('+') && new Temporal.ZonedDateTime(0n,'+01:00').toLocaleString('en').includes('GMT+1') && new Temporal.ZonedDateTime(0n,'-01:00').toLocaleString('en').includes('GMT-1')",
     );
 }

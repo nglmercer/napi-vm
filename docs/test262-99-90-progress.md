@@ -95,3 +95,15 @@ in AST and prepared modes. The clean `4a30aa4` release passes 13,736/13,758
 variants: 30 new passes, zero lost passes, and 22 semantic failures with no
 timeouts, crashes, harness errors, or skips. The after report and comparison
 are archived. Core library Clippy passes with warnings denied.
+
+## Duration relative dates and range formatting
+
+Duration relativeTo now shares calendar-slot conversion and date-field
+validation with other Temporal entry points, including era/eraYear ordering.
+Range collapsing compares displayed fields, including day periods and
+fractional seconds, instead of raw ISO ranks. Fixed zero-offset zones use
+ICU's GMT identity and nonzero offsets use localized offset names. Nine native
+regressions pass through explicit Script compilation, normal prepared
+evaluation and AST execution. An earlier native regression reproduces the
+range failure only in release, so release verification is required for this
+block before claiming its conformance gains.
