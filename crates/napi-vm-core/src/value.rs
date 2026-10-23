@@ -641,6 +641,13 @@ impl ArrayCell {
             return;
         }
         let old_length = self.elements.borrow().len();
+        if index == old_length {
+            // Appending introduces no holes. Creating an all-present bitmap
+            // here and scanning it on every write makes dense growth quadratic.
+            self.elements.borrow_mut().push(value);
+            self.append_present(1);
+            return;
+        }
         if index >= old_length {
             self.elements
                 .borrow_mut()

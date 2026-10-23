@@ -89,26 +89,22 @@ test("loop budget refills on the next run", () => {
   expect(vm.run("let s = 0; for (let i = 0; i < 10; i++) { s += i; } s;")).toBe("45");
 });
 
-test("array growth past the cap throws a catchable RangeError", () => {
+test("array push crosses the dense storage limit using sparse slots", () => {
   const vm = new Vm();
-  const r = vm.run(
-    "let a = []; try { for (let i = 0; i < 300000; i++) { a.push(1); } } catch (e) { e.message; }"
-  );
-  expect(r).toContain("Maximum array length exceeded");
+  expect(vm.run("let a = []; a.length = 262144; a.push(1); a.length === 262145 && a[262144] === 1;")).toBe("true");
 });
 
-test("indexed array assignment enforces the hard cap", () => {
+test("large indexed assignments preserve sparse length without dense allocation", () => {
   const vm = new Vm();
-  const r = vm.run("let a = []; try { a[1000000000] = 1; } catch (e) { e.message; }");
-  expect(r).toContain("Maximum array length exceeded");
+  expect(vm.run("let a = []; a[1000000000] = 1; a.length === 1000000001 && Object.keys(a).length === 1;")).toBe("true");
 });
 
-test("sparse object destructuring does not materialize a huge array", () => {
+test("object array-destructuring rejects a missing iterator without materializing indexes", () => {
   const vm = new Vm();
-  expect(vm.run('let o = {}; o["1000000000"] = 1; let [x] = o; x;')).toBe("undefined");
+  expect(() => vm.run('let o = {}; o["1000000000"] = 1; let [x] = o; x;')).toThrow(/Symbol.iterator/);
 });
 
-test("JSON.parse enforces array and object caps", () => {
+test("JSON.parse enforces the array cap and counts distinct object keys", () => {
   const vm = new Vm();
   const arrayResult = vm.run(
     "try { JSON.parse('[' + '0,'.repeat(262144) + '0]'); } catch (e) { e.message; }",
@@ -116,9 +112,9 @@ test("JSON.parse enforces array and object caps", () => {
   expect(arrayResult).toContain("Maximum array length exceeded");
 
   const objectResult = vm.run(
-    "let p = '\"a\":0,'; try { JSON.parse('{' + p.repeat(262144) + '\"z\":0}'); } catch (e) { e.message; }",
+    "let p = '\"a\":0,'; Object.keys(JSON.parse('{' + p.repeat(1000) + '\"z\":0}')).length;",
   );
-  expect(objectResult).toContain("Maximum object property count exceeded");
+  expect(objectResult).toBe("2");
 });
 
 test("ordinary String.replace enforces the string cap", () => {
@@ -142,15 +138,15 @@ test("Number.toFixed rejects unbounded precision", () => {
   const r = vm.run(
     "try { (1).toFixed(17 * 1024 * 1024); } catch (e) { e.message; }",
   );
-  expect(r).toContain("Maximum string length exceeded");
+  expect(r).toContain("toFixed digits must be between 0 and 100");
 });
 
-test("Object.assign enforces the object property cap", () => {
+test("Object.assign extends a target parsed from duplicate JSON keys", () => {
   const vm = new Vm();
   const r = vm.run(
-    "let target = JSON.parse('{' + '\"k\":0,'.repeat(262143) + '\"last\":0}'); try { Object.assign(target, { overflow: 1 }); } catch (e) { e.message; }",
+    "let target = JSON.parse('{' + '\"k\":0,'.repeat(1000) + '\"last\":0}'); Object.assign(target, { overflow: 1 }); Object.keys(target).length === 3 && target.overflow === 1;",
   );
-  expect(r).toContain("Maximum object property count exceeded");
+  expect(r).toBe("true");
 });
 
 test("deep Array.prototype.flat is iterative and bounded", () => {

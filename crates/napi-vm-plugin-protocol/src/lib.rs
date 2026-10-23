@@ -40,9 +40,58 @@ impl RpcError {
         };
         Self {
             code: number,
-            message: message.into().chars().take(4096).collect(),
+            message: message.into().chars().take(2048).collect(),
             data: json!({"code":code}),
         }
+    }
+    pub(crate) fn validate_wire(&self) -> PluginResult<()> {
+        let invalid = || RpcError::new("INVALID_REQUEST", "invalid error metadata");
+        let data = self.data.as_object().ok_or_else(invalid)?;
+        let code = data
+            .get("code")
+            .and_then(Value::as_str)
+            .ok_or_else(invalid)?;
+        let known = [
+            "PARSE_ERROR",
+            "INVALID_REQUEST",
+            "METHOD_NOT_FOUND",
+            "INVALID_ARGUMENT",
+            "INTERNAL_ERROR",
+            "NOT_READY",
+            "PROTOCOL_MISMATCH",
+            "CONTRACT_MISMATCH",
+            "CANCELLED",
+            "DEADLINE_EXCEEDED",
+            "OVERLOADED",
+            "PLUGIN_EXITED",
+            "CONNECTION_CLOSED",
+            "REENTRANT_CALL",
+            "INVALID_RESULT",
+            "STATE_INCOMPATIBLE",
+            "APPLICATION_ERROR",
+        ];
+        if !known.contains(&code)
+            || Self::new(code, "").code != self.code
+            || self.message.chars().count() > 2048
+            || data
+                .keys()
+                .any(|key| !["code", "details", "domainCode", "data"].contains(&key.as_str()))
+        {
+            return Err(invalid());
+        }
+        if code == "APPLICATION_ERROR" {
+            if !data
+                .get("domainCode")
+                .and_then(Value::as_str)
+                .is_some_and(|v| !v.is_empty())
+                || !data.contains_key("data")
+            {
+                return Err(invalid());
+            }
+        } else if data.contains_key("domainCode") || data.contains_key("data") {
+            return Err(invalid());
+        }
+        Ok(())
     }
     pub fn domain(code: &str, message: impl Into<String>, data: Value) -> Self {
         let mut e = Self::new("APPLICATION_ERROR", message);
@@ -156,6 +205,51 @@ mod tests {
     struct S {
         #[serde(default, skip_serializing_if = "Field::is_missing")]
         x: Field<Option<String>>,
+    }
+    #[test]
+    fn error_messages_obey_the_shared_unicode_limit() {
+        let error = RpcError::new("INTERNAL_ERROR", "🙂".repeat(3000));
+        assert_eq!(error.message.chars().count(), 2048);
+        assert!(serde_json::to_string(&error).is_ok());
+    }
+    #[test]
+    fn wire_errors_reject_malformed_metadata() {
+        for (code, data) in [
+            (-32603, json!({"code":"UNKNOWN"})),
+            (-32012, json!({"code":"INTERNAL_ERROR"})),
+            (-32603, json!({"code":"INTERNAL_ERROR", "extra":true})),
+            (
+                -32603,
+                json!({"code":"INTERNAL_ERROR", "domainCode":"ERR", "data":null}),
+            ),
+            (
+                -32012,
+                json!({"code":"APPLICATION_ERROR", "domainCode":12, "data":null}),
+            ),
+            (
+                -32012,
+                json!({"code":"APPLICATION_ERROR", "domainCode":"ERR"}),
+            ),
+        ] {
+            let error = RpcError {
+                code,
+                message: "bad".into(),
+                data,
+            };
+            assert_eq!(
+                error.validate_wire().unwrap_err().stable_code(),
+                "INVALID_REQUEST"
+            );
+        }
+        RpcError::new("INTERNAL_ERROR", "🙂".repeat(2048))
+            .validate_wire()
+            .unwrap();
+        RpcError::domain("ERR", "failure", Value::Null)
+            .validate_wire()
+            .unwrap();
+        let mut error = RpcError::new("INTERNAL_ERROR", "failure");
+        error.message = "x".repeat(2049);
+        assert!(error.validate_wire().is_err());
     }
     #[test]
     fn missing_is_not_null() {

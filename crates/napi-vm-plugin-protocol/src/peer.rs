@@ -672,12 +672,7 @@ impl Peer {
             } else {
                 let e: RpcError = serde_json::from_value(v["error"].clone())
                     .map_err(|_| RpcError::new("INVALID_REQUEST", "malformed RPC error"))?;
-                if e.message.len() > 16384
-                    || !e.data.is_object()
-                    || e.data["code"].as_str().is_none()
-                {
-                    return Err(RpcError::new("INVALID_REQUEST", "invalid error metadata"));
-                }
+                e.validate_wire()?;
                 Err(e)
             };
             let pending = self.0.pending.lock().unwrap().remove(id);

@@ -5,7 +5,8 @@ fn check(source: &str) {
         let result = if ast {
             let mut parser = napi_vm::Parser::new(napi_vm::Lexer::new(source).tokenize());
             let statements = parser.parse();
-            vm.run(&statements)
+            // A whole script needs declaration instantiation before execution.
+            vm.run_program_body(&statements)
         } else {
             let prepared = Interpreter::compile(source).unwrap();
             assert_eq!(
