@@ -62,8 +62,8 @@ percentage.
 
 ## Remaining gates
 
-- [ ] Revalidate restored changes and archive focused evidence.
-- [ ] Reproduce SIGKILL outcomes in the BMP RegExp/eval loops and identify cause.
+- [x] Revalidate restored changes and archive focused evidence.
+- [x] Reproduce SIGKILL outcomes in the BMP RegExp/eval loops and identify cause.
 - [ ] Triage the remaining Temporal, staging, Annex B, and DateTimeFormat cases.
 - [ ] Validate semantic changes in AST and prepared bytecode where applicable.
 - [ ] Run the complete pinned corpus on a clean committed candidate and archive it.
@@ -105,5 +105,6 @@ fractional seconds, instead of raw ISO ranks. Fixed zero-offset zones use
 ICU's GMT identity and nonzero offsets use localized offset names. Nine native
 regressions pass through explicit Script compilation, normal prepared
 evaluation and AST execution. An earlier native regression reproduces the
-range failure only in release, so release verification is required for this
-block before claiming its conformance gains.
+range failure only in release. The clean `cddb969` implementation now passes
+all nine native regressions in both debug and release, and Clippy with warnings
+denied. The matched Test262 release run remains pending.
