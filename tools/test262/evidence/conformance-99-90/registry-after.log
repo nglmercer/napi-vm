@@ -1,0 +1,16 @@
+   Compiling napi-vm-core v0.1.5 (/workspace/scratch/2e6f496376db/napi-vm/crates/napi-vm-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.79s
+     Running tests/allocation_registry.rs (target/debug/deps/allocation_registry-8f7d49cf391370c8)
+
+running 1 test
+test transient_guest_allocations_do_not_accumulate_dead_registry_entries ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.29s
+
+     Running tests/regexp_replace_limits.rs (target/debug/deps/regexp_replace_limits-02801a99389a150c)
+
+running 1 test
+test repeated_capture_substitutions_stop_at_the_string_limit ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+

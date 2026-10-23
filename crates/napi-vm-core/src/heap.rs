@@ -93,6 +93,8 @@ struct HeapInner {
     next_pin: u64,
     total_collected: u64,
     allocation_debt: usize,
+    registry_debt: usize,
+    registry_prune_at: usize,
 }
 
 impl HeapInner {
@@ -114,6 +116,8 @@ impl HeapInner {
             next_pin: 1,
             total_collected: 0,
             allocation_debt: 0,
+            registry_debt: 0,
+            registry_prune_at: 4096,
         }
     }
 
@@ -136,6 +140,31 @@ impl HeapInner {
                     0
                 }
             }
+    }
+
+    fn record_allocation(&mut self) {
+        self.allocation_debt = self.allocation_debt.saturating_add(1);
+        self.registry_debt = self.registry_debt.saturating_add(1);
+        if self.registry_debt < self.registry_prune_at {
+            return;
+        }
+        // Weak registrations retain the Rc allocation even after its payload
+        // has been dropped. Pruning only entries with no strong owners is safe
+        // during guest execution: it neither traces roots nor collects cycles.
+        self.objects.retain(|entry| entry.strong_count() != 0);
+        self.arrays.retain(|entry| entry.strong_count() != 0);
+        self.envs.retain(|entry| entry.strong_count() != 0);
+        self.functions.retain(|entry| entry.strong_count() != 0);
+        self.promises.retain(|entry| entry.strong_count() != 0);
+        self.generators.retain(|entry| entry.strong_count() != 0);
+        self.proxies.retain(|entry| entry.strong_count() != 0);
+        self.bindings.retain(|entry| entry.strong_count() != 0);
+        #[cfg(stackful_coroutines)]
+        self.async_tasks.retain(|entry| entry.strong_count() != 0);
+        self.registry_debt = 0;
+        // Grow the interval with the live registry so workloads retaining many
+        // objects do not repeatedly scan it at a fixed small allocation rate.
+        self.registry_prune_at = self.tracked_count().max(4096);
     }
 }
 
@@ -214,7 +243,7 @@ macro_rules! track_impl {
                 HEAP.with(|heap| {
                     let mut heap = heap.borrow_mut();
                     heap.$vec.push(Rc::downgrade(rc));
-                    heap.allocation_debt = heap.allocation_debt.saturating_add(1);
+                    heap.record_allocation();
                 });
             }
         }

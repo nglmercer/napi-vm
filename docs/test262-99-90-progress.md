@@ -20,6 +20,23 @@ Before the reset, its native regression passed and the String replacement plus
 `staging/sm/String/replace-math.js` selection passed 110/110 variants. Revalidation
 on the current branch remains required; no new full score is claimed.
 
+## Restored verification and registry memory
+
+On the restored branch, the capture-limit native regression passes again.
+The two BMP/eval files pass 4/4 in a one-worker diagnostic, but the worker reaches
+5,328,296 KiB peak RSS. This is enough to exhaust the 8 GiB execution environment
+when two workers run together. The raw focused report is archived under
+`tools/test262/evidence/conformance-99-90/`.
+
+A native regression demonstrates the allocation registry growing from 1,289 to
+121,301 entries during 20,000 transient-array iterations without cycle collection.
+The registry now periodically drops dead Weak registrations, whose Rc allocations
+otherwise remain resident. It never clears live cells or runs the cycle collector
+during execution. The pruning interval scales with the retained live registry.
+The regression, heap root/barrier tests, iterative-drop tests, capture-limit test,
+and formatting checks pass. Release memory and focused conformance verification
+of this registry change remain pending.
+
 ## Remaining gates
 
 - [ ] Revalidate restored changes and archive focused evidence.

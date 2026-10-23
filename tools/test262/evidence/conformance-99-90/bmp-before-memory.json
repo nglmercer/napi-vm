@@ -1,0 +1,14 @@
+{
+  "source": "da5641c3c707121e8a86695e8d2279dd781221ee",
+  "worker_sha256": "754c6e8c801ed0b266d65f537e7640bb62a09f018d2f1d47cf816dabb5f4ba4a",
+  "jobs": 1,
+  "timeout_seconds": 10,
+  "max_rss_kib": 5328296,
+  "counts": {
+    "pass": 4,
+    "fail": 0,
+    "timeout": 0,
+    "crash": 0
+  },
+  "measurement": "resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss after the focused runner (Linux KiB)"
+}

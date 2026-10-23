@@ -1,0 +1,32 @@
+   Compiling napi-vm-core v0.1.5 (/workspace/scratch/2e6f496376db/napi-vm/crates/napi-vm-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 22.29s
+     Running unittests src/lib.rs (target/debug/deps/napi_vm_core-20a5a1f7bde943a4)
+
+running 8 tests
+test heap::tests::pure_promise_cycle_reclaimed ... ok
+test heap::tests::collect_refused_while_executing ... ok
+test heap::tests::object_cycle_reclaimed ... ok
+test heap::tests::reachable_objects_survive ... ok
+test heap::tests::closure_cycle_reclaimed ... ok
+test heap::tests::env_cleared_while_held_by_promise ... ok
+test heap::tests::suspended_generator_refuses ... ok
+test heap::tests::host_pin_survives_collection ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 361 filtered out; finished in 0.04s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running unittests src/lib.rs (target/debug/deps/napi_vm_core-20a5a1f7bde943a4)
+
+running 1 test
+test value::drop_tests::deeply_nested_values_drop_without_overflowing_the_stack ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 368 filtered out; finished in 1.09s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running unittests src/lib.rs (target/debug/deps/napi_vm_core-20a5a1f7bde943a4)
+
+running 1 test
+test value::weak_registry_drop_tests::weak_registrations_do_not_disable_iterative_teardown ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 368 filtered out; finished in 0.15s
+
