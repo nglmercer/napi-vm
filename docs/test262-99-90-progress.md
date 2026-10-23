@@ -107,4 +107,8 @@ regressions pass through explicit Script compilation, normal prepared
 evaluation and AST execution. An earlier native regression reproduces the
 range failure only in release. The clean `cddb969` implementation now passes
 all nine native regressions in both debug and release, and Clippy with warnings
-denied. The matched Test262 release run remains pending.
+denied. The matched Test262 release run passes all 13,758 variants: 22 new
+passes and zero lost passes, failures, timeouts, crashes, harness errors or
+skips. Together the two follow-up blocks add 52 passes over `f6b780c`; the
+complete Temporal/DateTimeFormat continuation adds 210 over its 13,548-pass
+matched baseline. These are focused measurements, not a new full-suite score.
