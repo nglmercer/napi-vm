@@ -856,10 +856,10 @@ impl VM {
     #[napi]
     pub fn set_import_meta_main(&mut self, is_main: bool) -> napi::Result<()> {
         let _busy = self.state.try_start()?;
-        self.state.runtime.with_mut(|runtime| {
-            runtime.interp.is_main = is_main;
-        });
-        Ok(())
+        self.state
+            .runtime
+            .with_mut(|runtime| runtime.interp.set_import_meta_main(is_main))
+            .map_err(|error| napi::Error::from_reason(error.to_string()))
     }
 
     /// Cap the number of loop iterations in a single execution.

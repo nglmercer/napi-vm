@@ -295,7 +295,7 @@ class VmSession {
     this.startedAt = new Date().toISOString();
     this.stopped = false;
 
-    process.once("exit", () => this.cleanup());
+    this.exitListener = () => this.cleanup();
   }
 
   attach(vm, options = {}) {
@@ -472,6 +472,7 @@ class VmSession {
   start() {
     if (this.server) return this;
     this.stopped = false;
+    process.once("exit", this.exitListener);
     const endpoint = process.platform === "win32"
       ? `\\\\.\\pipe\\napi-vm-${this.id}-${process.pid}-${this.sessionId}`
       : path.join(os.tmpdir(), `napi-vm-${this.id}-${process.pid}-${this.sessionId}.sock`);
@@ -489,6 +490,7 @@ class VmSession {
   stop() {
     if (this.stopped) return;
     this.stopped = true;
+    process.removeListener("exit", this.exitListener);
     for (const socket of this.clients) socket.destroy();
     this.clients.clear();
     this.authenticatedClients.clear();
@@ -592,30 +594,34 @@ class VmSession {
     if (!this.server || !this.server.listening) return;
     this.generation += 1;
     this.writeLocator();
-    for (const socket of this.authenticatedClients) this.send(socket, "snapshot", reason);
+    if (!this.authenticatedClients.size) return;
+    const frame = this.encodeSnapshot("snapshot", reason);
+    for (const socket of this.authenticatedClients) this.writeFrame(socket, frame);
+  }
+
+  encodeSnapshot(type, reason) {
+    return `${JSON.stringify({ type, reason, payload: this.snapshot() })}\n`;
   }
 
   send(socket, type, reason) {
-    const encoded = JSON.stringify({
-      type,
-      reason,
-      payload: this.snapshot(),
-    });
-    if (Buffer.byteLength(encoded, "utf8") > MAX_FRAME_BYTES) {
+    return this.writeFrame(socket, this.encodeSnapshot(type, reason));
+  }
+
+  writeFrame(socket, frame) {
+    if (socket.destroyed) return false;
+    // Bound pending writes as well as each individual frame. An authenticated
+    // editor that stops reading must not retain every subsequent snapshot.
+    const bytes = Buffer.byteLength(frame, "utf8");
+    if (bytes > MAX_FRAME_BYTES || socket.writableLength + bytes > MAX_FRAME_BYTES) {
       socket.destroy();
       return false;
     }
-    socket.write(`${encoded}\n`);
+    socket.write(frame);
     return true;
   }
 
   sendError(socket, payload) {
-    const encoded = JSON.stringify(payload);
-    if (Buffer.byteLength(encoded, "utf8") > MAX_FRAME_BYTES) {
-      socket.destroy();
-      return;
-    }
-    socket.write(`${encoded}\n`);
+    return this.writeFrame(socket, `${JSON.stringify(payload)}\n`);
   }
 
   writeLocator() {

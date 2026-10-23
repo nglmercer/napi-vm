@@ -1440,6 +1440,16 @@ impl Interpreter {
         Ok(Value::Promise(target))
     }
 
+    /// Update the host main flag while preserving a previously exposed meta object.
+    pub fn set_import_meta_main(&mut self, is_main: bool) -> Result<(), VmErr> {
+        let cached = self.current_module().import_meta.clone();
+        if let Some(meta) = cached {
+            meta.set_prop("main".into(), Value::Bool(is_main))?;
+        }
+        self.is_main = is_main;
+        Ok(())
+    }
+
     /// Shared `import.meta`: the current module's URL and main flag.
     pub(crate) fn eval_import_meta(&mut self) -> Result<Value, VmErr> {
         let cached = self.current_module().import_meta.clone();

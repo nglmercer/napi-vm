@@ -39,8 +39,14 @@ export class PluginError extends Error {
     if (this.details !== undefined) data.details = this.details;
     if (this.domainCode !== undefined) data.domainCode = this.domainCode;
     if (this.data !== undefined) data.data = this.data;
-    return { code: ERROR_CODES[this.code], message: this.message.slice(0, 2048), data };
+    return { code: ERROR_CODES[this.code], message: truncateMessage(this.message), data };
   }
+}
+// JSON Schema lengths count Unicode scalars; never split a surrogate pair.
+function truncateMessage(message: string): string {
+  let end = 0, count = 0;
+  for (const character of message) { if (count++ === 2048) break; end += character.length; }
+  return message.slice(0, end);
 }
 export function asPluginError(error: unknown): PluginError {
   return error instanceof PluginError ? error : new PluginError('INTERNAL_ERROR', 'Handler failed');
@@ -172,7 +178,14 @@ export function validateSchema(root: Schema, schema: Schema, value: JsonValue, p
     value.forEach((v, i) => validateSchema(root, schema.items as Schema, v, `${path}/${i}`, depth + 1));
   } else if (schema.type === 'string') {
     if (typeof value !== 'string') return fail('expected string');
-    const len = [...value].length;
+    let len = 0;
+    // Count scalars without allocating an array proportional to frame size.
+    if (typeof schema.minLength === 'number' || typeof schema.maxLength === 'number') {
+      for (const _character of value) {
+        len++;
+        if (typeof schema.maxLength === 'number' && len > schema.maxLength) break;
+      }
+    }
     if (typeof schema.minLength === 'number' && len < schema.minLength || typeof schema.maxLength === 'number' && len > schema.maxLength) fail('string length out of bounds');
     checkWireType(value, schema['x-wire-type']);
   } else if (schema.type === 'integer' || schema.type === 'number') {
@@ -204,10 +217,10 @@ export function encodeFrame(value: unknown, maxBytes = DEFAULT_LIMITS.maxFrameBy
 /** Bounded incremental codec: allocates payload only after validating its header. */
 export class FrameDecoder {
   private header = Buffer.alloc(4); private headerUsed = 0; private payload: Buffer | undefined; private used = 0;
-  maxBytes: number; readonly maxDepth: number;
+  maxBytes: number; maxDepth: number;
   constructor(maxBytes = DEFAULT_LIMITS.maxFrameBytes, maxDepth: number = DEFAULT_LIMITS.maxDepth) { this.maxBytes = maxBytes; this.maxDepth = maxDepth; }
-  push(chunk: Uint8Array): JsonValue[] {
-    const frames: JsonValue[] = []; let offset = 0; let decodedBytes = 0;
+  push(chunk: Uint8Array, onFrame?: (value: JsonValue) => boolean): JsonValue[] {
+    const frames: JsonValue[] = []; let offset = 0; let decodedBytes = 0; let decodedFrames = 0;
     while (offset < chunk.length) {
       if (!this.payload) {
         const count = Math.min(4 - this.headerUsed, chunk.length - offset); this.header.set(chunk.subarray(offset, offset + count), this.headerUsed); this.headerUsed += count; offset += count;
@@ -219,11 +232,14 @@ export class FrameDecoder {
       const count = Math.min(this.payload.length - this.used, chunk.length - offset); this.payload.set(chunk.subarray(offset, offset + count), this.used); offset += count; this.used += count;
       if (this.used === this.payload.length) {
         const payload = this.payload; this.payload = undefined; this.used = 0;
-        decodedBytes += payload.length; if (frames.length >= 256 || decodedBytes > 16 * 1024 * 1024) throw new PluginError('OVERLOADED', 'Coalesced frame admission limit exceeded');
+        decodedBytes += payload.length; if (++decodedFrames > 256 || decodedBytes > 16 * 1024 * 1024) throw new PluginError('OVERLOADED', 'Coalesced frame admission limit exceeded');
         let parsed: unknown;
         try { const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(payload); parsed = JSON.parse(text); }
         catch { throw new PluginError('PARSE_ERROR', 'Invalid UTF-8 or JSON'); }
-        frames.push(wireValue(parsed, this.maxDepth));
+        const value = wireValue(parsed, this.maxDepth);
+        // Dispatch before decoding the next frame: hello may tighten limits.
+        if (onFrame) { if (!onFrame(value)) break; }
+        else frames.push(value);
       }
     }
     return frames;
@@ -251,14 +267,14 @@ export class RpcPeer extends EventEmitter {
     super(); this.socket = socket; this.sessionId = options.sessionId; this.endpointId = `${options.role}:${options.sessionId}`; this.prefix = `${this.endpointId}:`;
     this.limits = effectiveLimits(options.limits); this.decoder = new FrameDecoder(options.bootstrap ? 65536 : this.limits.maxFrameBytes, this.limits.maxDepth);
     socket.setNoDelay(true);
-    socket.on('data', chunk => { try { for (const value of this.decoder.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)) this.receive(value); } catch (error) { this.close(asPluginError(error)); } });
+    socket.on('data', chunk => { try { this.decoder.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk, value => { this.receive(value); return !this.closed; }); } catch (error) { this.close(asPluginError(error)); } });
     socket.on('end', () => { try { this.decoder.finish(); } catch (error) { this.close(asPluginError(error)); } });
     socket.on('error', () => this.close(new PluginError('CONNECTION_CLOSED', 'Transport error')));
     socket.on('close', () => this.close());
   }
   get isClosed(): boolean { return this.closed; }
   get busy(): boolean { return this.occupied; }
-  negotiate(remote: Partial<Limits>): void { this.limits = negotiateLimits(this.limits, remote); this.decoder.maxBytes = this.limits.maxFrameBytes; }
+  negotiate(remote: Partial<Limits>): void { this.limits = negotiateLimits(this.limits, remote); this.decoder.maxBytes = this.limits.maxFrameBytes; this.decoder.maxDepth = this.limits.maxDepth; }
   onRequest(method: string, handler: RpcHandler): this { if (this.handlers.has(method)) throw new PluginError('INVALID_ARGUMENT', `Duplicate handler ${method}`); this.handlers.set(method, handler); return this; }
   // Keep events bounded in the normal outbound queue until this success reply is queued.
   holdEventsUntilReply(method: string): void { this.eventFence = method; }
@@ -355,7 +371,7 @@ export class RpcPeer extends EventEmitter {
         const e = object(msg.error); exactKeys(e, ['code', 'message', 'data'], ['code', 'message', 'data']); const data = object(e.data);
         exactKeys(data, ['code', 'details', 'domainCode', 'data'], ['code']);
         if (Object.hasOwn(data, 'domainCode') && (typeof data.domainCode !== 'string' || !data.domainCode || data.code !== 'APPLICATION_ERROR') || Object.hasOwn(data, 'data') && data.code !== 'APPLICATION_ERROR' || data.code === 'APPLICATION_ERROR' && (!Object.hasOwn(data, 'domainCode') || !Object.hasOwn(data, 'data'))) throw new PluginError('INVALID_REQUEST', 'Malformed application error');
-        if (typeof data.code !== 'string' || !Object.hasOwn(ERROR_CODES, data.code) || ERROR_CODES[data.code as ErrorCode] !== e.code || typeof e.message !== 'string' || e.message.length > 2048) throw new PluginError('INVALID_REQUEST', 'Malformed RPC error');
+        if (typeof data.code !== 'string' || !Object.hasOwn(ERROR_CODES, data.code) || ERROR_CODES[data.code as ErrorCode] !== e.code || typeof e.message !== 'string' || truncateMessage(e.message).length !== e.message.length) throw new PluginError('INVALID_REQUEST', 'Malformed RPC error');
         failure = new PluginError(data.code as ErrorCode, e.message, data.details as JsonValue | undefined, data.domainCode as string | undefined, data.data as JsonValue | undefined);
       }
       this.pending.delete(msg.id); pending.cleanup();

@@ -299,7 +299,9 @@ test('a saved host result protects reentry across executions and queued admissio
     assert.equal(await s.run('var saved=background();42;'), '42');
     // Admit B before releasing A's callback. Pure guest work precedes await;
     // neither a new host dispatch nor a synchronous Node wait masks the gap.
-    const b = s.run('for(var i=0;i<100000;i++){};await saved;');
+    // Admission is reserved synchronously before release(); a small loop
+    // exercises guest work without making correctness depend on CPU speed.
+    const b = s.run('for(var i=0;i<1000;i++){};await saved;');
     release();
     assert.equal(await b, '7');
     assert.match(observed, /awaiting Node|host.call dependency/);

@@ -305,7 +305,7 @@ impl ClientTransport for PeerTransport {
             .is_some_and(|x| x.digest == c.digest);
         let sequence = self
             .sequence
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_add(1));
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_add(1));
         Box::pin(async move {
             if !ready {
                 return Err(RpcError::new("NOT_READY", "business events require READY"));

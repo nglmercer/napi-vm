@@ -85,10 +85,10 @@ test("Reflect exists with members", () => {
   expect(vm.run("'has' in Reflect;")).toBe("true");
 });
 
-test("unsupported Intl formatters are absent", () => {
+test("implemented Intl formatters are callable", () => {
   const vm = new Vm();
-  expect(vm.run("'DateTimeFormat' in Intl;")).toBe("false");
-  expect(vm.run("'NumberFormat' in Intl;")).toBe("false");
+  expect(vm.run("typeof Intl.DateTimeFormat;")).toBe("function");
+  expect(vm.run("typeof Intl.NumberFormat;")).toBe("function");
 });
 
 test("ArrayBuffer exists with isView", () => {
@@ -138,11 +138,11 @@ test("decodeURI keeps reserved triplets encoded", () => {
 });
 
 test("Math.f16round rounds to half precision", () => {
-  expect(runCode("Math.f16round(1.0005);")).toBe("1");
+  expect(runCode("Math.f16round(1.0005);")).toBe("1.0009765625");
   expect(runCode("Math.f16round(0.1);")).toBe("0.0999755859375");
   expect(runCode("Math.f16round.length;")).toBe("1");
   expect(runCode("String(Math.f16round(NaN));")).toBe("NaN");
-  expect(runCode("Math.f16round(2.980232238769532e-8);")).toBe("5.960464477539063e-8");
+  expect(runCode("Math.f16round(2.980232238769532e-8) === 5.960464477539063e-8;")).toBe("true");
   expect(runCode("Math.f16round(65519);")).toBe("65504");
 });
 

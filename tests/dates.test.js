@@ -52,8 +52,8 @@ test("setTime is observed through every reference", () => {
   );
 });
 
-test("a date stringifies as its ISO form", () => {
-  expect(runCode("new Date(0) + '';")).toBe("1970-01-01T00:00:00.000Z");
+test("default date coercion uses the human-readable UTC form", () => {
+  expect(runCode("new Date(0) + '';")).toBe("Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)");
 });
 
 test("a date serializes to JSON as its ISO form", () => {

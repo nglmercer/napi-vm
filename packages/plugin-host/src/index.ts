@@ -1,5 +1,5 @@
 import { createServer, type Server, type Socket } from 'node:net';
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypto';
 import { readFile, realpath, stat, access } from 'node:fs/promises';
 import { constants } from 'node:fs';
@@ -109,6 +109,14 @@ async function findExecutable(name: string): Promise<string | undefined> {
     const path = resolve(dir, candidate); try { await access(path, constants.X_OK); if ((await stat(path)).isFile()) return path; } catch { /* try declared runtime alternatives before spawning */ }
   } return undefined;
 }
+// Version discovery must not stall RPC deadlines, audio or event delivery.
+function probeRuntime(command: string, args: string[]): Promise<{ stdout: string; status: number; error?: Error }> {
+  return new Promise(resolve => {
+    execFile(command, args, { encoding: 'utf8', timeout: 5000, maxBuffer: 8192, shell: false }, (error, stdout) => {
+      resolve({ stdout, status: error ? 1 : 0, ...(error ? { error } : {}) });
+    });
+  });
+}
 function versionAtLeast(actual: string, requirement: string): boolean { const a = actual.replace(/^v/, '').split('.').map(Number), b = requirement.replace(/^>=/, '').split('.').map(Number); if (!requirement.startsWith('>=')) return a.slice(0, 3).join('.') === b.join('.'); for (let i = 0; i < 3; i++) { if (a[i]! > b[i]!) return true; if (a[i]! < b[i]!) return false; } return true; }
 function targetMatches(target: Target): boolean { const libc = process.platform === 'linux' ? ((process.report?.getReport() as { header?: { glibcVersionRuntime?: string } })?.header?.glibcVersionRuntime ? 'gnu' : 'musl') : undefined; return target.os === process.platform && target.arch === process.arch && (!target.libc || target.libc === libc); }
 export async function resolveLaunch(resolved: ResolvedManifest, options: LaunchOptions = {}): Promise<ResolvedLaunch> {
@@ -124,13 +132,13 @@ export async function resolveLaunch(resolved: ResolvedManifest, options: LaunchO
   for (const name of candidates) {
     const command = await findExecutable(options.runtimePaths?.[name] ?? name);
     if (!command) { failures.push(`${name}: executable unavailable`); continue; }
-    const probe = spawnSync(command, ['--version'], { encoding: 'utf8', timeout: 5000, maxBuffer: 8192, shell: false });
+    const probe = await probeRuntime(command, ['--version']);
     const actual = probe.stdout?.trim().replace(/^v/, '') ?? '';
     if (probe.status !== 0 || !/^\d+\.\d+\.\d+/.test(actual) || m.launch.versions?.[name] && !versionAtLeast(actual, m.launch.versions[name]!)) { failures.push(`${name}: version requirement failed`); continue; }
     const entry = await packagePath(resolved.directory, name === 'bun' ? dev?.entry ?? m.launch.entry : m.launch.entry);
     if (name === 'node' && /\.[cm]?tsx?$/.test(entry)) throw new PluginError('INVALID_ARGUMENT', 'Node requires emitted JavaScript; build the TypeScript artifact first');
     if (!options.development && /\.[cm]?tsx?$/.test(entry)) throw new PluginError('INVALID_ARGUMENT', 'Production requires emitted JavaScript');
-    const versionsProbe = spawnSync(command, ['-e', 'process.stdout.write(JSON.stringify(process.versions))'], { encoding: 'utf8', timeout: 5000, maxBuffer: 8192, shell: false });
+    const versionsProbe = await probeRuntime(command, ['-e', 'process.stdout.write(JSON.stringify(process.versions))']);
     let selectedVersions: Record<string, string> = {}; try { if (versionsProbe.status === 0) selectedVersions = JSON.parse(versionsProbe.stdout) as Record<string, string>; } catch {}
     if (versionsProbe.status !== 0) { failures.push(`${name}: runtime inspection failed (${versionsProbe.error?.message ?? versionsProbe.status})`); continue; }
     if (!selectedVersions.node || (name === 'bun' ? !selectedVersions.bun : !!selectedVersions.bun)) { failures.push(`${name}: configured executable is the wrong runtime`); continue; }
@@ -201,6 +209,7 @@ export class TrustedPluginHost extends EventEmitter {
   }
   async load(path: string, options: LoadOptions = {}): Promise<PluginHandle> {
     if (this.closing) throw new PluginError('NOT_READY', 'Host is shutting down'); const { resolved, launch } = await this.preflight(path, options);
+    if (this.closing) throw new PluginError('NOT_READY', 'Host is shutting down');
     const handle = new PluginHandle(this, resolved, options); if (this.instances.has(handle.instanceId)) throw new PluginError('INVALID_ARGUMENT', 'Duplicate instanceId'); this.instances.set(handle.instanceId, handle);
     try { await this.start(handle, launch, null); return handle; } catch (error) { this.transition(handle, 'FAILED'); await this.terminate(handle); throw error; }
   }
@@ -217,6 +226,7 @@ export class TrustedPluginHost extends EventEmitter {
     };
   }
   private async start(handle: PluginHandle, launch: ResolvedLaunch, snapshot: Snapshot | null): Promise<void> {
+    if (this.closing) throw new PluginError('NOT_READY', 'Host is shutting down');
     handle.sessionId = randomUUID(); handle.selectedRuntime = launch; handle.lastEvent = 0n; handle.outgoingEvent = 0n; this.transition(handle, 'STARTING');
     const session = handle.sessionId; const token = randomBytes(32).toString('hex');
     const secretValues = [token, ...Object.values(handle.options.env ?? {}), ...Object.values(handle.options.services ?? {}).flatMap(service => Object.values(service.headers ?? {}))];
@@ -290,10 +300,10 @@ export class TrustedPluginHost extends EventEmitter {
       const e = object(value); exactKeys(e, ['interface', 'version', 'event', 'sessionId', 'sequence', 'payload', 'relatedRequestId'], ['interface', 'version', 'event', 'sessionId', 'sequence', 'payload']);
       if (e.sessionId !== session || typeof e.sequence !== 'string' || !/^[1-9][0-9]{0,30}$/.test(e.sequence) || BigInt(e.sequence) <= handle.lastEvent) throw new PluginError('INVALID_REQUEST', 'Invalid event session/sequence');
       const c = handle.resolved.contracts.find(c => c.descriptor.id === e.interface && c.descriptor.version === e.version); if (!c || typeof e.event !== 'string' || !c.descriptor.events[e.event]) throw new PluginError('CONTRACT_MISMATCH', 'Undeclared event');
-      const payload = validate(c, c.descriptor.events[e.event]!.payload, e.payload); handle.lastEvent = BigInt(e.sequence);
+      const payload = validate(c, c.descriptor.events[e.event]!.payload, e.payload); const bytes = Buffer.byteLength(JSON.stringify(payload)); handle.lastEvent = BigInt(e.sequence);
       for (const sub of handle.subscriptions) if (!sub.stopped && sub.contract.descriptor.id === e.interface && sub.event === e.event) {
-        if (sub.queue.length >= this.limits.maxEventQueue || sub.bytes + Buffer.byteLength(JSON.stringify(payload)) > this.limits.maxQueuedBytes) { sub.stopped = true; sub.queue = []; handle.subscriptions.delete(sub); const error = new PluginError('OVERLOADED', 'Event subscriber queue overflow'); try { sub.onError?.(error); } catch {} this.emit('subscriptionError', error); continue; }
-        const bytes = Buffer.byteLength(JSON.stringify(payload)); sub.queue.push({ payload, sessionId: session, bytes }); sub.bytes += bytes; if (!sub.running) void this.drainSubscription(handle, sub);
+        if (sub.queue.length >= this.limits.maxEventQueue || sub.bytes + bytes > this.limits.maxQueuedBytes) { sub.stopped = true; sub.queue = []; handle.subscriptions.delete(sub); const error = new PluginError('OVERLOADED', 'Event subscriber queue overflow'); try { sub.onError?.(error); } catch {} this.emit('subscriptionError', error); continue; }
+        sub.queue.push({ payload, sessionId: session, bytes }); sub.bytes += bytes; if (!sub.running) void this.drainSubscription(handle, sub);
       }
     } catch (error) { handle.peer?.close(asPluginError(error)); }
   }

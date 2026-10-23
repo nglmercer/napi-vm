@@ -39,7 +39,7 @@ test("let inside a function block does not escape it", () => {
 
 test("block function declarations remain hoisted and block-scoped", () => {
   expect(run(`let result; { result = local(); function local(){ return 4; } } result;`)).toBe("4");
-  expect(run(`function outer(){ { function local(){ return 4; } } return typeof local; } outer();`)).toBe(
+  expect(run(`"use strict"; function outer(){ { function local(){ return 4; } } return typeof local; } outer();`)).toBe(
     "undefined",
   );
 });

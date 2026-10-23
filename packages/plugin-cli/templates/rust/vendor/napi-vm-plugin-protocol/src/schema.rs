@@ -630,18 +630,16 @@ fn validate_at(s: &Value, v: &Value, root: &Value, path: &str, depth: usize) -> 
     if let Some(r) = s["$ref"].as_str() {
         return validate_at(resolve(root, r)?, v, root, path, depth + 1);
     }
-    for k in ["oneOf"] {
-        if let Some(a) = s[k].as_array() {
-            let n = a
-                .iter()
-                .filter(|s| validate_at(s, v, root, path, depth + 1).is_ok())
-                .count();
-            return if n == 1 {
-                Ok(())
-            } else {
-                Err(fail("union variant mismatch"))
-            };
-        }
+    if let Some(a) = s["oneOf"].as_array() {
+        let n = a
+            .iter()
+            .filter(|s| validate_at(s, v, root, path, depth + 1).is_ok())
+            .count();
+        return if n == 1 {
+            Ok(())
+        } else {
+            Err(fail("union variant mismatch"))
+        };
     }
     if let Some(types) = s["type"].as_array() {
         if v.is_null() {
@@ -694,14 +692,14 @@ fn validate_at(s: &Value, v: &Value, root: &Value, path: &str, depth: usize) -> 
         }
         Some("array") => {
             let a = v.as_array().ok_or_else(|| fail("expected array"))?;
-            length_bounds(s, a.len(), "minItems", "maxItems").map_err(&fail)?;
+            length_bounds(s, a.len(), "minItems", "maxItems").map_err(fail)?;
             for (i, v) in a.iter().enumerate() {
                 validate_at(&s["items"], v, root, &format!("{path}/{i}"), depth + 1)?;
             }
         }
         Some("string") => {
             let x = v.as_str().ok_or_else(|| fail("expected string"))?;
-            length_bounds(s, x.chars().count(), "minLength", "maxLength").map_err(&fail)?;
+            length_bounds(s, x.chars().count(), "minLength", "maxLength").map_err(fail)?;
             if let Some(w) = s["x-wire-type"].as_str() {
                 let ok = match w {
                     "i64-decimal" => canonical_decimal(x, true) && x.parse::<i64>().is_ok(),
