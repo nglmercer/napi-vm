@@ -292,6 +292,16 @@ fn host_clear_timeout(vm: &mut Interpreter, _: Value, args: Vec<Value>) -> Resul
     Ok(Value::Undefined)
 }
 
+// Keep diagnostic output off stdout, which carries the worker JSON protocol.
+fn host_print(vm: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let words = args
+        .iter()
+        .map(|arg| vm.ecmascript_to_string(arg).map(|s| s.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    eprintln!("{}", words.join(" "));
+    Ok(Value::Undefined)
+}
+
 fn realm_host(vm: &mut Interpreter) -> Value {
     // An explicit host timer uses the owner queue and its real-time clock.
     // No runtime capability or foreign-thread callback entry is required.
@@ -299,6 +309,8 @@ fn realm_host(vm: &mut Interpreter) -> Value {
     let clear = vm.native_function_in_realm("clearTimeout", host_clear_timeout);
     vm.global.borrow_mut().set("setTimeout", timeout);
     vm.global.borrow_mut().set("clearTimeout", clear);
+    let print = vm.native_function_in_realm("print", host_print);
+    vm.global.borrow_mut().set("print", print);
     let agent = agents::host(vm);
     let host = Value::object(vec![
         ("IsHTMLDDA".into(), vm.create_html_dda()),

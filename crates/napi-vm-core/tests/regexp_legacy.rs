@@ -123,3 +123,28 @@ fn foreign_legacy_accessors_keep_their_realm_after_collection() {
         "RegExp.prototype.exec.call(foreignPattern,'child');ForeignRegExp.lastMatch==='child'&&RegExp.lastMatch==='parent';",
     );
 }
+
+#[test]
+fn annex_b_numeric_and_control_escapes_in_both_execution_paths() {
+    let cases = [
+        r#"/\2/.test('\x02') && !/\b(\w+) \2\b/.test('do you listen the the band')"#,
+        r#"/\1(a)/.test('a') && /(a)\1/.test('aa') && /\10(a)/.test('\ba')"#,
+        r#"/[\12-\14]+/.exec('x\n\v\fy')[0] === '\n\v\f'"#,
+        r#"/\377/.test('\xff') && /\400/.test(' 0') && /\08/.test('\0'+'8') && /[\8\9]/.test('9')"#,
+        r#"/\cA/.test('\x01') && /[\c0]/.test('\x10') && /[\c_]/.test('\x1f')"#,
+        r#"new RegExp('\\cЖ').test('\\cЖ') && !new RegExp('\\cЖ').test('cЖ') && new RegExp('\\c').test('\\c')"#,
+        r#"new RegExp('[\\c!]').test('\\') && new RegExp('[\\c!]').test('c') && new RegExp('[\\c!]').test('!')"#,
+        r#"var caught=0; for (var p of ['\\1','\\01','[\\1]','\\c0','[\\c_]']) {try {new RegExp(p,'u');} catch(e){if(e instanceof SyntaxError)caught++;}} caught===5"#,
+    ];
+    for source in cases {
+        let mut vm = Interpreter::with_builtins();
+        truth(&mut vm, source);
+        let mut vm = Interpreter::with_builtins();
+        let program = napi_vm_core::parser::parse_cached(source).unwrap();
+        let result = vm.run_program_body(&program);
+        assert!(
+            matches!(result, Ok(Value::Bool(true))),
+            "AST {source}: {result:?}"
+        );
+    }
+}

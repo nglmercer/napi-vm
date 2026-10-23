@@ -411,3 +411,13 @@ fn module_source_intrinsic_is_abstract_and_owned_by_each_realm() {
  "#}));
     assert_eq!(report["status"], "ok", "{report}");
 }
+
+#[test]
+fn print_is_available_in_each_realm_without_corrupting_worker_json() {
+    let report = worker(
+        json!({"source": "var calls=0; var result=print('diagnostic', {toString(){calls++;return 'text';}}); if(calls!==1 || result!==undefined) throw new Error('print'); $262.createRealm().evalScript(\"if(typeof print!=='function') throw new Error('missing print'); print('child');\");"}),
+    );
+    assert_eq!(report["status"], "ok", "{report}");
+    let report = worker(json!({"source": "print({toString(){throw new TypeError('coercion');}})"}));
+    assert_eq!(report["error_type"], "TypeError");
+}

@@ -187,6 +187,7 @@ pub struct Parser {
     chars: Vec<char>,
     pos: usize,
     group_count: usize,
+    total_groups: usize,
     names: HashMap<String, Vec<usize>>,
     /// `u` flag: makes otherwise-tolerated escapes an error, as in a real
     /// engine's Unicode mode.
@@ -204,6 +205,7 @@ impl Parser {
         let mut class = false;
         let mut at = 0;
         let mut has_named_captures = false;
+        let mut total_groups = 0;
         while at < chars.len() {
             match chars[at] {
                 '\\' => {
@@ -217,8 +219,10 @@ impl Parser {
                     && chars.get(at + 2) == Some(&'<')
                     && !matches!(chars.get(at + 3), Some('=' | '!')) =>
                 {
-                    has_named_captures = true
+                    has_named_captures = true;
+                    total_groups += 1;
                 }
+                '(' if !class && chars.get(at + 1) != Some(&'?') => total_groups += 1,
                 _ => {}
             }
             at += 1;
@@ -227,6 +231,7 @@ impl Parser {
             chars,
             pos: 0,
             group_count: 0,
+            total_groups,
             names: HashMap::new(),
             unicode,
             vsets,
@@ -871,6 +876,12 @@ impl Parser {
             },
             // `\b` inside a class is a backspace, not a word boundary.
             'b' => ClassItem::Char(8),
+            'c' if !self.unicode && self.peek().is_some_and(|c| c.is_ascii_digit() || c == '_') => {
+                let c = self.peek().expect("checked above");
+                self.pos += 1;
+                ClassItem::Char(c as u32 % 32)
+            }
+            c @ '0'..='7' if !self.unicode => ClassItem::Char(self.legacy_octal(c)),
             other => ClassItem::Char(self.escaped_char(other)?),
         })
     }
@@ -887,6 +898,17 @@ impl Parser {
         let Some(e) = self.peek() else {
             return Err("Trailing backslash in regular expression".to_string());
         };
+        // Annex B treats an invalid control escape as a literal backslash;
+        // leave `c` (and its successor) to the ordinary class grammar.
+        if e == 'c'
+            && !self.unicode
+            && !self
+                .chars
+                .get(self.pos + 1)
+                .is_some_and(|c| c.is_ascii_alphanumeric() || *c == '_')
+        {
+            return Ok(ClassItem::Char('\\' as u32));
+        }
         self.pos += 1;
         self.class_atom_tail(e)
     }
@@ -928,10 +950,27 @@ impl Parser {
                 Node::NamedBackref(name)
             }
             c if c.is_ascii_digit() && c != '0' => {
-                self.pos -= 1;
-                let index = self.digits().unwrap_or(0) as usize;
-                Node::Backref(index)
+                let start = self.pos - 1;
+                self.pos = start;
+                let index = self.digits().unwrap_or(u32::MAX) as usize;
+                if index <= self.total_groups {
+                    Node::Backref(index)
+                } else if self.unicode {
+                    return Err("Invalid decimal escape".into());
+                } else {
+                    self.pos = start + 1;
+                    Node::Char(if c <= '7' {
+                        self.legacy_octal(c)
+                    } else {
+                        c as u32
+                    })
+                }
             }
+            'c' if !self.unicode && !self.peek().is_some_and(|c| c.is_ascii_alphabetic()) => {
+                self.pos -= 1;
+                Node::Char('\\' as u32)
+            }
+            '0' if !self.unicode => Node::Char(self.legacy_octal('0')),
             other => Node::Char(self.escaped_char(other)?),
         })
     }
@@ -1009,7 +1048,12 @@ impl Parser {
             'r' => '\r' as u32,
             'f' => '\u{000C}' as u32,
             'v' => '\u{000B}' as u32,
-            '0' => '\0' as u32,
+            '0' => {
+                if self.unicode && self.peek().is_some_and(|c| c.is_ascii_digit()) {
+                    return Err("Invalid decimal escape".into());
+                }
+                0
+            }
             'x' => self.hex_escape_or_identity('x', 2)?,
             'u' => {
                 // `\u{1F600}` in Unicode mode, `￿` otherwise.
@@ -1051,9 +1095,8 @@ impl Parser {
                 }
             }
             'c' => {
-                // `\cA` … `\cZ`: a control character.
-                let Some(letter) = self.peek() else {
-                    return Ok('\\' as u32);
+                let Some(letter) = self.peek().filter(|c| c.is_ascii_alphabetic()) else {
+                    return Err("Invalid control escape".into());
                 };
                 self.pos += 1;
                 (letter as u32) % 32
@@ -1065,6 +1108,20 @@ impl Parser {
                 other as u32
             }
         })
+    }
+
+    /// Annex B octal escapes consume at most three digits and never exceed 255.
+    fn legacy_octal(&mut self, first: char) -> u32 {
+        let mut value = first as u32 - '0' as u32;
+        let extra = if first <= '3' { 2 } else { 1 };
+        for _ in 0..extra {
+            let Some(c @ '0'..='7') = self.peek() else {
+                break;
+            };
+            self.pos += 1;
+            value = value * 8 + c as u32 - '0' as u32;
+        }
+        value
     }
 
     fn hex_escape_or_identity(&mut self, escaped: char, digits: usize) -> ParseResult<u32> {
