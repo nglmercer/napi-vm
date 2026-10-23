@@ -44,3 +44,23 @@ fn durations_use_the_intrinsic_formatter_and_branded_fields() {
         "var value=Temporal.Duration.from({hours:2,minutes:30});var expected=new Intl.DurationFormat('de',{style:'long'}).format(value);Intl.DurationFormat=function(){throw 99;};value.toLocaleString('de',{style:'long'})===expected",
     );
 }
+
+#[test]
+fn default_hour_cycles_keep_midnight_and_calendar_reference_dates() {
+    yes(
+        "var time=new Temporal.PlainTime(0);time.toLocaleString('en',{hourCycle:'h24'}).includes('24:00:00') && time.toLocaleString('en',{hourCycle:'h11'}).includes('0:00:00')",
+    );
+    yes(
+        "var value=Temporal.PlainYearMonth.from({year:1445,monthCode:'M09',calendar:'islamic-tbla'});value.toLocaleString('en-u-ca-islamic-tbla',{dateStyle:'long'}).includes('Ramadan')",
+    );
+    yes(
+        "var value=Temporal.PlainMonthDay.from({monthCode:'M09',day:1,calendar:'islamic-tbla'});value.toLocaleString('en-u-ca-islamic-tbla',{dateStyle:'long'}).includes('Ramadan')",
+    );
+}
+
+#[test]
+fn formatting_keeps_temporal_dates_outside_date_time_clip() {
+    yes(
+        "var f=new Intl.DateTimeFormat('en',{calendar:'iso8601'});f.format(new Temporal.PlainDate(-271821,4,19)).includes('271822') && f.format(new Temporal.PlainYearMonth(-271821,4)).includes('271822')",
+    );
+}

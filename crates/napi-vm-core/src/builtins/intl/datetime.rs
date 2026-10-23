@@ -35,6 +35,7 @@ pub(crate) struct Slots {
     calendar: String,
     numbering: String,
     hour_cycle: Option<String>,
+    formatter_hour_cycle: String,
     hour12: Option<bool>,
     time_zone: String,
     weekday: Option<String>,
@@ -991,22 +992,12 @@ fn resolve_moment(i: &mut Interpreter, s: &Slots, value: Value) -> Result<Moment
                 if !s.defaults {
                     ensure_temporal_compatible(s, TemporalClass::Date)?;
                 }
-                let iso = date
-                    .to_plain_date_time(None)
-                    .map_err(|e| VmErr::Msg(e.to_string()))?;
-                return Ok(Moment {
-                    kind: kind_of(date.calendar().identifier()),
-                    stamp: stamp_of(iso.iso_year(), iso.iso_month(), iso.iso_day()),
-                    year: iso.iso_year(),
-                    month: iso.iso_month(),
-                    day: iso.iso_day(),
-                    hour: 0,
-                    minute: 0,
-                    second: 0,
-                    ms: 0,
-                    tclass: Some(TemporalClass::Date),
-                    tcalendar: Some(date.calendar().identifier().into()),
-                });
+                return Ok(plain_calendar_moment(
+                    date.epoch_ns_for_utc().as_i128(),
+                    kind_of(date.calendar().identifier()),
+                    TemporalClass::Date,
+                    date.calendar().identifier(),
+                ));
             }
             Temporal::Time(time) => {
                 if !s.defaults {
@@ -1049,49 +1040,23 @@ fn resolve_moment(i: &mut Interpreter, s: &Slots, value: Value) -> Result<Moment
                 if !s.defaults {
                     ensure_temporal_compatible(s, TemporalClass::YearMonth)?;
                 }
-                return Ok(Moment {
-                    kind: kind_of(ym.calendar().identifier()),
-                    stamp: stamp_of(ym.year(), ym.month(), 1),
-                    year: ym.year(),
-                    month: ym.month(),
-                    day: 1,
-                    hour: 0,
-                    minute: 0,
-                    second: 0,
-                    ms: 0,
-                    tclass: Some(TemporalClass::YearMonth),
-                    tcalendar: Some(ym.calendar().identifier().into()),
-                });
+                return Ok(plain_calendar_moment(
+                    ym.epoch_ns_for_utc().as_i128(),
+                    kind_of(ym.calendar().identifier()),
+                    TemporalClass::YearMonth,
+                    ym.calendar().identifier(),
+                ));
             }
             Temporal::MonthDay(md) => {
-                // Month codes look like "M08" (leap months append "L").
-                let code = md.month_code().as_str().to_string();
-                let month: u8 = code
-                    .bytes()
-                    .skip_while(|b| !b.is_ascii_digit())
-                    .take(2)
-                    .collect::<Vec<_>>()
-                    .as_slice()
-                    .try_into()
-                    .ok()
-                    .and_then(|pair: &[u8; 2]| core::str::from_utf8(pair).ok()?.parse().ok())
-                    .unwrap_or(1);
                 if !s.defaults {
                     ensure_temporal_compatible(s, TemporalClass::MonthDay)?;
                 }
-                return Ok(Moment {
-                    kind: kind_of(md.calendar().identifier()),
-                    stamp: stamp_of(1972, month, md.day()),
-                    year: 1972,
-                    month,
-                    day: md.day(),
-                    hour: 0,
-                    minute: 0,
-                    second: 0,
-                    ms: 0,
-                    tclass: Some(TemporalClass::MonthDay),
-                    tcalendar: Some(md.calendar().identifier().into()),
-                });
+                return Ok(plain_calendar_moment(
+                    md.epoch_ns_for_utc().as_i128(),
+                    kind_of(md.calendar().identifier()),
+                    TemporalClass::MonthDay,
+                    md.calendar().identifier(),
+                ));
             }
         }
     }
@@ -1111,6 +1076,31 @@ fn resolve_moment(i: &mut Interpreter, s: &Slots, value: Value) -> Result<Moment
         return Err(time_range());
     }
     epoch_moment(s, ms as i64)
+}
+// Temporal's reference ISO dates can extend beyond Date's clipped range.
+// Convert their exact UTC epoch directly, without applying the formatter zone
+// or constructing an intermediate PlainDateTime at an invalid midnight.
+fn plain_calendar_moment(
+    epoch_ns: i128,
+    kind: AnyCalendarKind,
+    tclass: TemporalClass,
+    calendar: &str,
+) -> Moment {
+    let stamp = epoch_ns.div_euclid(1_000_000_000) as i64;
+    let (year, month, day) = civil_from_days(stamp.div_euclid(86_400));
+    Moment {
+        kind,
+        stamp,
+        year,
+        month: month as u8,
+        day: day as u8,
+        hour: 12,
+        minute: 0,
+        second: 0,
+        ms: 0,
+        tclass: Some(tclass),
+        tcalendar: Some(calendar.into()),
+    }
 }
 fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
     let y = year as i64 - (month <= 2) as i64;
@@ -1527,7 +1517,7 @@ fn collect_parts(s: &Slots, m: &Moment) -> Result<Vec<(String, String)>, VmErr> 
     };
     for (kind, text) in &mut out {
         // h24 formats through h23: midnight renders as 24.
-        if kind == "hour" && s.hour_cycle.as_deref() == Some("h24") && m.hour == 0 {
+        if kind == "hour" && s.formatter_hour_cycle == "h24" && m.hour == 0 {
             *text = "24".into();
         }
         if let Some((_, width)) = widths.iter().find(|(k, _)| k == kind)
@@ -2187,6 +2177,7 @@ fn finish(mut p: Parts) -> Result<Slots, VmErr> {
         calendar: p.calendar,
         numbering: p.numbering,
         hour_cycle,
+        formatter_hour_cycle: p.hour_cycle,
         hour12,
         time_zone: p.time_zone,
         weekday: p.weekday,

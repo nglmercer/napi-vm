@@ -82,3 +82,13 @@ prepared modes. The matched baseline selects 84 variants and passes 30, with
 54 failures. The clean `2a56bc8` release passes all 84 variants: 54 new
 passes and zero lost passes, failures, timeouts, crashes, harness errors or
 skips. Both reports and their comparison are archived.
+
+## Temporal reference dates and default hour cycles
+
+Formatting now converts PlainDate, PlainYearMonth and PlainMonthDay reference
+ISO dates directly from the library's exact UTC nanoseconds. This preserves
+non-Gregorian calendar conversion and dates outside Date's clipped range,
+without constructing an invalid midnight PlainDateTime. The formatter retains
+its effective hour cycle internally even when resolvedOptions omits time
+fields, so default h24 midnight is rendered as 24. Six native regressions pass
+in AST and prepared modes. Matched release verification is pending.
