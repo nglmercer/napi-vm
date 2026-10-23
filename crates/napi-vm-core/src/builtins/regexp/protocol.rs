@@ -469,6 +469,9 @@ fn substitute(
                     out.push_str(s);
                 }
                 at += width;
+                if out.len() > crate::value::MAX_STRING_LEN {
+                    return Err(crate::value::limit_err("Maximum string length exceeded"));
+                }
                 continue;
             }
             60 if !matches!(groups, Value::Undefined) => {
@@ -480,6 +483,9 @@ fn substitute(
                         out.push_str(i.ecmascript_to_string(&value)?);
                     }
                     at = end + 1;
+                    if out.len() > crate::value::MAX_STRING_LEN {
+                        return Err(crate::value::limit_err("Maximum string length exceeded"));
+                    }
                     continue;
                 }
                 out.push_str("$");
