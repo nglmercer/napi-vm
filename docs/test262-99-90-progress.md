@@ -126,4 +126,6 @@ boundaries. Math.atanh evaluates the positive magnitude and restores its sign
 to avoid cancellation near -1. Two embedding regressions pass through prepared
 and AST evaluation, and Clippy passes with warnings denied. A matched baseline
 for Number/BigInt/atanh passes 852/856; all 371 core library tests pass.
-Release comparison is pending.
+The clean `3806712` release passes 856/856, with four new passes and zero
+lost passes, failures, timeouts, crashes, harness errors or skips. Both the
+after report and comparison are archived.
