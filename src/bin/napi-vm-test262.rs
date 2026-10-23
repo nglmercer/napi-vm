@@ -301,6 +301,7 @@ fn realm_host(vm: &mut Interpreter) -> Value {
     vm.global.borrow_mut().set("clearTimeout", clear);
     let agent = agents::host(vm);
     let host = Value::object(vec![
+        ("IsHTMLDDA".into(), vm.create_html_dda()),
         (
             "AbstractModuleSource".into(),
             vm.abstract_module_source_constructor(),

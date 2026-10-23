@@ -183,6 +183,8 @@ pub(crate) enum CollectionKind {
 /// one binding they were applied to.
 #[derive(Default)]
 pub struct ObjectMeta {
+    /// Host-only legacy HTMLDDA brand. Never inherited or forwarded by proxies.
+    pub(crate) html_dda: bool,
     /// The realm that owns native methods and implicit intrinsic prototypes.
     pub(crate) realm_global: Option<Env>,
     /// Host-created module-source brand; never inherited through prototypes.
@@ -3692,6 +3694,9 @@ impl Value {
     }
 
     pub fn is_truthy(&self) -> bool {
+        if self.is_html_dda() {
+            return false;
+        }
         match self {
             Value::Bool(b) => *b,
             Value::Number(n) => *n != 0.0 && !n.is_nan(),
@@ -3700,6 +3705,17 @@ impl Value {
             Value::StringIterator { .. } => true,
             Value::Null | Value::Undefined => false,
             _ => true,
+        }
+    }
+
+    pub(crate) fn is_html_dda(&self) -> bool {
+        match self {
+            Value::Function(function) => function.properties.meta.borrow().html_dda,
+            Value::Object { props }
+            | Value::HostFunction {
+                properties: props, ..
+            } => props.meta.borrow().html_dda,
+            _ => false,
         }
     }
 

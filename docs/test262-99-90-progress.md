@@ -54,7 +54,11 @@ formatters instead of ISO serialization, including receiver brands, calendar
 compatibility, style conflicts, and ZonedDateTime's own time zone. Numeric hour
 formatting retains the locale pattern's leading zero rather than stripping it
 from 24-hour clock output. Four new native regressions pass through both AST
-and prepared evaluation. Release Test262 comparison for this block is pending.
+and prepared evaluation. The clean `f6b780c` release passes 13,706/13,758
+variants: 158 new passes, zero lost passes, and 52 semantic failures with no
+crashes, timeouts, harness errors, or skips. The after report and per-variant
+comparison are archived. This focused result does not establish the full-suite
+percentage.
 
 ## Remaining gates
 
@@ -67,3 +71,12 @@ and prepared evaluation. Release Test262 comparison for this block is pending.
 
 Push each verified implementation block and its evidence to this draft branch.
 Keep runtime capabilities optional, execution limits enforced, and AST fallback.
+
+## HTMLDDA host support
+
+The optional Test262 host now exposes a callable object with the HTMLDDA brand.
+Only boolean coercion, typeof, and loose null/undefined comparisons change;
+strict equality, object operations, nullish checks, inheritance and proxies
+retain ordinary object semantics. Three native regressions pass in AST and
+prepared modes. The matched baseline selects 84 variants and passes 30, with
+54 failures. Release verification is pending.

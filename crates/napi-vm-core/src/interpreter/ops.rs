@@ -547,6 +547,7 @@ impl Interpreter {
             UnOp::Neg => Value::Number(-self.ecmascript_to_number(v)?),
             UnOp::Pos => Value::Number(self.ecmascript_to_number(v)?),
             UnOp::BitNot => Value::Number(!to_int32(self.ecmascript_to_number(v)?) as f64),
+            UnOp::Typeof if v.is_html_dda() => Value::String("undefined".into()),
             UnOp::Typeof if super::call::callable_slot(v, super::call::CALL_SLOT).is_some() => {
                 Value::String(("function".to_string()).into())
             }
@@ -724,6 +725,11 @@ impl Interpreter {
         let mut right = right.deref_binding();
         loop {
             self.check_execution()?;
+            if left.is_html_dda() && matches!(right, Value::Null | Value::Undefined)
+                || right.is_html_dda() && matches!(left, Value::Null | Value::Undefined)
+            {
+                return Ok(true);
+            }
             let left_object = super::call::is_js_object(&left);
             let right_object = super::call::is_js_object(&right);
             if (left_object && right_object)
