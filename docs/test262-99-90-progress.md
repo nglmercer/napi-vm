@@ -129,3 +129,28 @@ for Number/BigInt/atanh passes 852/856; all 371 core library tests pass.
 The clean `3806712` release passes 856/856, with four new passes and zero
 lost passes, failures, timeouts, crashes, harness errors or skips. Both the
 after report and comparison are archived.
+
+## Annex B numeric/control escapes and Test262 print
+
+Legacy decimal escapes are backreferences only when their full index names a
+capture, including forward captures. Otherwise they use Annex B octal or
+identity semantics. Class octal ranges and invalid control escapes preserve
+their literal characters; control letters are ASCII, with the class-only
+legacy digit/underscore extension. Unicode modes retain strict validation.
+The isolated host supplies `print` in each realm and sends diagnostics to stderr
+to preserve its stdout JSON protocol.
+
+The clean implementation tree `b896e475eac417480bc914e52a500475a3f57ede`
+(local commit `d5b8a1b`, identical GitHub commit `8d4fc2e`) passes **852/852**
+RegExp/String variants using the same selection, two workers and ten-second
+limit as the archived 842-pass baseline: **10 new passes, zero lost passes**,
+failures, timeouts, crashes, harness errors or skips. Rust is 1.98.0 in this
+restored environment. Seven native RegExp tests, including AST/prepared escape
+regressions, all 22 worker tests, all 371 core unit tests, the 12 Python runner
+tests, formatting and core all-target Clippy with warnings denied pass.
+The debug run has zero semantic failures but 12 measured timeouts (840/852),
+retained separately rather than promoted to passes. Reports, comparison, source
+identities and logs are archived under the existing evidence directory.
+
+A complete pinned run on that immutable implementation has started with a
+checkpoint; its result is not yet a completed full-suite score.
