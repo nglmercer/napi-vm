@@ -91,4 +91,7 @@ non-Gregorian calendar conversion and dates outside Date's clipped range,
 without constructing an invalid midnight PlainDateTime. The formatter retains
 its effective hour cycle internally even when resolvedOptions omits time
 fields, so default h24 midnight is rendered as 24. Six native regressions pass
-in AST and prepared modes. Matched release verification is pending.
+in AST and prepared modes. The clean `4a30aa4` release passes 13,736/13,758
+variants: 30 new passes, zero lost passes, and 22 semantic failures with no
+timeouts, crashes, harness errors, or skips. The after report and comparison
+are archived. Core library Clippy passes with warnings denied.
