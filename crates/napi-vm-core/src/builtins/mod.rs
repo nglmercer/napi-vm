@@ -37,6 +37,7 @@ pub use error::error_to_string;
 pub use number::number_method;
 pub(crate) use object::install_intrinsic_accessor;
 pub(crate) use regexp::compile as compile_regex;
+pub(crate) use regexp::compile_cached as compile_regex_cached;
 pub use regexp::regexp_member;
 pub use string::string_method;
 pub use symbol::new_symbol;

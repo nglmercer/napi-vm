@@ -395,13 +395,55 @@ fn type_err(message: String) -> VmErr {
 }
 
 pub(crate) fn compile(source: impl Into<crate::JsString>, flags: &str) -> Result<Value, VmErr> {
-    let regex = Regex::new(source, flags).map_err(type_err)?;
-    Ok(Value::RegExp(Rc::new(RegExpData {
+    Ok(instantiate(Regex::new(source, flags).map_err(type_err)?))
+}
+
+pub(crate) fn compile_cached(
+    interp: &mut Interpreter,
+    source: impl Into<crate::JsString>,
+    flags: &str,
+) -> Result<Value, VmErr> {
+    let source = source.into();
+    // Cache only small classic patterns. Excluding Unicode/property-set modes
+    // keeps compiled tables bounded as well as source text. Every evaluation
+    // still creates a distinct RegExpData, lastIndex and property storage.
+    let cacheable = source.len() <= 256
+        && flags.len() <= 8
+        && !flags.contains(['u', 'v'])
+        && source.units().iter().all(|unit| *unit < 128);
+    let cached = cacheable
+        .then(|| {
+            interp
+                .regex_cache
+                .iter()
+                .find(|(pattern, options, _)| pattern == &source && options == flags)
+                .map(|(_, _, regex)| regex.clone())
+        })
+        .flatten();
+    let regex = if let Some(regex) = cached {
+        regex
+    } else {
+        let regex = Regex::new(source.clone(), flags).map_err(type_err)?;
+        if cacheable {
+            if interp.regex_cache.len() == 8 {
+                interp.regex_cache.remove(0);
+            }
+            interp
+                .regex_cache
+                .push((source, flags.to_owned(), regex.clone()));
+        }
+        regex
+    };
+    Ok(instantiate(regex))
+}
+
+fn instantiate(regex: Regex) -> Value {
+    Value::RegExp(Rc::new(RegExpData {
         properties: Value::instance_properties(),
         regex: RefCell::new(regex),
         legacy_enabled: Cell::new(true),
         last_index: Cell::new(0),
-    })))
+    }))
 }
 
 /// `RegExp(pattern, flags)`. A `RegExp` argument is re-compiled, taking its
@@ -461,7 +503,7 @@ fn initialize_regexp(i: &mut Interpreter, args: Vec<Value>, regex: bool) -> Resu
     } else {
         i.ecmascript_to_string(&flags)?.to_string()
     };
-    compile(source, &flags)
+    compile_cached(i, source, &flags)
 }
 
 /// Properties and methods readable on a regular expression.
@@ -674,7 +716,7 @@ fn string_protocol(
     } else {
         i.ecmascript_to_string(&pattern)?
     };
-    let regex = compile(source, "")?;
+    let regex = compile_cached(i, source, "")?;
     let method = i.get_prop_value(&regex, &symbol)?;
     i.call_this(&method, regex, vec![Value::String(input)])
 }
@@ -727,7 +769,7 @@ pub fn string_match_all(
     } else {
         interp.ecmascript_to_string(&pattern)?
     };
-    let regex = compile(source, "g")?;
+    let regex = compile_cached(interp, source, "g")?;
     let method = interp.get_prop_value(&regex, &symbol)?;
     interp.call_this(&method, regex, vec![Value::String(input)])
 }
@@ -862,4 +904,27 @@ fn regexp_escape(_: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Valu
         index += 1;
     }
     Value::checked_string(crate::JsString::from_units(out))
+}
+
+#[cfg(test)]
+mod pattern_cache_tests {
+    use super::*;
+    #[test]
+    fn compiled_pattern_retention_is_bounded_and_skips_large_tables() {
+        let mut vm = Interpreter::with_builtins();
+        for index in 0..100 {
+            compile_cached(&mut vm, format!("pattern{index}"), "g").unwrap();
+        }
+        assert_eq!(vm.regex_cache.len(), 8);
+        let retained: Vec<_> = vm.regex_cache.iter().map(|(p, _, _)| p.clone()).collect();
+        compile_cached(&mut vm, "a".repeat(257), "g").unwrap();
+        compile_cached(&mut vm, "\\p{ASCII}", "u").unwrap();
+        assert_eq!(
+            vm.regex_cache
+                .iter()
+                .map(|(p, _, _)| p.clone())
+                .collect::<Vec<_>>(),
+            retained
+        );
+    }
 }
