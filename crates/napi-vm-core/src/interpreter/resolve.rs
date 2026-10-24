@@ -2129,7 +2129,7 @@ pub(crate) fn array_iter_with_kind(
 
 /// Read the source at each step. Array iterators observe changes to both
 /// values and length, but remain exhausted after the first done result.
-fn array_iter_next(
+pub(super) fn array_iter_next(
     interp: &mut super::Interpreter,
     this: super::Value,
     _args: Vec<super::Value>,
