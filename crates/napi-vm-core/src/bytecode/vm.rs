@@ -478,7 +478,7 @@ fn run_loop(
                         Constant::Undefined => Value::Undefined,
                         Constant::BigInt(v) => Value::BigInt(v.clone()),
                         Constant::Regex { pattern, flags } => {
-                            crate::builtins::compile_regex(pattern, flags)?
+                            crate::builtins::compile_regex_cached(interp, pattern, flags)?
                         }
                         _ => return Err(internal("invalid load_const")),
                     };

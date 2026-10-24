@@ -1283,7 +1283,7 @@ impl Interpreter {
         }
         if let Some((index, _, _)) = existing {
             if props.meta.borrow().attrs_of(key).writable {
-                props.borrow_mut()[index].1.assign_for_execution(value);
+                props.write_data_slot(Some(index), key, value)?;
             } else {
                 return Ok(false);
             }
@@ -1298,16 +1298,7 @@ impl Interpreter {
         if props.meta.borrow().non_extensible {
             return Ok(false);
         }
-        {
-            let mut slots = props.borrow_mut();
-            if slots.len() >= crate::value::MAX_OBJECT_PROPS {
-                return Err(crate::value::limit_err(
-                    "Maximum object property count exceeded",
-                ));
-            }
-            slots.push((key.to_owned(), value));
-        }
-        props.note_key_added(key);
+        props.write_data_slot(None, key, value)?;
         Ok(true)
     }
 
@@ -1436,6 +1427,26 @@ impl Interpreter {
         }
         let key = self.ecmascript_to_property_key(property)?;
         let slot = self.property_key(&key)?;
+        // Global var updates use the same ordinary object record as reads.
+        // An existing data slot needs no descriptor construction or realm
+        // switch. Resolve after key coercion/RHS evaluation, since either may
+        // have deleted the property or changed its descriptor.
+        if crate::interpreter::strict_equals(target, receiver)
+            && let Some(global) = self.global_scope_of(target)
+        {
+            let record = global.borrow().global_object();
+            if let Some(Value::Object { ref props }) = record
+                && !props.meta.borrow().has_accessors
+                && let Some(index) = props.own_index(&slot)
+            {
+                if !props.meta.borrow().attrs_of(&slot).writable {
+                    return Ok(false);
+                }
+                props.write_data_slot(Some(index), &slot, value)?;
+                global.borrow_mut().note_global_property(&slot);
+                return Ok(true);
+            }
+        }
         // Ordinary same-receiver data writes need not allocate descriptors or
         // invalidate the complete layout on every assignment. In particular,
         // growing a wide object otherwise repeatedly rebuilds all earlier keys.
@@ -2127,12 +2138,52 @@ impl Interpreter {
         self.resolve_tail_calls(result)
     }
 
+    fn current_realm_native(&self, function: &Value) -> Option<crate::builtins::NativeFn> {
+        match function {
+            Value::NativeFunction { callable, .. } => Some(*callable),
+            Value::Function(fd) if fd.bound.is_none() && fd.closure.is_none() => {
+                fd.native.filter(|_| {
+                    fd.properties
+                        .meta
+                        .borrow()
+                        .realm_global
+                        .as_ref()
+                        .is_some_and(|owner| Rc::ptr_eq(owner, &self.persistent_global))
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn invoke_current_native(
+        &mut self,
+        native: crate::builtins::NativeFn,
+        receiver: Value,
+        arguments: Vec<Value>,
+    ) -> Result<Value, VmErr> {
+        self.execution.check()?;
+        if arguments.len() > crate::value::MAX_ARRAY_LEN {
+            return Err(crate::value::limit_err("Maximum argument count exceeded"));
+        }
+        let _allocation_realm =
+            super::realm::AllocationRealm::enter(Some(self.persistent_global.clone()));
+        native(self, receiver, arguments)
+            .map_err(|error| error.with_context(None, self.get_stack()))
+    }
+
     fn call_this_borrowed_once(
         &mut self,
         f: &Value,
         this_val: Value,
         args: &[Value],
     ) -> Result<Value, VmErr> {
+        // Native methods in the current realm do not need bound-target
+        // resolution or a module/global storage switch. Keep the allocation
+        // realm guard and the same error-context boundary; foreign natives
+        // still take the full realm-aware operation below.
+        if let Some(native) = self.current_realm_native(f) {
+            return self.invoke_current_native(native, this_val, args.to_vec());
+        }
         if let Value::Function(fd) = f
             && fd.bound.is_none()
             && !fd.is_generator
@@ -2266,6 +2317,9 @@ impl Interpreter {
         this_val: Value,
         args: Vec<Value>,
     ) -> Result<Value, VmErr> {
+        if let Some(native) = self.current_realm_native(f) {
+            return self.invoke_current_native(native, this_val, args);
+        }
         let (target, this_val, args, _) =
             self.resolve_bound_chain(f.clone(), this_val, args, Value::Undefined, false)?;
         let f = &target;

@@ -557,7 +557,9 @@ impl Environment {
     }
 
     pub(crate) fn note_global_property(&mut self, name: &str) {
-        if let Some(record) = &mut self.global_environment {
+        if let Some(record) = &mut self.global_environment
+            && !record.user_names.contains(name)
+        {
             record.user_names.insert(name.into());
         }
     }
@@ -1524,5 +1526,36 @@ mod global_quota_tests {
             vm.eval_source("delete globalThis.guest_0; globalThis.replacement=42; replacement;"),
             Ok(Value::Number(42.))
         ));
+    }
+}
+
+#[cfg(test)]
+mod global_write_quota_tests {
+    #[test]
+    fn overwriting_builtin_data_still_counts_its_global_property_once() {
+        let mut vm = crate::Interpreter::with_builtins();
+        let before = {
+            let env = vm.global.borrow();
+            let record = env.global_environment.as_ref().unwrap();
+            assert!(!record.user_names.contains("parseInt"));
+            env.vars.len() + record.user_names.len()
+        };
+        vm.global.borrow_mut().global_limit = Some(before + 1);
+        vm.eval_source("parseInt = 7; parseInt = 8;").unwrap();
+        assert!(
+            vm.global
+                .borrow()
+                .global_environment
+                .as_ref()
+                .unwrap()
+                .user_names
+                .contains("parseInt")
+        );
+        let error = vm.eval_source("var extraQuotaName = 1;").unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Maximum global binding count exceeded")
+        );
     }
 }

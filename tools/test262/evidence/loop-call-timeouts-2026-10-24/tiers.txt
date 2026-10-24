@@ -1,0 +1,9 @@
+/workspace/scratch/test262/harness/sm/non262-Date-shell.js Bytecode None
+/workspace/scratch/test262/harness/decimalToHexString.js Bytecode None
+Some("runDSTOffsetCachingTestsFraction") instr=321 env=true captured=6
+ Some("tzOffsetFromUnixTimestamp") instr=18 env=false captured=0
+ Some("clearDSTOffsetCache") instr=33 env=false captured=0
+ Some("computeCanonicalTZOffset") instr=10 env=false captured=0
+ Some("nextIncrement") instr=11 env=false captured=0
+ None instr=5 env=false captured=0
+Some("decimalToPercentHexString") instr=20 env=false captured=0

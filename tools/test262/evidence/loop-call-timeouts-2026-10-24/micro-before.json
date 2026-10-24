@@ -1,0 +1,20 @@
+[
+  {
+    "name": "global-writes",
+    "source": "var total=0; for(var i=0;i<100000;i++)total+=i;",
+    "seconds": 2.9720394080004553,
+    "result": {
+      "status": "ok",
+      "phase": "runtime"
+    }
+  },
+  {
+    "name": "date-calls",
+    "source": "function f(x){var d=new Date(NaN);d.setTime(x);return d.getTimezoneOffset();}for(var i=0;i<100000;i++)f(i);",
+    "seconds": 2.4469050080006127,
+    "result": {
+      "status": "ok",
+      "phase": "runtime"
+    }
+  }
+]

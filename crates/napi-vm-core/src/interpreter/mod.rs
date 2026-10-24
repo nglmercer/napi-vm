@@ -335,6 +335,8 @@ pub struct Interpreter {
     jit_policy: crate::jit::JitPolicy,
     tier_tracking: crate::jit::TierTracking,
     pub(crate) activation_pool: Vec<(Vec<Value>, Vec<crate::bytecode::vm::RunSlot>)>,
+    /// Bounded, owner-local compiled patterns; no guest identity or match state.
+    pub(crate) regex_cache: Vec<(crate::JsString, String, crate::regex::Regex)>,
     /// Registered native-code backend, if any. `None` (the default) means
     /// hot functions stay on bytecode; see [`Self::set_jit_backend`].
     jit_backend: Option<crate::jit::BackendRef>,
@@ -508,6 +510,7 @@ impl Interpreter {
             jit_policy: crate::jit::JitPolicy::default(),
             tier_tracking: crate::jit::TierTracking::Disabled,
             activation_pool: Vec::new(),
+            regex_cache: Vec::new(),
             jit_backend: None,
         };
         interp.publish_module_realm();

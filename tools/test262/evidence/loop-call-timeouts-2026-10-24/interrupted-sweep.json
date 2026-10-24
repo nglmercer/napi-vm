@@ -1,0 +1,6 @@
+{
+  "status": "Full patched sweep completed; full baseline sweep interrupted before producing a report.",
+  "completed_report": "regression-after.json",
+  "baseline_elapsed_seconds": 59.589999999999236,
+  "reason": "Replace the overly expensive generated-property/set baseline with a matched focused constructor/protocol/cross-realm comparison. No partial baseline outcomes are counted."
+}
