@@ -3434,6 +3434,12 @@ fn typed_sort_values(
     cmp: &Value,
 ) -> Result<(), VmErr> {
     let len = values.len();
+    if len >= 256
+        && matches!(cmp, Value::Undefined)
+        && values.iter().all(|value| matches!(value, Value::Number(_)))
+    {
+        return typed_sort_numbers(i, values);
+    }
     // Sorted numeric inputs need no merge passes. This keeps zero-filled and
     // already ordered buffers linear without adding observable comparator calls.
     if matches!(cmp, Value::Undefined) {
@@ -3476,6 +3482,120 @@ fn typed_sort_values(
     }
     Ok(())
 }
+// Stable sorting of unboxed numeric bits avoids cloning full JS values on
+// every merge pass. NaNs share a final key, preserving their input order and
+// payloads; the bit transform orders negative zero before positive zero.
+fn typed_sort_numbers(i: &mut Interpreter, values: &mut [Value]) -> Result<(), VmErr> {
+    fn key(bits: u64) -> u64 {
+        if f64::from_bits(bits).is_nan() {
+            u64::MAX
+        } else if bits >> 63 != 0 {
+            !bits
+        } else {
+            bits ^ (1 << 63)
+        }
+    }
+    let mut numbers = Vec::with_capacity(values.len());
+    let mut ordered = true;
+    let mut previous = 0;
+    for value in values.iter() {
+        i.consume_loop()?;
+        let Value::Number(number) = value else {
+            unreachable!()
+        };
+        let bits = number.to_bits();
+        let current = key(bits);
+        ordered &= current >= previous;
+        previous = current;
+        numbers.push(bits);
+    }
+    if ordered {
+        return Ok(());
+    }
+    let mut scratch = vec![0u64; numbers.len()];
+    for shift in (0..64).step_by(8) {
+        let mut counts = [0usize; 256];
+        for &bits in &numbers {
+            i.consume_loop()?;
+            counts[((key(bits) >> shift) & 255) as usize] += 1;
+        }
+        if counts.contains(&numbers.len()) {
+            continue;
+        }
+        let mut offset = 0;
+        for count in &mut counts {
+            let length = *count;
+            *count = offset;
+            offset += length;
+        }
+        for &bits in &numbers {
+            i.consume_loop()?;
+            let bucket = ((key(bits) >> shift) & 255) as usize;
+            scratch[counts[bucket]] = bits;
+            counts[bucket] += 1;
+        }
+        std::mem::swap(&mut numbers, &mut scratch);
+    }
+    for (value, bits) in values.iter_mut().zip(numbers) {
+        i.consume_loop()?;
+        *value = Value::Number(f64::from_bits(bits));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod numeric_sort_tests {
+    use super::*;
+    #[test]
+    fn radix_order_matches_comparison_including_nan_payloads_and_signed_zero() {
+        let mut seed = 7u64;
+        let mut values = Vec::new();
+        for _ in 0..4096 {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            values.push(Value::Number(f64::from_bits(seed)));
+        }
+        for bits in [
+            0,
+            1 << 63,
+            0x7ff0000000000000,
+            0xfff0000000000000,
+            0x7ff8000000000001,
+            0xfff8000000000002,
+            0x7ff8000000000003,
+        ] {
+            values.push(Value::Number(f64::from_bits(bits)));
+        }
+        let mut expected = values.clone();
+        let mut interp = Interpreter::with_builtins();
+        expected.sort_by(|a, b| typed_sort_compare(&mut interp, a, b, &Value::Undefined).unwrap());
+        typed_sort_values(&mut interp, &mut values, &Value::Undefined).unwrap();
+        let bits = |values: Vec<Value>| {
+            values
+                .into_iter()
+                .map(|value| {
+                    let Value::Number(n) = value else {
+                        unreachable!()
+                    };
+                    n.to_bits()
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(bits(values), bits(expected));
+    }
+    #[test]
+    fn radix_sort_observes_budget_without_rewriting_input() {
+        let mut interp = Interpreter::with_builtins();
+        interp.set_loop_budget(300);
+        let mut values = (0..256)
+            .rev()
+            .map(|n| Value::Number(n as f64))
+            .collect::<Vec<_>>();
+        assert!(typed_sort_values(&mut interp, &mut values, &Value::Undefined).is_err());
+        assert!(matches!(values[0], Value::Number(255.0)));
+        assert!(matches!(values[255], Value::Number(0.0)));
+    }
+}
+
 fn typed_sort(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     typed_sort_impl(i, t, a, false)
 }
