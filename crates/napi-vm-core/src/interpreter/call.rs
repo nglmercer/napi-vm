@@ -1411,11 +1411,13 @@ impl Interpreter {
     ) -> Result<bool, VmErr> {
         // Only direct integer-indexed receivers qualify. Proxies and foreign
         // receivers retain OrdinarySet, including their observable traps.
-        if let (Value::TypedArray(view), Value::Number(index)) = (target, property)
+        if let Value::TypedArray(view) = target
             && crate::interpreter::strict_equals(target, receiver)
+            && let Some(index) = super::resolve::fast_typed_array_index(property)
         {
-            if view.buffer.is_immutable() { return Ok(false); }
-            let index = if *index == 0. { 0. } else { *index };
+            if view.buffer.is_immutable() {
+                return Ok(false);
+            }
             crate::builtins::set_integer_index_in(self, view, index, &value)?;
             return Ok(true);
         }
