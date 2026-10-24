@@ -1882,7 +1882,22 @@ fn object_get_own_descriptors(
 /// escapes to guest code; internal operations keep prototype-free records.
 pub(crate) fn from_property_descriptor(descriptor: Value) -> Value {
     match descriptor {
-        Value::Object { ref props } => Value::object(props.borrow().clone()),
+        Value::Object { ref props } => {
+            let fields = props.borrow();
+            Value::object(
+                [
+                    "value",
+                    "writable",
+                    "get",
+                    "set",
+                    "enumerable",
+                    "configurable",
+                ]
+                .into_iter()
+                .filter_map(|name| fields.iter().find(|(key, _)| key == name).cloned())
+                .collect(),
+            )
+        }
         other => other,
     }
 }

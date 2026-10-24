@@ -1197,6 +1197,9 @@ fn instant_from_nanoseconds(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Res
 }
 fn instant_from_milliseconds(i: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let n = i.ecmascript_to_number(&arg(&a, 0))?;
+    instant_from_epoch_milliseconds(i, n)
+}
+pub(super) fn instant_from_epoch_milliseconds(i: &mut Interpreter, n: f64) -> Result<Value, VmErr> {
     if !n.is_finite() || n.trunc() != n || n.abs() > 8.64e15 {
         return vm_err("RangeError: invalid epoch milliseconds");
     }
