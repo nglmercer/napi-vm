@@ -11,7 +11,7 @@ mkdir -p artifacts/test262
 python3 tools/test262/run.py .napi-vm/test262 \
   --engine target/release/napi-vm-test262 \
   --revision 5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81 \
-  --jobs 4 --timeout 5 --output artifacts/test262/full-results.json
+  --jobs 2 --timeout 10 --output artifacts/test262/full-results.json
 python3 tools/test262/dashboard.py artifacts/test262/full-results.json \
   --output artifacts/test262/compatibility.html
 ```

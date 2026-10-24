@@ -121,11 +121,48 @@ impl BigInt {
     }
 
     pub fn to_f64(&self) -> f64 {
-        let mut value = 0.0f64;
-        for limb in self.limbs.iter().rev() {
-            value = value * 4_294_967_296.0 + *limb as f64;
+        let bits = self.bit_length();
+        let negative = if self.negative { 1_u64 << 63 } else { 0 };
+        if bits == 0 {
+            return 0.0;
         }
-        if self.negative { -value } else { value }
+        if bits <= 53 {
+            let value =
+                self.limbs[0] as u64 | (self.limbs.get(1).copied().unwrap_or(0) as u64) << 32;
+            return if self.negative {
+                -(value as f64)
+            } else {
+                value as f64
+            };
+        }
+        if bits > 1024 {
+            return f64::from_bits(negative | (0x7ff_u64 << 52));
+        }
+        // Keep one binary64 significand and round once, ties to even. Repeated
+        // limb accumulation can discard a sticky bit before the final rounding.
+        let shift = bits - 53;
+        let bit = |index: usize| (self.limbs[index / 32] >> (index % 32)) & 1;
+        let mut significand = 0_u64;
+        for index in (shift..bits).rev() {
+            significand = (significand << 1) | bit(index) as u64;
+        }
+        let guard = bit(shift - 1) != 0;
+        let sticky = self.limbs[..(shift - 1) / 32].iter().any(|word| *word != 0)
+            || self.limbs[(shift - 1) / 32] & ((1_u32 << ((shift - 1) % 32)) - 1) != 0;
+        if guard && (sticky || significand & 1 != 0) {
+            significand += 1;
+        }
+        let mut exponent = bits - 1;
+        if significand == 1_u64 << 53 {
+            significand >>= 1;
+            exponent += 1;
+        }
+        if exponent > 1023 {
+            return f64::from_bits(negative | (0x7ff_u64 << 52));
+        }
+        f64::from_bits(
+            negative | ((exponent as u64 + 1023) << 52) | (significand & ((1_u64 << 52) - 1)),
+        )
     }
 
     /// Convert an `f64` that is an exact integer. Fractional or non-finite
@@ -716,5 +753,40 @@ mod tests {
             "18446744073709551616"
         );
         assert_eq!(big("3").pow(&big("0")).unwrap().to_decimal(), "1");
+    }
+}
+
+#[cfg(test)]
+mod binary64_rounding_tests {
+    use super::BigInt;
+    #[test]
+    fn integer_casts_round_once_and_symmetrically() {
+        let mut value = u128::MAX;
+        for _ in 0..10000 {
+            let words = [value as u64, (value >> 64) as u64];
+            assert_eq!(BigInt::from_words(false, &words).to_f64(), value as f64);
+            assert_eq!(BigInt::from_words(true, &words).to_f64(), -(value as f64));
+            value = value
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+        }
+    }
+    #[test]
+    fn sticky_bits_and_overflow_boundaries_round_correctly() {
+        let mut words = vec![0_u64; 16];
+        words[15] = u64::MAX << 11;
+        assert_eq!(BigInt::from_words(false, &words).to_f64(), f64::MAX);
+        words[15] |= 1 << 10;
+        assert_eq!(BigInt::from_words(false, &words).to_f64(), f64::INFINITY);
+        words[15] -= 1;
+        assert_eq!(BigInt::from_words(false, &words).to_f64(), f64::MAX);
+        let mut words = vec![0_u64; 4];
+        words[3] = (1 << 63) | (1 << 10);
+        assert_eq!(BigInt::from_words(false, &words).to_f64(), 2_f64.powi(255));
+        words[0] = 1;
+        assert_eq!(
+            BigInt::from_words(false, &words).to_f64(),
+            f64::from_bits(2_f64.powi(255).to_bits() + 1)
+        );
     }
 }

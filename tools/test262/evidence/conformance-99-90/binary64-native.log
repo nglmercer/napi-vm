@@ -1,0 +1,10 @@
+   Compiling napi-vm-core v0.1.5 (/workspace/scratch/2e6f496376db/napi-vm/crates/napi-vm-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 26.62s
+     Running unittests src/lib.rs (target/debug/deps/napi_vm_core-20a5a1f7bde943a4)
+
+running 2 tests
+test bigint::binary64_rounding_tests::sticky_bits_and_overflow_boundaries_round_correctly ... ok
+test bigint::binary64_rounding_tests::integer_casts_round_once_and_symmetrically ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 369 filtered out; finished in 0.02s
+

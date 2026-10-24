@@ -658,6 +658,19 @@ fn render(i: &mut Interpreter, this: Value, args: Vec<Value>, parts: bool) -> Re
 fn format(i: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
     render(i, this, args, false)
 }
+pub(crate) fn temporal_to_locale(
+    i: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let constructor = i
+        .persistent_global
+        .borrow()
+        .intrinsic("Intl.DurationFormat")
+        .unwrap();
+    let formatter = i.reflect_constructor(&constructor, args, constructor.clone())?;
+    format(i, formatter, vec![this])
+}
 fn format_to_parts(i: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
     render(i, this, args, true)
 }

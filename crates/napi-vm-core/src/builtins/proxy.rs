@@ -107,12 +107,11 @@ impl Interpreter {
             let result = self.call_this(
                 &trap,
                 handler,
-                vec![target.clone(), key.clone(), {
-                    let Value::Object { props } = descriptor else {
-                        unreachable!("normalized descriptor");
-                    };
-                    Value::object(props.borrow().clone())
-                }],
+                vec![
+                    target.clone(),
+                    key.clone(),
+                    super::object::from_property_descriptor(descriptor.clone()),
+                ],
             )?;
             if !result.is_truthy() {
                 return Ok(false);

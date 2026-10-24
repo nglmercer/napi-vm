@@ -35,6 +35,7 @@ pub(crate) struct Slots {
     calendar: String,
     numbering: String,
     hour_cycle: Option<String>,
+    formatter_hour_cycle: String,
     hour12: Option<bool>,
     time_zone: String,
     weekday: Option<String>,
@@ -991,22 +992,12 @@ fn resolve_moment(i: &mut Interpreter, s: &Slots, value: Value) -> Result<Moment
                 if !s.defaults {
                     ensure_temporal_compatible(s, TemporalClass::Date)?;
                 }
-                let iso = date
-                    .to_plain_date_time(None)
-                    .map_err(|e| VmErr::Msg(e.to_string()))?;
-                return Ok(Moment {
-                    kind: kind_of(date.calendar().identifier()),
-                    stamp: stamp_of(iso.iso_year(), iso.iso_month(), iso.iso_day()),
-                    year: iso.iso_year(),
-                    month: iso.iso_month(),
-                    day: iso.iso_day(),
-                    hour: 0,
-                    minute: 0,
-                    second: 0,
-                    ms: 0,
-                    tclass: Some(TemporalClass::Date),
-                    tcalendar: Some(date.calendar().identifier().into()),
-                });
+                return Ok(plain_calendar_moment(
+                    date.epoch_ns_for_utc().as_i128(),
+                    kind_of(date.calendar().identifier()),
+                    TemporalClass::Date,
+                    date.calendar().identifier(),
+                ));
             }
             Temporal::Time(time) => {
                 if !s.defaults {
@@ -1049,49 +1040,23 @@ fn resolve_moment(i: &mut Interpreter, s: &Slots, value: Value) -> Result<Moment
                 if !s.defaults {
                     ensure_temporal_compatible(s, TemporalClass::YearMonth)?;
                 }
-                return Ok(Moment {
-                    kind: kind_of(ym.calendar().identifier()),
-                    stamp: stamp_of(ym.year(), ym.month(), 1),
-                    year: ym.year(),
-                    month: ym.month(),
-                    day: 1,
-                    hour: 0,
-                    minute: 0,
-                    second: 0,
-                    ms: 0,
-                    tclass: Some(TemporalClass::YearMonth),
-                    tcalendar: Some(ym.calendar().identifier().into()),
-                });
+                return Ok(plain_calendar_moment(
+                    ym.epoch_ns_for_utc().as_i128(),
+                    kind_of(ym.calendar().identifier()),
+                    TemporalClass::YearMonth,
+                    ym.calendar().identifier(),
+                ));
             }
             Temporal::MonthDay(md) => {
-                // Month codes look like "M08" (leap months append "L").
-                let code = md.month_code().as_str().to_string();
-                let month: u8 = code
-                    .bytes()
-                    .skip_while(|b| !b.is_ascii_digit())
-                    .take(2)
-                    .collect::<Vec<_>>()
-                    .as_slice()
-                    .try_into()
-                    .ok()
-                    .and_then(|pair: &[u8; 2]| core::str::from_utf8(pair).ok()?.parse().ok())
-                    .unwrap_or(1);
                 if !s.defaults {
                     ensure_temporal_compatible(s, TemporalClass::MonthDay)?;
                 }
-                return Ok(Moment {
-                    kind: kind_of(md.calendar().identifier()),
-                    stamp: stamp_of(1972, month, md.day()),
-                    year: 1972,
-                    month,
-                    day: md.day(),
-                    hour: 0,
-                    minute: 0,
-                    second: 0,
-                    ms: 0,
-                    tclass: Some(TemporalClass::MonthDay),
-                    tcalendar: Some(md.calendar().identifier().into()),
-                });
+                return Ok(plain_calendar_moment(
+                    md.epoch_ns_for_utc().as_i128(),
+                    kind_of(md.calendar().identifier()),
+                    TemporalClass::MonthDay,
+                    md.calendar().identifier(),
+                ));
             }
         }
     }
@@ -1111,6 +1076,31 @@ fn resolve_moment(i: &mut Interpreter, s: &Slots, value: Value) -> Result<Moment
         return Err(time_range());
     }
     epoch_moment(s, ms as i64)
+}
+// Temporal's reference ISO dates can extend beyond Date's clipped range.
+// Convert their exact UTC epoch directly, without applying the formatter zone
+// or constructing an intermediate PlainDateTime at an invalid midnight.
+fn plain_calendar_moment(
+    epoch_ns: i128,
+    kind: AnyCalendarKind,
+    tclass: TemporalClass,
+    calendar: &str,
+) -> Moment {
+    let stamp = epoch_ns.div_euclid(1_000_000_000) as i64;
+    let (year, month, day) = civil_from_days(stamp.div_euclid(86_400));
+    Moment {
+        kind,
+        stamp,
+        year,
+        month: month as u8,
+        day: day as u8,
+        hour: 12,
+        minute: 0,
+        second: 0,
+        ms: 0,
+        tclass: Some(tclass),
+        tcalendar: Some(calendar.into()),
+    }
 }
 fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
     let y = year as i64 - (month <= 2) as i64;
@@ -1176,7 +1166,11 @@ fn build_input(
     let date = iso.to_calendar(AnyCalendar::new(m.kind));
     let time = Time::try_new(m.hour, m.minute, m.second, m.ms as u32 * 1_000_000)
         .map_err(|_| time_range())?;
-    let zone_id = computation_zone(&s.time_zone);
+    let zone_id = if parse_offset_zone(&s.time_zone).is_some_and(|(minutes, _)| minutes == 0) {
+        "Etc/GMT".into()
+    } else {
+        computation_zone(&s.time_zone)
+    };
     let offset = zone_offset(&s.time_zone, m.stamp * 1000).unwrap_or(0);
     let zone = TimeZone::from_iana_id(&zone_id)
         .with_offset(Some(
@@ -1527,11 +1521,12 @@ fn collect_parts(s: &Slots, m: &Moment) -> Result<Vec<(String, String)>, VmErr> 
     };
     for (kind, text) in &mut out {
         // h24 formats through h23: midnight renders as 24.
-        if kind == "hour" && s.hour_cycle.as_deref() == Some("h24") && m.hour == 0 {
+        if kind == "hour" && s.formatter_hour_cycle == "h24" && m.hour == 0 {
             *text = "24".into();
         }
         if let Some((_, width)) = widths.iter().find(|(k, _)| k == kind)
             && let Some(width) = width
+            && (kind != "hour" || *width == "2-digit")
         {
             *text = pad2(text, *width == "2-digit", zero);
         }
@@ -1628,6 +1623,92 @@ pub(crate) enum DateLocaleKind {
     DateOnly,
     TimeOnly,
 }
+pub(crate) fn temporal_to_locale(
+    i: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    use super::super::temporal::Slots as Temporal;
+    let temporal = this
+        .property_cell()
+        .and_then(|p| p.meta.borrow().temporal.clone())
+        .ok_or_else(error)?;
+    let requested = locale_list(i, arg(&args, 0))?;
+    let options = match arg(&args, 1) {
+        Value::Undefined => Value::object_with_proto(vec![], None),
+        value => super::super::object::to_object_receiver(&value)?,
+    };
+    let mut raw = read_raw_options(i, &options)?;
+    if matches!(&temporal, Temporal::Time(_)) && raw.date_style.is_some()
+        || matches!(
+            &temporal,
+            Temporal::Date(_) | Temporal::YearMonth(_) | Temporal::MonthDay(_)
+        ) && raw.time_style.is_some()
+    {
+        return Err(VmErr::Msg(
+            "TypeError: style cannot format this Temporal type".into(),
+        ));
+    }
+    if let Temporal::Zoned(zoned) = &temporal {
+        if raw.time_zone.is_some() {
+            return Err(VmErr::Msg(
+                "TypeError: timeZone option is not allowed for ZonedDateTime".into(),
+            ));
+        }
+        raw.time_zone = Some(
+            zoned
+                .time_zone()
+                .identifier_with_provider(&*temporal_rs::provider::COMPILED_TZ_PROVIDER)
+                .map_err(|e| VmErr::Msg(e.to_string()))?,
+        );
+        let no_fields = raw.weekday.is_none()
+            && raw.year.is_none()
+            && raw.month.is_none()
+            && raw.day.is_none()
+            && raw.day_period.is_none()
+            && raw.hour.is_none()
+            && raw.minute.is_none()
+            && raw.second.is_none()
+            && raw.fractional.is_none();
+        if no_fields
+            && raw.date_style.is_none()
+            && raw.time_style.is_none()
+            && raw.time_zone_name.is_none()
+        {
+            raw.time_zone_name = Some("short".into());
+        }
+    }
+    let s = resolve_parts(&requested, raw, false, false)?;
+    let calendar = match &temporal {
+        Temporal::Date(value) => Some(value.calendar().identifier()),
+        Temporal::DateTime(value) => Some(value.calendar().identifier()),
+        Temporal::YearMonth(value) => Some(value.calendar().identifier()),
+        Temporal::MonthDay(value) => Some(value.calendar().identifier()),
+        Temporal::Zoned(value) => Some(value.calendar().identifier()),
+        _ => None,
+    };
+    if let Some(calendar) = calendar {
+        let iso_allowed = !matches!(&temporal, Temporal::YearMonth(_) | Temporal::MonthDay(_));
+        if canonical_calendar(calendar) != s.calendar && !(iso_allowed && calendar == "iso8601") {
+            return Err(VmErr::Msg(
+                "RangeError: Temporal calendar does not match formatter calendar".into(),
+            ));
+        }
+    }
+    let mut moment = if let Temporal::Zoned(value) = &temporal {
+        let mut moment = epoch_moment(&s, value.epoch_milliseconds())?;
+        moment.tclass = Some(TemporalClass::Instant);
+        moment
+    } else {
+        resolve_moment(i, &s, this)?
+    };
+    // ISO plain values may be rendered in the locale's chosen calendar.
+    moment.kind = s.calendar_kind;
+    Ok(Value::String(
+        join_parts(&collect_parts(&s, &moment)?).into(),
+    ))
+}
+
 pub(crate) fn date_to_locale(
     i: &mut Interpreter,
     this: Value,
@@ -1719,22 +1800,9 @@ fn format_to_parts(i: &mut Interpreter, this: Value, args: Vec<Value>) -> Result
     let moment = resolve_moment(i, &s, arg(&args, 0))?;
     parts_array(&collect_parts(&s, &moment)?, None)
 }
-/// Calendar-field ranks for range collapsing: larger ranks collapse first.
-fn field_ranks(m: &Moment) -> [i64; 6] {
-    [
-        m.year as i64,
-        m.month as i64,
-        m.day as i64,
-        m.hour as i64,
-        m.minute as i64,
-        m.second as i64,
-    ]
-}
 fn collapse_range(
     start: &[(String, String)],
     end: &[(String, String)],
-    start_fields: [i64; 6],
-    end_fields: [i64; 6],
 ) -> Vec<(String, String, &'static str)> {
     // Identical sides collapse to a single shared date.
     if start == end {
@@ -1767,9 +1835,6 @@ fn collapse_range(
     // Largest differing field rank drives the per-side window: fields from
     // that rank down to the smallest shown field render on both sides, while
     // larger (equal) fields stay shared.
-    let diff_rank = [0, 1, 2, 3, 4, 5]
-        .into_iter()
-        .find(|rank| start_fields[*rank] != end_fields[*rank]);
     let rank_of = |kind: &str| match kind {
         "year" | "era" | "relatedYear" | "yearName" => Some(0),
         "month" => Some(1),
@@ -1779,6 +1844,17 @@ fn collapse_range(
         "second" | "fractionalSecond" => Some(5),
         _ => None,
     };
+    // Compare the fields actually displayed, including day periods and
+    // fractional seconds, rather than raw ISO fields hidden by the pattern.
+    let diff_rank = start
+        .iter()
+        .zip(end)
+        .filter_map(
+            |((kind, a), (_, b))| {
+                if a != b { rank_of(kind) } else { None }
+            },
+        )
+        .min();
     let max_rank = start.iter().filter_map(|(kind, _)| rank_of(kind)).max();
     let (Some(diff_rank), Some(max_rank)) = (diff_rank, max_rank) else {
         return start
@@ -1880,15 +1956,10 @@ fn format_range(i: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Va
     let end_parts = collect_parts(&s, &end)?;
     Ok(Value::String(
         join_parts(
-            &collapse_range(
-                &start_parts,
-                &end_parts,
-                field_ranks(&start),
-                field_ranks(&end),
-            )
-            .into_iter()
-            .map(|(kind, text, _)| (kind, text))
-            .collect::<Vec<_>>(),
+            &collapse_range(&start_parts, &end_parts)
+                .into_iter()
+                .map(|(kind, text, _)| (kind, text))
+                .collect::<Vec<_>>(),
         )
         .into(),
     ))
@@ -1908,12 +1979,7 @@ fn format_range_to_parts(
     check_range_pair(&start, &end, "formatRangeToParts")?;
     let start_parts = collect_parts(&s, &start)?;
     let end_parts = collect_parts(&s, &end)?;
-    let collapsed = collapse_range(
-        &start_parts,
-        &end_parts,
-        field_ranks(&start),
-        field_ranks(&end),
-    );
+    let collapsed = collapse_range(&start_parts, &end_parts);
     let mut items = Vec::new();
     for (kind, text, source) in collapsed {
         items.push(Value::object_with_proto(
@@ -2045,7 +2111,17 @@ fn finish(mut p: Parts) -> Result<Slots, VmErr> {
     } else {
         None
     };
-    builder.zone_style = p.time_zone_name.as_deref().map(zone_style);
+    builder.zone_style = p.time_zone_name.as_deref().map(|name| {
+        if parse_offset_zone(&p.time_zone).is_some_and(|(minutes, _)| minutes != 0) {
+            if name.starts_with("long") {
+                ZoneStyle::LocalizedOffsetLong
+            } else {
+                ZoneStyle::LocalizedOffsetShort
+            }
+        } else {
+            zone_style(name)
+        }
+    });
     // ICU cannot pair month-only or year-only dates with time: pad the
     // fieldset up to a buildable combo and drop the padding afterwards.
     let (omit_day, omit_month, omit_year) = if builder.time_precision.is_some() {
@@ -2100,6 +2176,7 @@ fn finish(mut p: Parts) -> Result<Slots, VmErr> {
         calendar: p.calendar,
         numbering: p.numbering,
         hour_cycle,
+        formatter_hour_cycle: p.hour_cycle,
         hour12,
         time_zone: p.time_zone,
         weekday: p.weekday,

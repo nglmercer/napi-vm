@@ -125,7 +125,12 @@ unary_math!(math_asin, asin);
 unary_math!(math_atan, atan);
 unary_math!(math_acosh, acosh);
 unary_math!(math_asinh, asinh);
-unary_math!(math_atanh, atanh);
+fn math_atanh(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let x = math_arg(interp, &args, 0)?;
+    // Evaluate the positive magnitude to avoid cancellation near -1, then
+    // restore odd symmetry (including negative zero).
+    Ok(Value::Number(x.abs().atanh().copysign(x)))
+}
 unary_math!(math_cosh, cosh);
 unary_math!(math_sinh, sinh);
 unary_math!(math_tanh, tanh);

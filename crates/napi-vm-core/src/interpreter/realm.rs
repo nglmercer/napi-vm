@@ -178,6 +178,18 @@ impl Interpreter {
             .map(Rc::new))
     }
 
+    /// Create a callable host object with legacy HTMLDDA semantics. It is falsy,
+    /// has typeof "undefined", and loosely equals null/undefined while retaining
+    /// its object identity. Hosts explicitly opt in; no global is installed.
+    pub fn create_html_dda(&self) -> Value {
+        fn call(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+            Ok(Value::Null)
+        }
+        let value = self.native_function_in_realm("IsHTMLDDA", call);
+        value.property_cell().unwrap().meta.borrow_mut().html_dda = true;
+        value
+    }
+
     /// Create a host function retaining this realm's identity and intrinsics.
     pub fn native_function_in_realm(
         &self,

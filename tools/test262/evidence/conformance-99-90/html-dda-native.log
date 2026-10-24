@@ -1,0 +1,11 @@
+   Compiling napi-vm-core v0.1.5 (/workspace/scratch/2e6f496376db/napi-vm/crates/napi-vm-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 17.91s
+     Running tests/html_dda.rs (target/debug/deps/html_dda-028819d483175256)
+
+running 3 tests
+test html_dda_brand_is_neither_inherited_nor_forwarded_by_a_proxy ... ok
+test html_dda_remains_an_object_for_properties_and_iteration_protocols ... ok
+test html_dda_only_changes_boolean_typeof_and_loose_null_comparisons ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+

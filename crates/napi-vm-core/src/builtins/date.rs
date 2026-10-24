@@ -49,6 +49,7 @@ const DATE_PROTOTYPE_METHODS: &[&str] = &[
     "setUTCMilliseconds",
     "getYear",
     "setYear",
+    "toTemporalInstant",
     "toISOString",
     "toJSON",
     "toString",
@@ -262,6 +263,7 @@ pub fn date_member(key: &str) -> Option<Value> {
         "setMilliseconds" | "setUTCMilliseconds" => date_set_milliseconds,
         "getYear" => date_get_year,
         "setYear" => date_set_year,
+        "toTemporalInstant" => date_to_temporal_instant,
         "toISOString" => date_to_iso,
         "toJSON" => date_to_json,
         // `toGMTString` is installed as an alias below (same function object
@@ -377,6 +379,15 @@ component!(date_get_day, 7, |v| v);
 
 fn date_get_time(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     Ok(Value::Number(epoch(&this)?))
+}
+
+fn date_to_temporal_instant(
+    interp: &mut Interpreter,
+    this: Value,
+    _: Vec<Value>,
+) -> Result<Value, VmErr> {
+    // Read the internal Date slot without invoking user conversion hooks.
+    super::temporal::instant_from_epoch_milliseconds(interp, epoch(&this)?)
 }
 
 fn date_zero(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {

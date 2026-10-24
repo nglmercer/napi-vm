@@ -56,6 +56,27 @@ fn duration(value: &Value) -> Result<Duration, VmErr> {
         _ => vm_err("TypeError: Temporal.Duration receiver required"),
     }
 }
+macro_rules! locale_method {
+    ($($name:ident => $brand:ident),+ $(,)?) => {$(
+        fn $name(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+            $brand(&t)?;
+            super::intl::datetime::temporal_to_locale(i, t, a)
+        }
+    )+};
+}
+locale_method!(
+    time_locale => time,
+    date_locale => date,
+    datetime_locale => datetime,
+    yearmonth_locale => yearmonth,
+    monthday_locale => monthday,
+    instant_locale => instant,
+    zoned_locale => zoned,
+);
+fn duration_locale(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    duration(&t)?;
+    super::intl::duration::temporal_to_locale(i, t, a)
+}
 fn method(target: &Value, name: &str, length: usize, f: NativeFn, fp: &Option<Value>) {
     target
         .set_prop(name.into(), native_method(name, length, f, fp.clone()))
@@ -207,7 +228,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("equals", 1, time_equals),
                 ("toString", 0, time_string),
                 ("toJSON", 0, time_json),
-                ("toLocaleString", 0, time_json),
+                ("toLocaleString", 0, time_locale),
                 ("valueOf", 0, value_of),
             ]
         } else if name == "PlainDate" {
@@ -225,7 +246,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("equals", 1, date_equals),
                 ("toString", 0, date_string),
                 ("toJSON", 0, date_json),
-                ("toLocaleString", 0, date_json),
+                ("toLocaleString", 0, date_locale),
                 ("valueOf", 0, value_of),
             ]
         } else if name == "PlainYearMonth" {
@@ -239,7 +260,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("equals", 1, yearmonth_equals),
                 ("toString", 0, yearmonth_string),
                 ("toJSON", 0, yearmonth_json),
-                ("toLocaleString", 0, yearmonth_json),
+                ("toLocaleString", 0, yearmonth_locale),
                 ("valueOf", 0, value_of),
             ]
         } else if name == "PlainMonthDay" {
@@ -248,7 +269,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("equals", 1, monthday_equals),
                 ("toString", 0, monthday_string),
                 ("toJSON", 0, monthday_json),
-                ("toLocaleString", 0, monthday_json),
+                ("toLocaleString", 0, monthday_locale),
                 ("toPlainDate", 1, monthday_to_date),
                 ("valueOf", 0, value_of),
             ]
@@ -263,7 +284,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("equals", 1, datetime_equals),
                 ("toString", 0, datetime_string),
                 ("toJSON", 0, datetime_json),
-                ("toLocaleString", 0, datetime_json),
+                ("toLocaleString", 0, datetime_locale),
                 ("valueOf", 0, value_of),
                 ("round", 1, datetime_round),
                 ("withPlainTime", 0, datetime_with_time),
@@ -282,7 +303,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("equals", 1, zoned_equals),
                 ("toString", 0, zoned_string),
                 ("toJSON", 0, zoned_json),
-                ("toLocaleString", 0, zoned_json),
+                ("toLocaleString", 0, zoned_locale),
                 ("valueOf", 0, value_of),
                 ("round", 1, zoned_round),
                 ("withPlainTime", 0, zoned_with_time),
@@ -304,7 +325,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("equals", 1, instant_equals),
                 ("toString", 0, instant_string),
                 ("toJSON", 0, instant_json),
-                ("toLocaleString", 0, instant_json),
+                ("toLocaleString", 0, instant_locale),
                 ("valueOf", 0, value_of),
                 ("toZonedDateTimeISO", 1, instant_to_zoned),
             ]
@@ -319,7 +340,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("abs", 0, duration_abs),
                 ("toString", 0, duration_string),
                 ("toJSON", 0, duration_json),
-                ("toLocaleString", 0, duration_json),
+                ("toLocaleString", 0, duration_locale),
                 ("valueOf", 0, value_of),
             ]
         };
@@ -993,21 +1014,15 @@ fn relative_to(i: &mut Interpreter, opts: &Value) -> Result<Option<RelativeTo>, 
     if !crate::interpreter::call::is_js_object(&value) {
         return vm_err("TypeError: relativeTo must be an object or string");
     }
-    let cal = i.get_prop_value_str(&value, "calendar")?;
-    let calendar = if matches!(cal, Value::Undefined) {
-        Calendar::ISO
-    } else {
-        let Value::String(text) = &cal else {
-            return vm_err("TypeError: calendar must be a string");
-        };
-        Calendar::try_from_utf8(text.to_string().as_bytes()).map_err(err)?
-    };
+    let calendar = calendar(i, &value)?;
     let mut date = PartialDate::new().with_calendar(calendar.clone());
     let mut time = PartialTime::new();
     let mut offset = None;
     let mut timezone = None;
     for key in [
         "day",
+        "era",
+        "eraYear",
         "hour",
         "microsecond",
         "millisecond",
@@ -1020,15 +1035,18 @@ fn relative_to(i: &mut Interpreter, opts: &Value) -> Result<Option<RelativeTo>, 
         "timeZone",
         "year",
     ] {
+        if matches!(key, "era" | "eraYear")
+            && matches!(calendar.identifier(), "iso8601" | "chinese" | "dangi")
+        {
+            continue;
+        }
         let field = i.get_prop_value_str(&value, key)?;
         if matches!(field, Value::Undefined) {
             continue;
         }
         match key {
-            "monthCode" => {
-                let code = i.ecmascript_to_string(&field)?;
-                date.calendar_fields.month_code =
-                    Some(MonthCode::try_from_utf8(code.to_string().as_bytes()).map_err(err)?);
+            "day" | "era" | "eraYear" | "month" | "monthCode" | "year" => {
+                read_date_field(i, &mut date.calendar_fields, key, &field)?;
             }
             "offset" => {
                 let primitive = i.coerce_object_to_primitive(&field, "string")?;
@@ -1045,24 +1063,6 @@ fn relative_to(i: &mut Interpreter, opts: &Value) -> Result<Option<RelativeTo>, 
             }
             _ => {
                 let n = integer(i, &field, false)?;
-                if key == "year" {
-                    if n < i32::MIN as f64 || n > i32::MAX as f64 {
-                        return vm_err("RangeError: year out of range");
-                    };
-                    date.calendar_fields.year = Some(n as i32);
-                    continue;
-                }
-                if matches!(key, "month" | "day") {
-                    if n <= 0. {
-                        return vm_err("RangeError: month and day must be positive");
-                    };
-                    if key == "month" {
-                        date.calendar_fields.month = Some(n.min(255.) as u8)
-                    } else {
-                        date.calendar_fields.day = Some(n.min(255.) as u8)
-                    };
-                    continue;
-                }
                 let n = n.clamp(0., 65535.) as u16;
                 match key {
                     "hour" => time.hour = Some(n.min(255) as u8),
@@ -1197,6 +1197,9 @@ fn instant_from_nanoseconds(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Res
 }
 fn instant_from_milliseconds(i: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let n = i.ecmascript_to_number(&arg(&a, 0))?;
+    instant_from_epoch_milliseconds(i, n)
+}
+pub(super) fn instant_from_epoch_milliseconds(i: &mut Interpreter, n: f64) -> Result<Value, VmErr> {
     if !n.is_finite() || n.trunc() != n || n.abs() > 8.64e15 {
         return vm_err("RangeError: invalid epoch milliseconds");
     }
