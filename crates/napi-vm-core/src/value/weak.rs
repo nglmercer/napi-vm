@@ -124,7 +124,7 @@ pub(crate) struct FinalizationRecord {
 pub(crate) enum WeakStorage {
     #[default]
     None,
-    Map(Vec<(WeakTarget, Value)>),
+    Map(std::collections::HashMap<usize, (WeakTarget, Value)>),
     Ref(Option<WeakTarget>),
     Registry {
         callback: Value,
@@ -144,7 +144,7 @@ impl WeakStorage {
     }
     pub(crate) fn drain_values(&mut self, out: &mut Vec<Value>) {
         match std::mem::take(self) {
-            Self::Map(mut entries) => out.extend(entries.drain(..).map(|(_, value)| value)),
+            Self::Map(mut entries) => out.extend(entries.drain().map(|(_, (_, value))| value)),
             Self::Registry {
                 callback,
                 mut records,

@@ -288,6 +288,7 @@ struct Marker {
     opaque: bool,
     borrowed: bool,
     weak_cells: Vec<Rc<ObjectCell>>,
+    newly_marked: Vec<HeapId>,
 }
 
 impl Marker {
@@ -299,6 +300,16 @@ impl Marker {
             opaque: false,
             borrowed: false,
             weak_cells: Vec::new(),
+            newly_marked: Vec::new(),
+        }
+    }
+
+    fn mark(&mut self, id: HeapId) -> bool {
+        if self.marked.insert(id) {
+            self.newly_marked.push(id);
+            true
+        } else {
+            false
         }
     }
 
@@ -335,14 +346,14 @@ impl Marker {
         }
     }
     fn mark_env(&mut self, env: &Env) {
-        if self.marked.insert(id_of(env)) {
+        if self.mark(id_of(env)) {
             self.work.push(MarkItem::Env(env.clone()));
         }
     }
 
     fn mark_value(&mut self, value: &Value) {
         if let Some(properties) = value.exotic_properties()
-            && self.marked.insert(id_of(&properties))
+            && self.mark(id_of(&properties))
         {
             self.work.push(MarkItem::Object(properties));
         }
@@ -351,43 +362,43 @@ impl Marker {
             Value::HostPending { id } => {
                 self.host_calls.insert(*id);
             }
-            Value::Object { props } if self.marked.insert(id_of(props)) => {
+            Value::Object { props } if self.mark(id_of(props)) => {
                 self.work.push(MarkItem::Object(props.clone()));
             }
-            Value::Array(cell) if self.marked.insert(id_of(cell)) => {
+            Value::Array(cell) if self.mark(id_of(cell)) => {
                 self.work.push(MarkItem::Array(cell.clone()));
             }
-            Value::Function(fd) if self.marked.insert(id_of(fd)) => {
+            Value::Function(fd) if self.mark(id_of(fd)) => {
                 self.work.push(MarkItem::Function(fd.clone()));
             }
-            Value::HostFunction { properties, .. } if self.marked.insert(id_of(properties)) => {
+            Value::HostFunction { properties, .. } if self.mark(id_of(properties)) => {
                 self.work.push(MarkItem::Object(properties.clone()));
             }
             // Boxed, so identity-less: trace through to the shared cells.
             Value::Class(cd) => self.mark_class(cd),
-            Value::Promise(inner) if self.marked.insert(id_of(inner)) => {
+            Value::Promise(inner) if self.mark(id_of(inner)) => {
                 self.work.push(MarkItem::Promise(inner.clone()));
             }
-            Value::Generator { inner } if self.marked.insert(id_of(inner)) => {
+            Value::Generator { inner } if self.mark(id_of(inner)) => {
                 self.work.push(MarkItem::Generator(inner.clone()));
             }
-            Value::Proxy(data) if self.marked.insert(id_of(data)) => {
+            Value::Proxy(data) if self.mark(id_of(data)) => {
                 self.work.push(MarkItem::Proxy(data.clone()));
             }
-            Value::Binding(cell) if self.marked.insert(id_of(cell)) => {
+            Value::Binding(cell) if self.mark(id_of(cell)) => {
                 self.work.push(MarkItem::Binding(cell.clone()));
             }
             #[cfg(stackful_coroutines)]
-            Value::AsyncTask(inner) if self.marked.insert(id_of(inner)) => {
+            Value::AsyncTask(inner) if self.mark(id_of(inner)) => {
                 self.work.push(MarkItem::AsyncTask(inner.clone()));
             }
             Value::TypedArray(view) | Value::DataView(view) => {
-                self.marked.insert(id_of(view));
+                self.mark(id_of(view));
                 self.mark_value(&view.buffer.to_value());
             }
             _ => {
                 if let Some(id) = value.weak_identity() {
-                    self.marked.insert(id);
+                    self.mark(id);
                 }
             }
         }
@@ -396,30 +407,39 @@ impl Marker {
     fn mark_class(&mut self, cd: &ClassData) {
         self.mark_value(&cd.constructor);
         self.mark_value(&cd.prototype);
-        if self.marked.insert(id_of(&cd.statics)) {
+        if self.mark(id_of(&cd.statics)) {
             self.work.push(MarkItem::Object(cd.statics.clone()));
         }
     }
 
     fn drain_ephemerons(&mut self) {
+        // Index each ephemeron once and wake it when its key becomes marked.
+        // Repeatedly scanning every entry is quadratic for long WeakMap chains.
+        let mut waiting: HashMap<HeapId, Vec<Value>> = HashMap::new();
+        let mut indexed_cells = 0;
         loop {
             self.drain();
-            let before = self.marked.len();
-            let mut values = Vec::new();
-            for cell in &self.weak_cells {
+            while indexed_cells < self.weak_cells.len() {
+                let cell = self.weak_cells[indexed_cells].clone();
+                indexed_cells += 1;
                 if let crate::value::weak::WeakStorage::Map(entries) = &*cell.weak.borrow() {
-                    values.extend(
-                        entries
-                            .iter()
-                            .filter(|(key, _)| self.marked.contains(&key.id()))
-                            .map(|(_, value)| value.clone()),
-                    );
+                    for (key, value) in entries.values() {
+                        if self.marked.contains(&key.id()) {
+                            self.mark_value(value);
+                        } else {
+                            waiting.entry(key.id()).or_default().push(value.clone());
+                        }
+                    }
                 }
             }
-            for value in values {
-                self.mark_value(&value);
+            while let Some(id) = self.newly_marked.pop() {
+                if let Some(values) = waiting.remove(&id) {
+                    for value in values {
+                        self.mark_value(&value);
+                    }
+                }
             }
-            if self.marked.len() == before {
+            if self.work.is_empty() {
                 break;
             }
         }
@@ -430,7 +450,7 @@ impl Marker {
             let mut storage = cell.weak.borrow_mut();
             match &mut *storage {
                 WeakStorage::Map(entries) => {
-                    entries.retain(|(key, _)| self.marked.contains(&key.id()))
+                    entries.retain(|_, (key, _)| self.marked.contains(&key.id()))
                 }
                 WeakStorage::Ref(target) => {
                     if target
@@ -525,7 +545,7 @@ impl Marker {
                     }
                 }
                 MarkItem::Function(fd) => {
-                    if self.marked.insert(id_of(&fd.properties)) {
+                    if self.mark(id_of(&fd.properties)) {
                         self.work.push(MarkItem::Object(fd.properties.clone()));
                     }
                     if let Some(closure) = &fd.closure {
@@ -553,7 +573,7 @@ impl Marker {
                         }
                         self.mark_value(&reaction.on_fulfilled);
                         self.mark_value(&reaction.on_rejected);
-                        if self.marked.insert(id_of(&reaction.derived)) {
+                        if self.mark(id_of(&reaction.derived)) {
                             self.work.push(MarkItem::Promise(reaction.derived.clone()));
                         }
                     }
