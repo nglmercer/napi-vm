@@ -923,6 +923,60 @@ fn array_unshift(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result
     Ok(Value::Number(result_length))
 }
 
+// Guard after argument coercion, which can mutate the receiver or prototypes.
+// With no indexed descriptors anywhere in the chain, these writes cannot run
+// guest code, so the guard remains valid throughout the fill.
+fn can_fill_directly(interp: &Interpreter, array: &Value, end: f64) -> bool {
+    let Value::Array(cell) = array else {
+        return false;
+    };
+    let meta = cell.meta.borrow();
+    if end > cell.array_length() as f64
+        || meta.non_extensible
+        || meta.has_accessors
+        || meta
+            .attrs
+            .iter()
+            .any(|(key, _)| crate::value::array_index(key).is_some())
+    {
+        return false;
+    }
+    drop(meta);
+    let mut prototype = interp.prototype_of(array);
+    for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+        let Some(current) = prototype else {
+            return true;
+        };
+        let clear = match current.as_ref() {
+            Value::Object { props } => {
+                let meta = props.meta.borrow();
+                !meta.module_namespace
+                    && meta.boxed_primitive.is_none()
+                    && !meta.has_accessors
+                    && !props
+                        .borrow()
+                        .iter()
+                        .any(|(key, _)| crate::value::array_index(key).is_some())
+            }
+            Value::Array(cell) => {
+                cell.array_length() == 0
+                    && !cell.meta.borrow().has_accessors
+                    && !cell
+                        .named
+                        .borrow()
+                        .iter()
+                        .any(|(key, _)| crate::value::array_index(key).is_some())
+            }
+            _ => false,
+        };
+        if !clear {
+            return false;
+        }
+        prototype = interp.prototype_of(current.as_ref());
+    }
+    false
+}
+
 /// `fill(value, start, end)`.
 fn array_fill(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let this = super::object::to_object_receiver(&this)?;
@@ -936,6 +990,17 @@ fn array_fill(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Va
         Some(value) => relative_number_index(interp.ecmascript_to_number(value)?, length),
     };
     let value = a.first().cloned().unwrap_or(Value::Undefined);
+    if can_fill_directly(interp, &this, end) {
+        let Value::Array(array) = &this else {
+            unreachable!()
+        };
+        while index < end {
+            interp.consume_loop()?;
+            array.store_index(index as usize, value.clone());
+            index += 1.0;
+        }
+        return Ok(this);
+    }
     while index < end {
         interp.consume_loop()?;
         interp.set_member_str_or_throw(

@@ -695,9 +695,10 @@ impl ArrayCell {
         if let Some(slot) = indices.get_mut(index) {
             *slot = present;
         }
-        if indices.iter().all(|present| *present) {
-            *presence = None;
-        }
+        // Keep an existing bitmap even when the last hole is filled. Scanning
+        // the entire array after every indexed write makes filling a holey
+        // array quadratic. Bulk presence operations can normalize it later;
+        // an all-true bitmap has the same semantics as no bitmap.
         drop(presence);
         if !present {
             self.meta.borrow_mut().forget(&index.to_string());

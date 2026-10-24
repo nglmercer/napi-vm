@@ -1895,6 +1895,51 @@ impl Interpreter {
 
     pub(crate) fn drain_iterator(&mut self, iterator: &Value) -> Result<Vec<Value>, VmErr> {
         let next_fn = self.member(iterator, "next")?;
+        // A dense Array iterator with the intrinsic next method cannot invoke
+        // guest code while reading its elements. Avoid allocating a temporary
+        // result object and entering a callable realm for every element. Keep
+        // cursor updates and the final done step, including their loop budget.
+        let native = match &next_fn {
+            Value::Function(function) if function.bound.is_none() => function.native,
+            Value::NativeFunction { callable, .. } => Some(*callable),
+            _ => None,
+        };
+        if native.is_some_and(|native| {
+            std::ptr::fn_addr_eq(
+                native,
+                super::resolve::array_iter_next as crate::builtins::NativeFn,
+            )
+        }) && let Value::Object { props } = iterator
+            && !props.meta.borrow().has_accessors
+            && let Some(Value::Array(array)) = props.own_value("__items__").as_ref()
+            && !array.meta.borrow().has_accessors
+            && array.array_length() <= crate::value::MAX_ARRAY_LEN
+            && array.array_length() == array.borrow().len()
+            && array.presence_snapshot().iter().all(|present| *present)
+            && matches!(props.own_value("__kind__"), Some(Value::String(ref kind)) if kind == "values")
+        {
+            let mut cursor = match props.own_value("__cursor__") {
+                Some(Value::Number(cursor)) => cursor as usize,
+                _ => 0,
+            };
+            let length = array.array_length();
+            let mut out = Vec::with_capacity(length.saturating_sub(cursor));
+            loop {
+                self.consume_loop()?;
+                if cursor >= length {
+                    iterator.set_prop("__items__".into(), Value::Undefined)?;
+                    return Ok(out);
+                }
+                iterator.set_prop("__cursor__".into(), Value::Number((cursor + 1) as f64))?;
+                out.push(
+                    array
+                        .index_value(cursor)
+                        .unwrap_or(Value::Undefined)
+                        .deref_binding(),
+                );
+                cursor += 1;
+            }
+        }
         let mut out = Vec::new();
         loop {
             self.consume_loop()?;
