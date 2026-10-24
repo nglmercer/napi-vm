@@ -8,6 +8,20 @@ use crate::lang::CompletionKind;
 use crate::value::{BoxedPrimitive, FunctionData, Value};
 use std::rc::Rc;
 
+// Bytecode computed accesses usually arrive with an already canonical String
+// key. Recognize array-index spellings without a float parse/format roundtrip;
+// all other strings (including "-0", "01" and ordinary names) keep the general
+// integer-indexed/property-key semantics.
+pub(super) fn fast_typed_array_index(key: &Value) -> Option<f64> {
+    match key {
+        Value::Number(index) => Some(if *index == 0. { 0. } else { *index }),
+        Value::String(text) if text.units().first().is_some_and(|c| (48..=57).contains(c)) => {
+            crate::value::array_index(text.as_str()).map(|index| index as f64)
+        }
+        _ => None,
+    }
+}
+
 impl Interpreter {
     /// ToBigInt is shared by typed elements and atomic operations. Unlike
     /// BigInt(number), it rejects Number primitives after observable coercion.
@@ -815,6 +829,27 @@ impl Interpreter {
         p: &Value,
         receiver: &Value,
     ) -> Result<Value, VmErr> {
+        // A Number key converts to its canonical numeric string. TypedArray
+        // integer-indexed reads can use that number directly; numeric -0
+        // denotes "0", unlike the distinct string key "-0".
+        if let Value::TypedArray(view) = o
+            && let Some(index) = fast_typed_array_index(p)
+        {
+            return self.with_property_get(|_| {
+                Ok(
+                    if index.is_finite()
+                        && index >= 0.
+                        && index.fract() == 0.
+                        && index < view.effective_length() as f64
+                    {
+                        crate::builtins::read_element(view, index as usize)
+                            .unwrap_or(Value::Undefined)
+                    } else {
+                        Value::Undefined
+                    },
+                )
+            });
+        }
         // Canonical keys need no conversion and retain the shared lookup's
         // diagnostic behavior. Check exotic-key receivers before conversion.
         if matches!(p, Value::String(_) | Value::Symbol(_)) {
