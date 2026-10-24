@@ -1,0 +1,11 @@
+. /root/.cargo/env
+cargo build --locked --release --no-default-features --bin napi-vm-test262
+cargo test --locked --profile ci -p napi-vm-core --lib
+cargo test --locked --profile ci --no-default-features --test direct_binding_reads --test empty_eval --test typed_array_numeric_sort --test global_binding_writes --test regexp_pattern_cache --test wide_object_writes --test with_bindings --test iterator_protocol --test mapped_arguments --test array_growth_audit
+cargo clippy --locked --profile ci -p napi-vm-core --all-targets -- -D warnings
+python3 -m unittest discover -s tools/test262 -p 'test_*.py'
+
+Run each worker in isolation, after builds finish:
+python3 tools/test262/run.py /workspace/scratch/test262 --revision 5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81 --engine WORKER --jobs 2 --timeout 5 --path EACH_PATH_FROM_SELECTION_JSON --output REPORT.json
+The regression selection also includes --group realms. Repeat --path per selection item.
+python3 tools/test262/compare.py BEFORE.json AFTER.json --output comparison.json

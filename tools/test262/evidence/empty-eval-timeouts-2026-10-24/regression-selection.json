@@ -1,0 +1,13 @@
+[
+  "built-ins/TypedArray/prototype/sort",
+  "built-ins/TypedArray/prototype/toSorted",
+  "built-ins/Date",
+  "built-ins/eval",
+  "language/eval-code",
+  "language/statements/empty",
+  "language/statements/block",
+  "built-ins/Function/prototype/call",
+  "built-ins/Function/prototype/bind",
+  "language/expressions/new.target",
+  "language/statements/with"
+]

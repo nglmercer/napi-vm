@@ -66,6 +66,31 @@ impl Interpreter {
         scope: &super::Env,
         name: &str,
     ) -> Result<super::Lookup, VmErr> {
+        // Plain lexical environments and existing global data slots can be
+        // read in one traversal. With bindings, accessors and missing or
+        // inherited globals retain observable reference resolution below.
+        if name != "this" {
+            let mut current = Some(scope.clone());
+            while let Some(environment) = current {
+                let frame = environment.borrow();
+                if frame.own_lexical_binding(name) {
+                    return Ok(frame.lookup(name));
+                }
+                if frame.with_object.is_some() {
+                    break;
+                }
+                if frame.is_global_scope() {
+                    if let Some(Value::Object { ref props }) = frame.global_object()
+                        && !props.meta.borrow().has_accessors
+                        && let Some(value) = props.own_value(name)
+                    {
+                        return Ok(super::Lookup::Value(value.deref_binding()));
+                    }
+                    break;
+                }
+                current = frame.parent_env();
+            }
+        }
         let (base, property) = self.resolve_assignment_binding(scope, name)?;
         self.read_resolved_binding(&base, property, name)
     }
@@ -1091,10 +1116,35 @@ impl Interpreter {
                 key
             )));
         }
+        // Date instances have no virtual own string properties. A direct
+        // prototype data slot can be read without descriptor construction or
+        // another prototype-chain walk. Inspect current storage on every read
+        // so replacement, shadowing and prototype mutation remain visible.
+        if let Value::Date(date) = o
+            && !date.properties.meta.borrow().has_accessors
+            && date.properties.own_index(key).is_none()
+            && let Some(prototype) = self.prototype_of(o)
+            && let Value::Object { props } = prototype.as_ref()
+            && !props.meta.borrow().has_accessors
+            && !props.meta.borrow().module_namespace
+            && let Some(value) = props.own_value(key)
+        {
+            let name = match &value {
+                Value::Function(function) => function.name.as_deref(),
+                Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
+                    Some(name.as_ref())
+                }
+                _ => None,
+            };
+            if name.is_none_or(|name| !name.starts_with("get ") && !name.starts_with("set ")) {
+                return Ok(value.deref_binding());
+            }
+        }
         // Ordinary [[Get]] delegates missing own properties to the prototype's
         // internal operation, retaining the original receiver for accessors.
         if let Some(props) = match o {
             Value::Object { props } => Some(props.clone()),
+            Value::Date(date) => Some(date.properties.clone()),
             _ if !self.seq(o, receiver) => o.exotic_properties(),
             _ => None,
         } {
