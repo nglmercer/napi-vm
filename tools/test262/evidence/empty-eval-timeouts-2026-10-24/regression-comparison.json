@@ -1,0 +1,27 @@
+{
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "total": 2739,
+  "baseline_engine_sha256": "e9c37ffa2f602810fb1194998719f56a77794e4ce9bca819a78ab3f9f42477e9",
+  "current_engine_sha256": "030966fc0575059702245773d5251c23d567359baad3b5fabe5d11106db87460",
+  "baseline_counts": {
+    "pass": 2737,
+    "fail": 2,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "current_counts": {
+    "pass": 2737,
+    "fail": 2,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 0,
+  "lost_passes": 0,
+  "newly_passing": [],
+  "formerly_passing": [],
+  "all_status_transitions": []
+}
