@@ -236,6 +236,22 @@ fn weak_entries(this: &Value) -> Option<Rc<ObjectCell>> {
         None
     }
 }
+// Weak entries have no observable iteration order. Index by allocation identity,
+// retaining the weak handle and equality check to preserve key semantics.
+fn weak_lookup<'a>(
+    entries: &'a std::collections::HashMap<usize, (WeakTarget, Value)>,
+    key: &Value,
+) -> Option<&'a (WeakTarget, Value)> {
+    if let Some(id) = key.weak_identity() {
+        return entries.get(&id).filter(|(target, _)| target.matches(key));
+    }
+    // The legacy GlobalObject sentinel has realm-dependent identity.
+    if matches!(key, Value::GlobalObject) {
+        return entries.values().find(|(target, _)| target.matches(key));
+    }
+    None
+}
+
 fn weak_insert(
     interp: &Interpreter,
     props: &ObjectCell,
@@ -251,14 +267,11 @@ fn weak_insert(
     let WeakStorage::Map(entries) = &mut *storage else {
         unreachable!("weak map receiver")
     };
-    if let Some((_, slot)) = entries.iter_mut().find(|(target, _)| target.matches(key)) {
-        *slot = value;
-    } else {
-        if entries.len() >= crate::value::MAX_ARRAY_LEN {
-            return Err(crate::value::limit_err("Maximum collection size exceeded"));
-        }
-        entries.push((target, value));
+    let id = target.id();
+    if !entries.contains_key(&id) && entries.len() >= crate::value::MAX_ARRAY_LEN {
+        return Err(crate::value::limit_err("Maximum collection size exceeded"));
     }
+    entries.insert(id, (target, value));
     Ok(())
 }
 /// Index of the entry whose key matches, if any.
@@ -493,7 +506,7 @@ fn construct(
         meta.collection_kind = Some(kind);
         meta.collection_entries = Some(storage);
         if matches!(kind, Kind::WeakMap | Kind::WeakSet) {
-            *props.weak.borrow_mut() = WeakStorage::Map(Vec::new());
+            *props.weak.borrow_mut() = WeakStorage::Map(Default::default());
         }
     }
     if let Some(source) = args.first()
@@ -655,10 +668,7 @@ fn existing_value(this: &Value, key: &Value) -> Option<Value> {
         let WeakStorage::Map(entries) = &*storage else {
             unreachable!()
         };
-        return entries
-            .iter()
-            .find(|(target, _)| target.matches(key))
-            .map(|(_, value)| value.clone());
+        return weak_lookup(entries, key).map(|(_, value)| value.clone());
     }
     let entries = entries_of(this)?;
     let index = position(&entries, key)?;
@@ -741,9 +751,7 @@ fn map_get(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmE
         let WeakStorage::Map(entries) = &*storage else {
             unreachable!()
         };
-        return Ok(entries
-            .iter()
-            .find(|(key, _)| key.matches(a.first().unwrap_or(&Value::Undefined)))
+        return Ok(weak_lookup(entries, a.first().unwrap_or(&Value::Undefined))
             .map(|(_, v)| v.clone())
             .unwrap_or(Value::Undefined));
     }
@@ -809,9 +817,9 @@ fn collection_has(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Val
         let WeakStorage::Map(entries) = &*storage else {
             unreachable!()
         };
-        return Ok(Value::Bool(entries.iter().any(|(key, _)| {
-            key.matches(a.first().unwrap_or(&Value::Undefined))
-        })));
+        return Ok(Value::Bool(
+            weak_lookup(entries, a.first().unwrap_or(&Value::Undefined)).is_some(),
+        ));
     }
     let entries = require(&this, "has")?;
     let key = a.first().cloned().unwrap_or(Value::Undefined);
@@ -824,9 +832,11 @@ fn collection_delete(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<
         let WeakStorage::Map(entries) = &mut *storage else {
             unreachable!()
         };
-        let prior = entries.len();
-        entries.retain(|(key, _)| !key.matches(a.first().unwrap_or(&Value::Undefined)));
-        return Ok(Value::Bool(entries.len() != prior));
+        let key = a.first().cloned().unwrap_or(Value::Undefined);
+        let id = weak_lookup(entries, &key).map(|(target, _)| target.id());
+        return Ok(Value::Bool(
+            id.is_some_and(|id| entries.remove(&id).is_some()),
+        ));
     }
     let entries = require(&this, "delete")?;
     let key = a.first().cloned().unwrap_or(Value::Undefined);
