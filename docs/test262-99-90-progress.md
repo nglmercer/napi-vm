@@ -154,3 +154,24 @@ identities and logs are archived under the existing evidence directory.
 
 A complete pinned run on that immutable implementation has started with a
 checkpoint; its result is not yet a completed full-suite score.
+
+## Date conversion and descriptor output order
+
+Date.prototype.toTemporalInstant now reads the Date slot directly and creates
+an intrinsic Temporal.Instant from exact milliseconds, rejecting invalid dates
+and incompatible receivers. It remains valid after the global Temporal.Instant
+binding is replaced. FromPropertyDescriptor emits value/writable or get/set
+before enumerable/configurable while ToPropertyDescriptor retains its observable
+input-read order. Proxy defineProperty now uses that shared conversion.
+
+Implementation tree `3fc653eefd7c0a804a7ccc0baaae59d311b368e3`
+(local commit `3138f0c`, identical GitHub commit `91555fe`) passes **4,134/4,134**
+selected Date, Object/Reflect/Proxy descriptor and two staging regression
+variants: **20 new passes, zero lost passes**, failures, timeouts, crashes,
+harness errors or skips against the matched two-worker/ten-second baseline.
+All three new native regressions pass in AST and prepared modes; all 371 core
+unit tests, formatting and core all-target Clippy with warnings denied pass.
+Raw reports, comparison, source identities and logs are archived alongside the
+RegExp evidence. A fresh complete run on this implementation uses four workers
+and ten-second timeouts without feature exclusions; it is separate from the
+earlier two-worker snapshot and cannot supply a score until it completes.
