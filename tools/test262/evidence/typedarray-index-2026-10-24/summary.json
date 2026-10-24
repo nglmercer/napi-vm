@@ -1,0 +1,40 @@
+{
+  "base_commit": "663d04667683875f505ee6ab75c307e66ba75ea0",
+  "measured_local_commit": "6f77447ed5f56d463ef557ef045e6d20f3d2842b",
+  "published_equivalent_commit": "968b3ec0773ee561d9522601518b02a061032d3f",
+  "source_tree": "b66ae4e501d9d10efb372f4548a4ae2ecd2ea0ac",
+  "flags": {
+    "CARGO_PROFILE_RELEASE_LTO": "false",
+    "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "1"
+  },
+  "worker_hashes": {
+    "before": "5d11964ebe7b6e1aa5736d5564f44801a607d391578afeaee98638ad18ed6948",
+    "after": "f3b3a42609295bd73927a2bd5334af98aee15166932d4123566c2c3f67adbc24"
+  },
+  "before": {
+    "pass": 0,
+    "fail": 0,
+    "skip": 0,
+    "timeout": 10,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "after": {
+    "pass": 0,
+    "fail": 0,
+    "skip": 0,
+    "timeout": 10,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "additional_timeout_fixes": 0,
+  "discarded_comparisons": "Shared-target attempts reused identical worker hashes (39c106f4 for both numeric variants and 5d11964e for both single-CGU attempts). Their timing comparisons are invalid. Reports here use a fresh isolated target for the candidate and distinct immutable executable snapshots.",
+  "native_validation": {
+    "core_tests": 371,
+    "semantic_integration_tests": 5,
+    "runner_tests": 12,
+    "clippy": "pass",
+    "formatting": "pass"
+  },
+  "note": "No full-corpus score or reduction of the 49 outstanding timeouts is claimed."
+}
