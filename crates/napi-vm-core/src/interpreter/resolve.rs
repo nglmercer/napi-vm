@@ -66,6 +66,27 @@ impl Interpreter {
         scope: &super::Env,
         name: &str,
     ) -> Result<super::Lookup, VmErr> {
+        // A direct global object data binding needs neither reference-base
+        // allocation nor a separate HasProperty operation. Lexicals, with
+        // environments, accessors and inherited/missing names retain the
+        // observable resolution operation below.
+        let record = {
+            let frame = scope.borrow();
+            if frame.is_global_scope()
+                && frame.with_object.is_none()
+                && !frame.own_lexical_binding(name)
+            {
+                frame.global_object()
+            } else {
+                None
+            }
+        };
+        if let Some(Value::Object { ref props }) = record
+            && !props.meta.borrow().has_accessors
+            && let Some(value) = props.own_value(name)
+        {
+            return Ok(super::Lookup::Value(value.deref_binding()));
+        }
         let (base, property) = self.resolve_assignment_binding(scope, name)?;
         self.read_resolved_binding(&base, property, name)
     }
@@ -1090,6 +1111,30 @@ impl Interpreter {
                 },
                 key
             )));
+        }
+        // Date instances have no virtual own string properties. A direct
+        // prototype data slot can be read without descriptor construction or
+        // another prototype-chain walk. Inspect current storage on every read
+        // so replacement, shadowing and prototype mutation remain visible.
+        if let Value::Date(date) = o
+            && !date.properties.meta.borrow().has_accessors
+            && date.properties.own_index(key).is_none()
+            && let Some(prototype) = self.prototype_of(o)
+            && let Value::Object { props } = prototype.as_ref()
+            && !props.meta.borrow().has_accessors
+            && !props.meta.borrow().module_namespace
+            && let Some(value) = props.own_value(key)
+        {
+            let name = match &value {
+                Value::Function(function) => function.name.as_deref(),
+                Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
+                    Some(name.as_ref())
+                }
+                _ => None,
+            };
+            if name.is_none_or(|name| !name.starts_with("get ") && !name.starts_with("set ")) {
+                return Ok(value.deref_binding());
+            }
         }
         // Ordinary [[Get]] delegates missing own properties to the prototype's
         // internal operation, retaining the original receiver for accessors.
