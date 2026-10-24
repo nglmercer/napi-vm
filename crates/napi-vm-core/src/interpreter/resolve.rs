@@ -815,6 +815,20 @@ impl Interpreter {
         p: &Value,
         receiver: &Value,
     ) -> Result<Value, VmErr> {
+        // A Number key converts to its canonical numeric string. TypedArray
+        // integer-indexed reads can use that number directly; numeric -0
+        // denotes "0", unlike the distinct string key "-0".
+        if let (Value::TypedArray(view), Value::Number(index)) = (o, p) {
+            return self.with_property_get(|_| {
+                Ok(if index.is_finite() && *index >= 0. && index.fract() == 0.
+                    && *index < view.effective_length() as f64 {
+                    crate::builtins::read_element(view, *index as usize)
+                        .unwrap_or(Value::Undefined)
+                } else {
+                    Value::Undefined
+                })
+            });
+        }
         // Canonical keys need no conversion and retain the shared lookup's
         // diagnostic behavior. Check exotic-key receivers before conversion.
         if matches!(p, Value::String(_) | Value::Symbol(_)) {

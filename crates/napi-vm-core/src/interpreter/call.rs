@@ -1409,6 +1409,16 @@ impl Interpreter {
         value: Value,
         receiver: &Value,
     ) -> Result<bool, VmErr> {
+        // Only direct integer-indexed receivers qualify. Proxies and foreign
+        // receivers retain OrdinarySet, including their observable traps.
+        if let (Value::TypedArray(view), Value::Number(index)) = (target, property)
+            && crate::interpreter::strict_equals(target, receiver)
+        {
+            if view.buffer.is_immutable() { return Ok(false); }
+            let index = if *index == 0. { 0. } else { *index };
+            crate::builtins::set_integer_index_in(self, view, index, &value)?;
+            return Ok(true);
+        }
         let key = self.ecmascript_to_property_key(property)?;
         let slot = self.property_key(&key)?;
         // Dense array construction should not materialize descriptor objects
