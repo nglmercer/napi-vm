@@ -66,26 +66,30 @@ impl Interpreter {
         scope: &super::Env,
         name: &str,
     ) -> Result<super::Lookup, VmErr> {
-        // A direct global object data binding needs neither reference-base
-        // allocation nor a separate HasProperty operation. Lexicals, with
-        // environments, accessors and inherited/missing names retain the
-        // observable resolution operation below.
-        let record = {
-            let frame = scope.borrow();
-            if frame.is_global_scope()
-                && frame.with_object.is_none()
-                && !frame.own_lexical_binding(name)
-            {
-                frame.global_object()
-            } else {
-                None
+        // Plain lexical environments and existing global data slots can be
+        // read in one traversal. With bindings, accessors and missing or
+        // inherited globals retain observable reference resolution below.
+        if name != "this" {
+            let mut current = Some(scope.clone());
+            while let Some(environment) = current {
+                let frame = environment.borrow();
+                if frame.own_lexical_binding(name) {
+                    return Ok(frame.lookup(name));
+                }
+                if frame.with_object.is_some() {
+                    break;
+                }
+                if frame.is_global_scope() {
+                    if let Some(Value::Object { ref props }) = frame.global_object()
+                        && !props.meta.borrow().has_accessors
+                        && let Some(value) = props.own_value(name)
+                    {
+                        return Ok(super::Lookup::Value(value.deref_binding()));
+                    }
+                    break;
+                }
+                current = frame.parent_env();
             }
-        };
-        if let Some(Value::Object { ref props }) = record
-            && !props.meta.borrow().has_accessors
-            && let Some(value) = props.own_value(name)
-        {
-            return Ok(super::Lookup::Value(value.deref_binding()));
         }
         let (base, property) = self.resolve_assignment_binding(scope, name)?;
         self.read_resolved_binding(&base, property, name)
@@ -1140,6 +1144,7 @@ impl Interpreter {
         // internal operation, retaining the original receiver for accessors.
         if let Some(props) = match o {
             Value::Object { props } => Some(props.clone()),
+            Value::Date(date) => Some(date.properties.clone()),
             _ if !self.seq(o, receiver) => o.exotic_properties(),
             _ => None,
         } {

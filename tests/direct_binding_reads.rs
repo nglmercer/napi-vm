@@ -22,7 +22,7 @@ fn globals_keep_lexical_shadowing_accessors_deletion_and_local_bindings() {
     both(
         r#"
         globalThis.shadowed = 1; let shadowed = 7;
-        var data = 9; var initial = data;
+        globalThis.data = 9; var initial = data;
         function read() {return data;}
         var local = (function(data) {return data;})(23);
         var seen = 0;
