@@ -952,7 +952,6 @@ fn can_fill_directly(interp: &Interpreter, array: &Value, end: f64) -> bool {
                 let meta = props.meta.borrow();
                 !meta.module_namespace
                     && meta.boxed_primitive.is_none()
-                    && !meta.has_accessors
                     && !props
                         .borrow()
                         .iter()
@@ -960,7 +959,6 @@ fn can_fill_directly(interp: &Interpreter, array: &Value, end: f64) -> bool {
             }
             Value::Array(cell) => {
                 cell.array_length() == 0
-                    && !cell.meta.borrow().has_accessors
                     && !cell
                         .named
                         .borrow()

@@ -1409,8 +1409,95 @@ impl Interpreter {
         value: Value,
         receiver: &Value,
     ) -> Result<bool, VmErr> {
+        if let (Value::TypedArray(view), Value::Number(index)) = (target, property)
+            && crate::interpreter::strict_equals(target, receiver)
+        {
+            if view.buffer.is_immutable() {
+                return Ok(false);
+            }
+            let index = if *index == 0.0 { 0.0 } else { *index };
+            crate::builtins::set_integer_index_in(self, view, index, &value)?;
+            return Ok(true);
+        }
+        if let (Value::Array(array), Value::Number(index)) = (target, property)
+            && crate::interpreter::strict_equals(target, receiver)
+            && index.is_finite()
+            && *index >= 0.0
+            && index.fract() == 0.0
+            && *index < u32::MAX as f64
+            && !array.meta.borrow().has_accessors
+            && array.has_index(*index as usize)
+        {
+            return self.set_member(
+                target,
+                &Value::Number(if *index == 0.0 { 0.0 } else { *index }),
+                value,
+            );
+        }
         let key = self.ecmascript_to_property_key(property)?;
         let slot = self.property_key(&key)?;
+        // Ordinary same-receiver data writes need not allocate descriptors or
+        // invalidate the complete layout on every assignment. In particular,
+        // growing a wide object otherwise repeatedly rebuilds all earlier keys.
+        if let Value::Object { props } = target
+            && crate::interpreter::strict_equals(target, receiver)
+            && self.global_scope_of(target).is_none()
+        {
+            let plain = {
+                let meta = props.meta.borrow();
+                !meta.has_accessors
+                    && !meta.module_namespace
+                    && !meta.is_arguments
+                    && meta.boxed_primitive.is_none()
+            };
+            if plain {
+                if let Some(index) = props.own_index(&slot) {
+                    if !props.meta.borrow().attrs_of(&slot).writable {
+                        return Ok(false);
+                    }
+                    props.write_data_slot(Some(index), &slot, value)?;
+                    return Ok(true);
+                }
+                // Only bypass OrdinarySet when no prototype can intercept the
+                // new key. Exotic prototypes and inherited descriptors retain
+                // the shared operation below, including Proxy receiver rules.
+                let mut prototype = self.prototype_of(target);
+                let mut clear = false;
+                for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+                    let Some(current) = prototype else {
+                        clear = true;
+                        break;
+                    };
+                    let absent = match current.as_ref() {
+                        Value::Object { props } => {
+                            let meta = props.meta.borrow();
+                            !meta.module_namespace
+                                && !meta.is_arguments
+                                && meta.boxed_primitive.is_none()
+                                && props.own_index(&slot).is_none()
+                        }
+                        _ => false,
+                    };
+                    if !absent {
+                        break;
+                    }
+                    prototype = self.prototype_of(current.as_ref());
+                }
+                if clear {
+                    if props.meta.borrow().non_extensible {
+                        return Ok(false);
+                    }
+                    props.write_data_slot(None, &slot, value)?;
+                    if let Value::Symbol(symbol) = &key {
+                        props
+                            .meta
+                            .borrow_mut()
+                            .set_symbol_key(&slot, symbol.clone());
+                    }
+                    return Ok(true);
+                }
+            }
+        }
         // Dense array construction should not materialize descriptor objects
         // for every element. Only bypass OrdinarySet when the receiver is the
         // target and no inherited indexed property can intercept a new write.

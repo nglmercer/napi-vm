@@ -1,0 +1,22 @@
+[
+  {
+    "worker": "before",
+    "diagnostic_only": true,
+    "source_prefix": "typedArrayCtorArgFactories=[makeArrayLike];\n",
+    "deadline_seconds": 12,
+    "elapsed_seconds": 12.035823976000302,
+    "status": "timeout"
+  },
+  {
+    "worker": "after",
+    "diagnostic_only": true,
+    "source_prefix": "typedArrayCtorArgFactories=[makeArrayLike];\n",
+    "deadline_seconds": 12,
+    "elapsed_seconds": 0.5833118719997401,
+    "status": "pass",
+    "engine": {
+      "status": "ok",
+      "phase": "runtime"
+    }
+  }
+]

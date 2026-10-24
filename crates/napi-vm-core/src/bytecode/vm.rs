@@ -2171,7 +2171,7 @@ mod tests {
     }
 
     #[test]
-    fn prepared_assignment_writes_invalidate_loop_read_caches() {
+    fn prepared_data_writes_preserve_valid_loop_read_caches() {
         let (result, module) = run_module(
             "let o = {x: 41}; let s = 0; \
              for (let i = 0; i < 10; i++) { s = s + o.x; o.y = i; } s;",
@@ -2180,10 +2180,16 @@ mod tests {
         let (hits, misses, mega, sites) = cache_stats(&module);
         assert_eq!(sites, 1, "expected the property read cache site");
         assert_eq!(mega, 0);
-        // Prepared writes invalidate the receiver's cache hints on every
-        // iteration, so the read site remains correct without cache hits.
-        assert_eq!(hits, 0);
-        assert_eq!(misses, 10);
+        // Ordinary data writes preserve the key layout, so the read cache
+        // can keep its slot index. Adding y must still invalidate the old
+        // layout; subsequent overwrites do not need to rebuild it.
+        assert!(hits > 0);
+        assert_eq!(hits + misses, 10);
+        let (result, _) = run_module(
+            "let o = {x: 0}; let s = 0; \
+             for (let i = 0; i < 10; i++) { o.x = i; s = s + o.x; } s;",
+        );
+        assert_eq!(num(&result), 45.0, "cached slots must read updated data");
     }
 
     #[test]

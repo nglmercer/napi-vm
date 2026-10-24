@@ -80,6 +80,16 @@ impl Interpreter {
         name: &str,
     ) -> Result<super::Lookup, VmErr> {
         if property {
+            // Global object bindings are ordinary own data slots in the
+            // common case. Reading one does not need two descriptor objects
+            // or a round trip through the realm's storage-switching wrapper.
+            if let Some(global) = self.global_scope_of(base)
+                && let Some(Value::Object { ref props }) = global.borrow().global_object()
+                && !props.meta.borrow().has_accessors
+                && let Some(value) = props.own_value(name)
+            {
+                return Ok(super::Lookup::Value(value.deref_binding()));
+            }
             if !self.has_property(base, &Value::String(crate::JsString::from_key(name)))? {
                 if self.global.borrow().strict() {
                     return Err(VmErr::Msg(format!("ReferenceError: {name} is not defined")));
@@ -723,7 +733,14 @@ impl Interpreter {
     pub(crate) fn has_property(&mut self, object: &Value, key: &Value) -> Result<bool, VmErr> {
         let trap_key = self.ecmascript_to_property_key(key)?;
         let property = self.property_key(&trap_key)?;
-        let mut current = object.clone();
+        let mut current = if let Some(global) = self.global_scope_of(object) {
+            global
+                .borrow()
+                .global_object()
+                .expect("global object record")
+        } else {
+            object.clone()
+        };
         for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
             if let Value::Proxy(proxy) = &current {
                 let (target, handler) = proxy.snapshot()?;
@@ -815,6 +832,34 @@ impl Interpreter {
         p: &Value,
         receiver: &Value,
     ) -> Result<Value, VmErr> {
+        // A Number property key has no observable coercion. Integer-indexed
+        // reads can therefore skip number/string round trips. Numeric -0
+        // becomes the property key "0" (unlike the literal string "-0").
+        if let (Value::TypedArray(view), Value::Number(index)) = (o, p) {
+            let index = if *index == 0.0 { 0.0 } else { *index };
+            return self.with_property_get(|_| {
+                Ok(if crate::builtins::valid_integer_index(view, index) {
+                    crate::builtins::read_element(view, index as usize).unwrap_or(Value::Undefined)
+                } else {
+                    Value::Undefined
+                })
+            });
+        }
+        if let (Value::Array(array), Value::Number(index)) = (o, p)
+            && index.is_finite()
+            && *index >= 0.0
+            && index.fract() == 0.0
+            && *index < u32::MAX as f64
+            && !array.meta.borrow().has_accessors
+            && array.has_index(*index as usize)
+        {
+            return self.with_property_get(|_| {
+                Ok(array
+                    .index_value(*index as usize)
+                    .unwrap_or(Value::Undefined)
+                    .deref_binding())
+            });
+        }
         // Canonical keys need no conversion and retain the shared lookup's
         // diagnostic behavior. Check exotic-key receivers before conversion.
         if matches!(p, Value::String(_) | Value::Symbol(_)) {
@@ -1054,7 +1099,7 @@ impl Interpreter {
             _ => None,
         } {
             let inherited = {
-                let own = props.borrow().iter().any(|(name, _)| name == key);
+                let own = props.own_index(key).is_some();
                 if own { None } else { props.proto() }
             };
             if let Some(prototype) = inherited

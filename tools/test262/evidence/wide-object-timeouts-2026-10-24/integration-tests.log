@@ -1,0 +1,88 @@
+
+running 7 tests
+test elisions_observe_inherited_elements_without_owning_them ... ok
+test elided_destructuring_skips_iterator_values ... ok
+test spreads_materialize_holes_but_preserve_surrounding_elisions ... ok
+test searches_coerce_indices_and_support_array_like_receivers ... ok
+test searches_visit_inherited_accessors_and_read_elements_live ... ok
+test elisions_contribute_length_without_creating_properties ... ok
+test indexed_writes_preserve_inherited_setters_and_receiver_descriptors ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+
+running 6 tests
+test indexed_append_preserves_dense_and_holey_arrays ... ok
+test filling_holes_preserves_presence_through_later_mutations ... ok
+test dense_iterator_drain_keeps_budget_and_partial_cursor ... ok
+test dense_iterator_drain_preserves_cursor_overrides_and_live_getters ... ok
+test fill_checks_descriptors_after_coercion_and_preserves_partial_writes ... ok
+test object_assign_rejects_a_new_key_at_the_distinct_property_limit ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+
+running 8 tests
+test bounded_searches_preserve_the_existing_execution_policy ... ok
+test native_arrays_observe_descriptors_and_partial_mutation ... ok
+test searches_use_logical_indexes_and_skip_holes ... ok
+test map_and_filter_preserve_species_and_callback_order ... ok
+test push_and_pop_use_logical_lengths_and_throwing_writes ... ok
+test shift_and_unshift_preserve_holes_and_inherited_elements ... ok
+test mutations_observe_proxy_operation_order ... ok
+test new_generic_loops_obey_execution_budgets ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s
+
+
+running 21 tests
+test direct_eval_sees_the_same_arguments_and_parameter_cells ... ok
+test arrow_arguments_refer_to_the_enclosing_parameter_map ... ok
+test descriptors_observe_the_current_parameter_value ... ok
+test accessors_disconnect_the_parameter ... ok
+test deleting_an_index_permanently_breaks_its_mapping ... ok
+test escaped_arguments_and_closures_keep_the_shared_cell ... ok
+test distinct_receivers_do_not_write_the_parameter ... ok
+test failed_deletion_and_descriptor_changes_preserve_the_mapping ... ok
+test mapped_cells_trace_parameter_objects_and_release_replacements ... ok
+test generator_parameters_remain_mapped_across_suspension ... ok
+test only_the_last_duplicate_parameter_maps_and_only_supplied_indexes_exist ... ok
+test duplicate_parameters_keep_the_last_initial_value_before_any_write ... ok
+test parameter_and_index_assignments_share_a_cell ... ok
+test proxies_forward_writes_to_mapped_indexes ... ok
+test ordinary_parameters_and_hot_index_writes_use_verified_bytecode ... ok
+test reassigning_arguments_does_not_disconnect_escaped_indexes ... ok
+test seal_preserves_mapping_and_freeze_disconnects ... ok
+test readonly_descriptors_snapshot_and_disconnect ... ok
+test unreachable_arguments_parameter_cycles_are_collected ... ok
+test var_arguments_preserves_the_object_and_other_bindings_shadow_it ... ok
+test strict_and_nonsimple_parameters_are_unmapped ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+
+
+running 4 tests
+test accessors_mapped_arguments_and_callable_data_remain_distinct ... ok
+test inherited_setters_frozen_data_and_proxy_receivers_keep_ordinary_set_order ... ok
+test numeric_typed_array_keys_preserve_negative_zero_and_invalid_write_coercion ... ok
+test growth_and_overwrites_preserve_keys_descriptors_and_symbol_identity ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.61s
+
+
+running 12 tests
+test excluded_names_and_declarative_bindings_keep_their_order ... ok
+test optional_calls_and_template_tags_keep_the_with_receiver ... ok
+test missing_call_bindings_are_tested_only_once_per_environment ... ok
+test calls_preserve_the_base_even_if_getters_hide_the_binding ... ok
+test deleted_bindings_are_recreated_by_sloppy_assignments ... ok
+test assignments_and_updates_do_not_resolve_again ... ok
+test disappearing_bindings_do_not_fall_back_to_an_outer_binding ... ok
+test global_identifier_calls_keep_an_undefined_receiver_in_bytecode ... ok
+test rhs_changes_do_not_redirect_the_captured_assignment_base ... ok
+test reads_and_calls_perform_one_resolution_and_a_separate_value_check ... ok
+test strict_closures_reject_a_binding_deleted_by_unscopables ... ok
+test with_global_object_retains_its_receiver ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
