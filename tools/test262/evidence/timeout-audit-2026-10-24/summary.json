@@ -1,0 +1,67 @@
+{
+  "scope": "Fresh timeout audit and rejected optimization experiment; not a full corpus run",
+  "source_base": "39f6a97b77e7de1001581cc242b8c0cafb5bd4b6",
+  "corpus_revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "platform": "aarch64",
+  "toolchain": "rustc 1.99.1 (58cf8f9c3 2026-10-13) (built from a source tarball)",
+  "profile": "ci-optimized: opt-level=3, LTO=false, codegen-units=16, line tables",
+  "timeout_seconds": 5,
+  "jobs": 2,
+  "candidate_retained_in_engine": false,
+  "candidate_patch_sha256": "e20534949e9c287ed142cca01e6d1216deaa3d4c1979f8aca7f22aaea0f04dd1",
+  "validation": {
+    "runner_tests": 12,
+    "candidate_regexp_integration_tests": 11,
+    "candidate_numeric_access_tests": 2
+  },
+  "reports": {
+    "timeouts-baseline": {
+      "engine_sha256": "d87fc135a65b91990765ac148fb508304ac61a689039248f21ae8ec1ffddcc00",
+      "total": 46,
+      "counts": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0,
+        "timeout": 46,
+        "crash": 0,
+        "harness_error": 0
+      }
+    },
+    "timeouts-after": {
+      "engine_sha256": "bfe8372980ac4a5b34df0bb41388f60b61222321ed448dc259b341ae7f22da48",
+      "total": 46,
+      "counts": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0,
+        "timeout": 46,
+        "crash": 0,
+        "harness_error": 0
+      }
+    },
+    "neighbors-before": {
+      "engine_sha256": "d87fc135a65b91990765ac148fb508304ac61a689039248f21ae8ec1ffddcc00",
+      "total": 780,
+      "counts": {
+        "pass": 780,
+        "fail": 0,
+        "skip": 0,
+        "timeout": 0,
+        "crash": 0,
+        "harness_error": 0
+      }
+    },
+    "neighbors-after": {
+      "engine_sha256": "bfe8372980ac4a5b34df0bb41388f60b61222321ed448dc259b341ae7f22da48",
+      "total": 780,
+      "counts": {
+        "pass": 780,
+        "fail": 0,
+        "skip": 0,
+        "timeout": 0,
+        "crash": 0,
+        "harness_error": 0
+      }
+    }
+  }
+}

@@ -1,0 +1,2 @@
+# Unified-diff context lines may consist of a required leading space.
+candidate.patch -whitespace

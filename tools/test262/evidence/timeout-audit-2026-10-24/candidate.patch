@@ -1,0 +1,216 @@
+diff --git a/crates/napi-vm-core/src/builtins/regexp.rs b/crates/napi-vm-core/src/builtins/regexp.rs
+index 28e0f20..13e31a8 100644
+--- a/crates/napi-vm-core/src/builtins/regexp.rs
++++ b/crates/napi-vm-core/src/builtins/regexp.rs
+@@ -394,8 +394,46 @@ fn type_err(message: String) -> VmErr {
+     VmErr::Msg(format!("SyntaxError: {}", message))
+ }
+ 
++thread_local! {
++    // Cache immutable compiled patterns, never guest objects or realm references.
++    // Bound entry count and source length to avoid retaining large one-shot inputs.
++    static COMPILED_PATTERNS: RefCell<std::collections::VecDeque<(crate::JsString, String, Regex)>> =
++        const { RefCell::new(std::collections::VecDeque::new()) };
++}
++
+ pub(crate) fn compile(source: impl Into<crate::JsString>, flags: &str) -> Result<Value, VmErr> {
+-    let regex = Regex::new(source, flags).map_err(type_err)?;
++    let source = source.into();
++    let cacheable = source.len() <= 256 && flags.len() <= 8;
++    let cached = if cacheable {
++        COMPILED_PATTERNS.with(|cache| {
++            let mut cache = cache.borrow_mut();
++            let index = cache
++                .iter()
++                .position(|(pattern, options, _)| pattern == &source && options == flags)?;
++            let entry = cache.remove(index).expect("located compiled pattern");
++            let regex = entry.2.clone();
++            cache.push_back(entry);
++            Some(regex)
++        })
++    } else {
++        None
++    };
++    let regex = match cached {
++        Some(regex) => regex,
++        None => {
++            let regex = Regex::new(source.clone(), flags).map_err(type_err)?;
++            if cacheable {
++                COMPILED_PATTERNS.with(|cache| {
++                    let mut cache = cache.borrow_mut();
++                    if cache.len() == 32 {
++                        cache.pop_front();
++                    }
++                    cache.push_back((source, flags.to_owned(), regex.clone()));
++                });
++            }
++            regex
++        }
++    };
+     Ok(Value::RegExp(Rc::new(RegExpData {
+         properties: Value::instance_properties(),
+         regex: RefCell::new(regex),
+diff --git a/crates/napi-vm-core/src/interpreter/call.rs b/crates/napi-vm-core/src/interpreter/call.rs
+index 24680da..e10fdb3 100644
+--- a/crates/napi-vm-core/src/interpreter/call.rs
++++ b/crates/napi-vm-core/src/interpreter/call.rs
+@@ -1742,6 +1742,16 @@ impl Interpreter {
+             }
+             // Writing an element of a typed array converts and wraps it to
+             // the element type; an out-of-range index is ignored, not grown.
++            (Value::TypedArray(view), Value::Number(index)) => {
++                if view.buffer.is_immutable() {
++                    return Ok(false);
++                }
++                // Numeric -0 becomes the property key "0". Other numbers
++                // already have their CanonicalNumericIndexString value.
++                let index = if *index == 0. { 0. } else { *index };
++                crate::builtins::set_integer_index_in(self, view, index, &val)?;
++                Ok(true)
++            }
+             (Value::TypedArray(view), key) => {
+                 let slot = self.property_key(key)?;
+                 if let Some(index) = crate::builtins::canonical_numeric_index(&slot) {
+diff --git a/crates/napi-vm-core/src/interpreter/eval.rs b/crates/napi-vm-core/src/interpreter/eval.rs
+index 5125ec7..0e0d832 100644
+--- a/crates/napi-vm-core/src/interpreter/eval.rs
++++ b/crates/napi-vm-core/src/interpreter/eval.rs
+@@ -2901,9 +2901,8 @@ impl Interpreter {
+             }
+             Expr::Bool(b) => Ok(Value::Bool(*b)),
+             Expr::Null => Ok(Value::Null),
+-            // Each evaluation compiles a fresh object, so two literals with
+-            // the same source have separate `lastIndex` state — as in a real
+-            // engine, where a literal creates a new `RegExp` each time.
++            // Each evaluation creates a fresh object with independent
++            // lastIndex state, even when its compiled pattern is cached.
+             Expr::Regex(pattern, flags) => crate::builtins::compile_regex(pattern, flags),
+             Expr::BigIntLiteral(digits) => match crate::bigint::BigInt::parse(digits) {
+                 Ok(value) => Ok(Value::BigInt(Rc::new(value))),
+diff --git a/crates/napi-vm-core/src/interpreter/resolve.rs b/crates/napi-vm-core/src/interpreter/resolve.rs
+index ba9cb89..4ae3633 100644
+--- a/crates/napi-vm-core/src/interpreter/resolve.rs
++++ b/crates/napi-vm-core/src/interpreter/resolve.rs
+@@ -815,6 +815,18 @@ impl Interpreter {
+         p: &Value,
+         receiver: &Value,
+     ) -> Result<Value, VmErr> {
++        // Numeric keys on integer-indexed objects need no string round trip.
++        // ToPropertyKey maps numeric -0 to "0" (unlike the string "-0").
++        if let (Value::TypedArray(view), Value::Number(index)) = (o, p) {
++            let index = if *index == 0. { 0. } else { *index };
++            return self.with_property_get(|_| {
++                Ok(if crate::builtins::valid_integer_index(view, index) {
++                    crate::builtins::read_element(view, index as usize).unwrap_or(Value::Undefined)
++                } else {
++                    Value::Undefined
++                })
++            });
++        }
+         // Canonical keys need no conversion and retain the shared lookup's
+         // diagnostic behavior. Check exotic-key receivers before conversion.
+         if matches!(p, Value::String(_) | Value::Symbol(_)) {
+diff --git a/crates/napi-vm-core/src/regex/mod.rs b/crates/napi-vm-core/src/regex/mod.rs
+index cbf78ba..6c3487a 100644
+--- a/crates/napi-vm-core/src/regex/mod.rs
++++ b/crates/napi-vm-core/src/regex/mod.rs
+@@ -33,9 +33,9 @@ const MAX_STEPS: usize = 1_000_000;
+ const STEPS_PER_INPUT_UNIT: usize = 64;
+ 
+ /// A compiled pattern together with its flags.
+-#[derive(Debug)]
++#[derive(Debug, Clone)]
+ pub struct Regex {
+-    root: Node,
++    root: std::sync::Arc<Node>,
+     pub group_count: usize,
+     pub names: HashMap<String, Vec<usize>>,
+     pub source: crate::JsString,
+@@ -131,7 +131,7 @@ impl Regex {
+         let unicode = flags.contains('u') || flags.contains('v');
+         let parsed = parse::Parser::new(&pattern, unicode, flags.contains('v')).parse()?;
+         Ok(Self {
+-            root: parsed.root,
++            root: std::sync::Arc::new(parsed.root),
+             group_count: parsed.group_count,
+             names: parsed.names,
+             source: if source.is_empty() {
+diff --git a/tests/regexp_protocol.rs b/tests/regexp_protocol.rs
+index 700fefa..3385727 100644
+--- a/tests/regexp_protocol.rs
++++ b/tests/regexp_protocol.rs
+@@ -91,3 +91,19 @@ fn linear_scans_scale_with_input_while_catastrophic_patterns_stay_bounded() {
+         r#"true"#,
+     );
+ }
++
++#[test]
++fn repeated_patterns_keep_identity_state_flags_and_compile_mutations_separate() {
++    check(
++        r#"function literal(){return /a/g;}var a=literal(),b=literal();a.exec('aa');a.extra=7;a.compile('b','i');var c=literal();var result=[a!==b,b!==c,b.lastIndex,c.lastIndex,b.extra,a.test('B'),b.test('a'),c.test('A'),new RegExp('a','i').test('A'),new RegExp('a','').test('A')];"#,
++        r#"[true,true,0,0,null,true,true,false,true,false]"#,
++    );
++}
++
++#[test]
++fn compiled_pattern_cache_preserves_utf16_and_rejects_invalid_flags_after_hits() {
++    check(
++        r#"var errors=[];new RegExp('a','g');for(var flags of ['gg','uv','z']){try{new RegExp('a',flags)}catch(e){errors.push(e.name)}}var x=new RegExp(String.fromCharCode(0xD800)),y=new RegExp(String.fromCharCode(0xD801));var result=[x.test(String.fromCharCode(0xD800)),y.test(String.fromCharCode(0xD800)),errors];"#,
++        r#"[true,false,["SyntaxError","SyntaxError","SyntaxError"]]"#,
++    );
++}
+diff --git a/tests/typed_array_numeric_access.rs b/tests/typed_array_numeric_access.rs
+new file mode 100644
+index 0000000..d1b4090
+--- /dev/null
++++ b/tests/typed_array_numeric_access.rs
+@@ -0,0 +1,49 @@
++use napi_vm::{Interpreter, Value};
++
++#[test]
++fn numeric_indices_preserve_zero_invalid_indices_and_value_coercion() {
++    let mut vm = Interpreter::with_builtins();
++    vm.eval_source(
++        r#"
++        var a = new Uint8Array([3, 4]), calls = 0;
++        var proto = Object.create(Object.getPrototypeOf(a));
++        proto['-1'] = 99;
++        Object.setPrototypeOf(a, proto);
++        a[-0] = 7;
++        a['-0'] = 55;
++        var converted = {valueOf(){calls++;return 9}};
++        for (var key of [-1, 0.5, NaN, Infinity, 2]) a[key] = converted;
++        var result = [a[-0], a['-0'], a[-1], a[0.5], a[NaN], a[Infinity], a[2], calls,
++            Reflect.get(a, '0', {}), Object.keys(a)];
++    "#,
++    )
++    .unwrap();
++    let result = vm.eval_source("JSON.stringify(result)").unwrap();
++    assert!(
++        matches!(&result, Value::String(s) if s == r#"[7,null,null,null,null,null,null,5,7,["0","1"]]"#),
++        "{result:?}"
++    );
++}
++
++#[test]
++fn numeric_access_observes_detachment_and_bigint_coercion() {
++    let mut vm = Interpreter::with_builtins();
++    let result = vm
++        .eval_source(
++            r#"
++        var a = new BigInt64Array([1n]);
++        a[-0] = {valueOf(){return 9n}};
++        var before = a[0], calls = 0;
++        a.buffer.transfer();
++        a[0] = {valueOf(){calls++;return 2n}};
++        var threw = false;
++        try { a[Infinity] = 1; } catch(e) { threw = e instanceof TypeError; }
++        JSON.stringify([String(before), a[0], calls, threw]);
++    "#,
++        )
++        .unwrap();
++    assert!(
++        matches!(&result, Value::String(s) if s == r#"["9",null,1,true]"#),
++        "{result:?}"
++    );
++}

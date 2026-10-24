@@ -969,17 +969,18 @@ pub struct ObjectCell {
     pub(crate) weak: RefCell<weak::WeakStorage>,
     slots: RefCell<Vec<(String, Value)>>,
     pub meta: RefCell<ObjectMeta>,
-    /// Cached canonical layout of the slot keys, built lazily on the
-    /// second indexed read (see `own_index`). A cache, never authority:
-    /// every indexed read verifies the key at the slot, and any mismatch
-    /// rebuilds from the slots — so mutations that bypass the maintaining
-    /// methods (host bridges writing through the `Deref`) only cost a
-    /// rebuild.
+    /// Cached layout of the slot keys. Small objects build it on a repeated
+    /// read; wide objects also use it to avoid scanning for absent write keys.
+    /// Managed mutable borrows invalidate it. Raw RefCell exposure disables
+    /// index use because a host may retain that reference and mutate later.
     shape: RefCell<Option<Rc<crate::shape::Shape>>>,
     /// An indexed scan already ran on this object. Single-read objects —
     /// serialization, conversion, one-shot lookups — scan and stop here,
     /// never allocating a shape; only a repeat read builds the layout.
     read_once: Cell<bool>,
+    /// A raw RefCell reference can outlive the Deref call and mutate slots
+    /// later. Once exposed, no cached layout may prove property absence.
+    slots_exposed: Cell<bool>,
 }
 
 impl ObjectCell {
@@ -994,6 +995,7 @@ impl ObjectCell {
             }),
             shape: RefCell::new(None),
             read_once: Cell::new(false),
+            slots_exposed: Cell::new(false),
         }
     }
 
@@ -1009,6 +1011,7 @@ impl ObjectCell {
             }),
             shape: RefCell::new(None),
             read_once: Cell::new(false),
+            slots_exposed: Cell::new(false),
         }
     }
 
@@ -1022,9 +1025,63 @@ impl ObjectCell {
         meta.uses_default_prototype = false;
     }
 
+    /// Read slots without exposing an untracked mutable access path.
+    pub fn borrow(&self) -> Ref<'_, Vec<(String, Value)>> {
+        self.slots.borrow()
+    }
+
+    pub fn try_borrow(&self) -> Result<Ref<'_, Vec<(String, Value)>>, std::cell::BorrowError> {
+        self.slots.try_borrow()
+    }
+
+    /// Arbitrary slot changes invalidate the cached layout before the caller
+    /// receives access. Value-only writes use the maintaining methods below.
+    pub fn borrow_mut(&self) -> RefMut<'_, Vec<(String, Value)>> {
+        let slots = self.slots.borrow_mut();
+        self.note_mutated();
+        slots
+    }
+
+    pub fn try_borrow_mut(
+        &self,
+    ) -> Result<RefMut<'_, Vec<(String, Value)>>, std::cell::BorrowMutError> {
+        let slots = self.slots.try_borrow_mut()?;
+        self.note_mutated();
+        Ok(slots)
+    }
+
     /// Uncontended access to the slots.
     pub fn slots_mut(&mut self) -> &mut Vec<(String, Value)> {
+        *self.shape.get_mut() = None;
         self.slots.get_mut()
+    }
+
+    /// Find a slot for assignment. Small cold objects still use a scan;
+    /// dictionary-sized objects build an index that can also answer misses.
+    pub(crate) fn write_index(&self, key: &str) -> Option<usize> {
+        if self.has_shape() || self.slots.borrow().len() >= 128 {
+            self.own_index(key)
+        } else {
+            self.slots.borrow().iter().position(|(name, _)| name == key)
+        }
+    }
+
+    /// Replace only a slot value, leaving its layout and inline caches valid.
+    pub(crate) fn assign_slot(&self, index: usize, value: Value) {
+        self.slots.borrow_mut()[index].1.assign_for_execution(value);
+    }
+
+    /// Append a key already checked absent by the caller, preserving the
+    /// dictionary index and insertion order under the ordinary property cap.
+    pub(crate) fn append_slot(&self, key: String, value: Value) -> Result<(), VmErr> {
+        let mut slots = self.slots.borrow_mut();
+        if slots.len() >= MAX_OBJECT_PROPS {
+            return Err(limit_err("Maximum object property count exceeded"));
+        }
+        slots.push((key.clone(), value));
+        drop(slots);
+        self.note_key_added(&key);
+        Ok(())
     }
 
     /// Child values for the cycle collector's marker: slot values plus the
@@ -1125,25 +1182,35 @@ impl ObjectCell {
         true
     }
 
-    /// Own slot index of `key`: the cached shape answers in O(1) when it
-    /// agrees with the slots, and any disagreement — a key the shape does
-    /// not know, an index whose key moved — falls back to the linear scan
-    /// and rebuilds the shape from the slots. Absence the shape and the
-    /// scan agree on keeps the shape untouched, so prototype-chain misses
-    /// cost exactly what they always did.
-    ///
-    /// Shapes build on the *second* indexed read that finds its key. The
-    /// first scan only marks the cell, so single-read objects never
-    /// allocate a layout, and pure-miss traffic (prototype walks over
-    /// foreign keys) never builds one either.
+    /// Own slot index of `key`. Wide objects with tracked mutations can
+    /// answer both hits and misses from the shape. Small objects retain lazy
+    /// shape construction and verified hits. After raw RefCell exposure all
+    /// lookups scan, including when a host inserts duplicate keys earlier
+    /// than a slot which a previous layout still knows.
     pub(crate) fn own_index(&self, key: &str) -> Option<usize> {
         let slots = self.slots.borrow();
+        if self.slots_exposed.get() {
+            return slots.iter().position(|(name, _)| name == key);
+        }
+        let wide = slots.len() >= 128;
+        if wide && self.shape.borrow().is_none() {
+            *self.shape.borrow_mut() = Some(crate::shape::Shape::rebuild(
+                slots.iter().map(|(name, _)| name.as_str()),
+            ));
+        }
         let cached = self.shape.borrow().clone();
         if let Some(shape) = &cached
             && let Some(index) = shape.slot_of(key)
             && slots.get(index).is_some_and(|(k, _)| k == key)
         {
             return Some(index);
+        }
+        if wide
+            && cached
+                .as_ref()
+                .is_some_and(|shape| shape.slot_of(key).is_none())
+        {
+            return None;
         }
         let found = slots.iter().position(|(k, _)| k == key);
         match &cached {
@@ -1185,12 +1252,12 @@ impl ObjectCell {
         self.slot_verified(index, key)
     }
 
-    /// This object's shape id, if a layout is cached. Never builds:
-    /// unbuilt objects answer `None` (inline caches miss fast, guards
-    /// fail) and only start caching once repeated reads build the shape.
-    /// The id may lag a bypass mutation; every consumer verifies the key
-    /// at the slot before trusting an id-indexed answer.
+    /// Cached shape id for inline-cache guards. Raw-storage exposure opts
+    /// out permanently, since future host mutations cannot be tracked.
     pub(crate) fn shape_id(&self) -> Option<u32> {
+        if self.slots_exposed.get() {
+            return None;
+        }
         self.shape.borrow().as_ref().map(|shape| shape.id)
     }
 
@@ -1205,6 +1272,9 @@ impl ObjectCell {
     /// the shape already knows means the push surprised the cache (or the
     /// shape lagged a bypass), so rebuild instead of forking a duplicate.
     pub(crate) fn note_key_added(&self, key: &str) {
+        if self.slots_exposed.get() {
+            return;
+        }
         let mut cached = self.shape.borrow_mut();
         let Some(shape) = cached.as_mut() else {
             // Unbuilt shapes build lazily with the key already in place.
@@ -1229,22 +1299,19 @@ impl ObjectCell {
 impl std::ops::Deref for ObjectCell {
     type Target = RefCell<Vec<(String, Value)>>;
     fn deref(&self) -> &Self::Target {
+        // A caller may retain this reference across future lookups. Managed
+        // borrow methods above avoid Deref; raw access permanently opts out.
+        self.slots_exposed.set(true);
         &self.slots
     }
 }
 
 fn set_cell_prop(props: &ObjectCell, key: String, val: Value) -> Result<(), VmErr> {
     let writable = props.meta.borrow().attrs_of(&key).writable;
-    // Cold objects scan linearly without touching the shape machinery:
-    // writes never build layouts, only repeated reads do.
-    let index = if props.has_shape() {
-        props.own_index(&key)
-    } else {
-        props.borrow().iter().position(|(name, _)| *name == key)
-    };
+    let index = props.write_index(&key);
     if let Some(index) = index {
         if writable {
-            let mut slots = props.borrow_mut();
+            let mut slots = props.slots.borrow_mut();
             if props.meta.borrow().is_arguments
                 && let Value::Binding(cell) = &slots[index].1
             {
@@ -1258,18 +1325,7 @@ fn set_cell_prop(props: &ObjectCell, key: String, val: Value) -> Result<(), VmEr
     if props.meta.borrow().non_extensible {
         return Ok(());
     }
-    let mut slots = props.borrow_mut();
-    if slots.len() >= MAX_OBJECT_PROPS {
-        return Err(limit_err("Maximum object property count exceeded"));
-    }
-    if props.has_shape() {
-        slots.push((key.clone(), val));
-        drop(slots);
-        props.note_key_added(&key);
-    } else {
-        slots.push((key, val));
-    }
-    Ok(())
+    props.append_slot(key, val)
 }
 
 /// A symbol's identity.
@@ -4167,5 +4223,63 @@ mod weak_registry_drop_tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod dictionary_slot_tests {
+    use super::{ObjectCell, Value};
+    use std::cell::RefCell;
+    use std::ops::Deref;
+
+    fn wide_object() -> ObjectCell {
+        ObjectCell::new(
+            (0..256)
+                .map(|i| (format!("p{i}"), Value::Number(i as f64)))
+                .collect(),
+            None,
+        )
+    }
+
+    #[test]
+    fn managed_mutation_invalidates_cached_presence_and_absence() {
+        let mut cell = wide_object();
+        assert!(cell.own_index("added").is_none());
+        {
+            let mut slots = cell.borrow_mut();
+            slots.remove(0);
+            slots.push(("added".into(), Value::Number(42.)));
+        }
+        assert_eq!(cell.own_index("p0"), None);
+        assert!(matches!(cell.own_value("added"), Some(Value::Number(42.))));
+        cell.try_borrow_mut().unwrap().reverse();
+        assert!(matches!(cell.own_value("added"), Some(Value::Number(42.))));
+        cell.slots_mut().retain(|(name, _)| name != "added");
+        assert_eq!(cell.own_index("added"), None);
+    }
+
+    #[test]
+    fn retained_raw_storage_remains_correct_after_later_host_mutations() {
+        let cell = wide_object();
+        assert_eq!(cell.own_index("missing"), None);
+        let raw: &RefCell<Vec<(String, Value)>> = cell.deref();
+        assert_eq!(cell.own_index("missing"), None);
+        raw.borrow_mut().push(("missing".into(), Value::Number(7.)));
+        assert!(matches!(cell.own_value("missing"), Some(Value::Number(7.))));
+        // A later raw mutation can introduce an earlier duplicate without
+        // moving the old cached slot. The first property must still win.
+        raw.borrow_mut()[0] = ("p255".into(), Value::Number(99.));
+        assert!(matches!(cell.own_value("p255"), Some(Value::Number(99.))));
+        assert_eq!(cell.own_index("p0"), None);
+    }
+
+    #[test]
+    fn clearing_edges_discards_the_dictionary_layout() {
+        let cell = wide_object();
+        assert_eq!(cell.own_index("p128"), Some(128));
+        assert!(cell.clear_edges());
+        assert_eq!(cell.own_index("p128"), None);
+        cell.append_slot("p128".into(), Value::Number(8.)).unwrap();
+        assert!(matches!(cell.own_value("p128"), Some(Value::Number(8.))));
     }
 }

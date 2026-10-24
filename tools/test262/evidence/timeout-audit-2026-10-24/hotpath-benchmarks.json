@@ -1,0 +1,42 @@
+[
+  {
+    "name": "regexp-literal",
+    "source": "for(var k=0;k<20000;k++){if(!/a/g.test('a'))throw new Error('wrong match');}",
+    "samples_seconds": {
+      "before": [
+        1.666523175983457,
+        1.7310409889905713,
+        1.6408706239890307
+      ],
+      "after": [
+        1.7261043219768908,
+        1.5581634370028041,
+        1.6270396870095283
+      ]
+    },
+    "median_seconds": {
+      "before": 1.666523175983457,
+      "after": 1.6270396870095283
+    }
+  },
+  {
+    "name": "typed-array-numeric-keys",
+    "source": "var a=new Uint8Array(10000);for(var n=0;n<10;n++){for(var k=0;k<10000;k++){a[k]=k;var x=a[k]}}if(a[9999]!==15)throw new Error('wrong value');",
+    "samples_seconds": {
+      "before": [
+        10.395363434014143,
+        10.963769005989889,
+        10.94743098501931
+      ],
+      "after": [
+        10.94062827702146,
+        11.035709475021577,
+        11.099773641995853
+      ]
+    },
+    "median_seconds": {
+      "before": 10.94743098501931,
+      "after": 11.035709475021577
+    }
+  }
+]

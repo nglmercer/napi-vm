@@ -1249,17 +1249,15 @@ impl Interpreter {
             }
             _ => false,
         };
-        let existing = {
+        let existing = props.write_index(key).map(|index| {
             let slots = props.borrow();
-            slots.iter().position(|(name, _)| name == key).map(|index| {
-                let property = &slots[index].1;
-                (
-                    index,
-                    is_setter(property).then(|| property.clone()),
-                    is_getter(property),
-                )
-            })
-        };
+            let property = &slots[index].1;
+            (
+                index,
+                is_setter(property).then(|| property.clone()),
+                is_getter(property),
+            )
+        });
         if let Some((_, Some(setter), _)) = &existing {
             self.call_this(setter, receiver.clone(), vec![value])?;
             return Ok(true);
@@ -1283,7 +1281,7 @@ impl Interpreter {
         }
         if let Some((index, _, _)) = existing {
             if props.meta.borrow().attrs_of(key).writable {
-                props.borrow_mut()[index].1.assign_for_execution(value);
+                props.assign_slot(index, value);
             } else {
                 return Ok(false);
             }
@@ -1298,16 +1296,7 @@ impl Interpreter {
         if props.meta.borrow().non_extensible {
             return Ok(false);
         }
-        {
-            let mut slots = props.borrow_mut();
-            if slots.len() >= crate::value::MAX_OBJECT_PROPS {
-                return Err(crate::value::limit_err(
-                    "Maximum object property count exceeded",
-                ));
-            }
-            slots.push((key.to_owned(), value));
-        }
-        props.note_key_added(key);
+        props.append_slot(key.to_owned(), value)?;
         Ok(true)
     }
 
@@ -1411,6 +1400,61 @@ impl Interpreter {
     ) -> Result<bool, VmErr> {
         let key = self.ecmascript_to_property_key(property)?;
         let slot = self.property_key(&key)?;
+        // Ordinary own data writes do not need temporary descriptor records.
+        // Keep exotic objects, accessors, symbols, and distinct receivers on
+        // OrdinarySet. For a new key, prove that the ordinary prototype chain
+        // contains no interceptor before creating an own data property.
+        if let Value::Object { props } = target
+            && matches!(&key, Value::String(_))
+            && crate::interpreter::strict_equals(target, receiver)
+            && {
+                let meta = props.meta.borrow();
+                !meta.module_namespace
+                    && !meta.deferred_module_namespace
+                    && meta.boxed_primitive.is_none()
+                    && !meta.is_arguments
+                    && !meta.has_accessors
+            }
+        {
+            if let Some(index) = props.write_index(&slot) {
+                if !props.meta.borrow().attrs_of(&slot).writable {
+                    return Ok(false);
+                }
+                props.assign_slot(index, value);
+                return Ok(true);
+            }
+            let mut prototype = self.prototype_of(target);
+            let mut clear_chain = false;
+            for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+                let Some(current) = prototype else {
+                    clear_chain = true;
+                    break;
+                };
+                let absent = match current.as_ref() {
+                    Value::Object { props } => {
+                        let meta = props.meta.borrow();
+                        !meta.module_namespace
+                            && !meta.deferred_module_namespace
+                            && meta.boxed_primitive.is_none()
+                            && !meta.is_arguments
+                            && props.own_index(&slot).is_none()
+                    }
+                    _ => false,
+                };
+                if !absent {
+                    break;
+                }
+                prototype = self.prototype_of(current.as_ref());
+            }
+            if clear_chain {
+                if props.meta.borrow().non_extensible {
+                    return Ok(false);
+                }
+                props.append_slot(slot.clone(), value)?;
+                props.meta.borrow_mut().set_attrs(&slot, Default::default());
+                return Ok(true);
+            }
+        }
         // Dense array construction should not materialize descriptor objects
         // for every element. Only bypass OrdinarySet when the receiver is the
         // target and no inherited indexed property can intercept a new write.

@@ -1,0 +1,29 @@
+{
+  "goal_status": "paused",
+  "test_log": "artifacts/test262/dictionary-writes/validation.log",
+  "test_run": {
+    "announced_tests": 368,
+    "completed_ok": 98,
+    "final_result_present": false,
+    "panic_or_signal_report_present": false,
+    "remaining_test_processes": false,
+    "heavy_tests_restarted_for_diagnosis": false
+  },
+  "confirmed_node_failure": {
+    "required_symbol": "_ZNSt6__ndk113__hash_memoryEPKvm",
+    "inherited_LD_LIBRARY_PATH": "/data/data/com.termux/files/usr/lib/node_modules/@mmmbuto/codex-cli-termux/bin",
+    "bundled_libcxx_exports_required_symbol": false,
+    "termux_libcxx_exports_required_symbol": true,
+    "node_version_with_LD_LIBRARY_PATH_removed": "v24.18.0",
+    "exit_code": 0
+  },
+  "app_termination": {
+    "cause": "unconfirmed",
+    "memory_pressure": "possible, not established",
+    "test_parallelism": "default; six CPUs reported",
+    "kernel_and_cgroup_oom_counters": "permission denied",
+    "current_crash_buffer": "Node dynamic-linker failures; no matching Rust fatal-signal entry"
+  },
+  "next_diagnostic": "Do not repeat the full parallel suite. When authorized to resume, run one isolated test with a resource limit and captured exit status; sanitize LD_LIBRARY_PATH for Node subprocesses.",
+  "engine_changes": "unverified; integration suite did not reach a completed result"
+}
