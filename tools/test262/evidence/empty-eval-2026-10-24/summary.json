@@ -1,0 +1,113 @@
+{
+  "base_commit": "663d04667683875f505ee6ab75c307e66ba75ea0",
+  "local_measured_commit": "61c43e12b6c348ef0f9e43b662fb173a80d6bb6d",
+  "published_equivalent_commit": "05c54366b57b773566f8544377240207966cc050",
+  "source_tree": "e26cc75eba1a338edbd602bb88d29e513e715a78",
+  "corpus_revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_hashes": {
+    "before": "39c106f4916da5dfe244d4dec3f7ce6f55ac8b56d737cd832e288ba1176f23a8",
+    "after": "b84c7a0cf11da363ffd8c5ea1fc2753bfd1b9de25bc70b181cc4c417f27d1482"
+  },
+  "flags": {
+    "CARGO_PROFILE_RELEASE_LTO": "false",
+    "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16"
+  },
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "deadline_seconds": 5,
+  "jobs": 2,
+  "before": {
+    "pass": 0,
+    "fail": 0,
+    "skip": 0,
+    "timeout": 2,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "after": {
+    "pass": 2,
+    "fail": 0,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "repeat_counts": [
+    {
+      "pass": 2,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    {
+      "pass": 2,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    {
+      "pass": 2,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    }
+  ],
+  "eval_regression_before": {
+    "pass": 512,
+    "fail": 2,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "eval_regression_after": {
+    "pass": 512,
+    "fail": 2,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "eval_status_changes": [],
+  "preexisting_eval_failures": [
+    {
+      "test": "language/eval-code/direct/var-env-func-init-local-new-delete.js",
+      "variant": "script",
+      "status": "fail",
+      "engine": {
+        "status": "error",
+        "phase": "runtime",
+        "error_type": "Test262Error",
+        "message": "binding may be deleted Expected a ReferenceError to be thrown but no exception was thrown at all"
+      }
+    },
+    {
+      "test": "language/eval-code/direct/var-env-var-init-local-new-delete.js",
+      "variant": "script",
+      "status": "fail",
+      "engine": {
+        "status": "error",
+        "phase": "runtime",
+        "error_type": "Test262Error",
+        "message": "Expected a ReferenceError to be thrown but no exception was thrown at all"
+      }
+    }
+  ],
+  "members_of_prior_49_timeout_inventory_now_passing": [
+    {
+      "test": "staging/sm/regress/regress-610026.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    }
+  ],
+  "limitations": "Focused evidence only. Two variants gain passes against the fresh matched baseline; only the script variant was a timeout in the previous 49-variant inventory. No full-suite rerun or new overall score is claimed."
+}
