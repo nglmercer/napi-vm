@@ -1,0 +1,17 @@
+{
+  "base_commit": "da2388c034efa7a23175e93b984b24da3b8b6bc4",
+  "measured_local_commit": "34fe66bb8cba26194ac51dcc703ec45563caa3dd",
+  "published_equivalent_commit": "8d875d68fb4f36314a3998139955fa977b23356f",
+  "measured_tree": "ffefdf124d3bd46618b40ddc7a86d723386baaed",
+  "corpus_revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "build_overrides": {
+    "CARGO_PROFILE_RELEASE_LTO": "false",
+    "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16"
+  },
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "workers": {
+    "baseline": "5bb58d99120874a0e44d0840e1604b26a526cd8b1e334ba3bfdd5528c9b5729e",
+    "patched": "39c106f4916da5dfe244d4dec3f7ce6f55ac8b56d737cd832e288ba1176f23a8"
+  },
+  "baseline_limitation": "Exploratory baseline overlapped builds and a diagnostic worker probe. Retained verbatim; timing transitions alone are not attributed to semantic changes."
+}
