@@ -115,6 +115,10 @@ impl Shape {
         self.index.get(key).map(|slot| *slot as usize)
     }
 
+    pub(crate) fn key_count(&self) -> usize {
+        self.keys.len()
+    }
+
     /// The child layout with `key` appended, memoized on this node. Callers
     /// must only transition on genuinely new keys; transitioning on a key
     /// the object already holds would fork a duplicate-key layout, so the
@@ -422,6 +426,48 @@ mod tests {
         assert_eq!(props.own_index("p"), None);
         assert_eq!(props.own_index("z"), Some(0));
         assert!(matches!(props.own_value("z"), Some(Value::Number(x)) if x == 9.0));
+    }
+
+    #[test]
+    fn retained_raw_cell_cannot_make_cached_absence_stale() {
+        let object = crate::value::ObjectCell::new(vec![("p".into(), Value::Number(1.0))], None);
+        let raw = <crate::value::ObjectCell as std::ops::Deref>::deref(&object);
+        built_id(&object, "p");
+        assert_eq!(object.own_index("q"), None);
+        // The raw cell may outlive a later cache rebuild. A same-length
+        // rename must still be found, and the old key must disappear.
+        raw.borrow_mut()[0].0 = "q".into();
+        assert_eq!(object.own_index("q"), Some(0));
+        assert_eq!(object.own_index("p"), None);
+        built_id(&object, "q");
+        object.try_borrow_mut().unwrap()[0].0 = "r".into();
+        assert_eq!(object.own_index("r"), Some(0));
+        assert_eq!(object.own_index("q"), None);
+        object
+            .write_data_slot(None, "s", Value::Number(2.0))
+            .unwrap();
+        assert_eq!(object.own_index("s"), Some(1));
+    }
+
+    #[test]
+    fn wide_write_only_objects_build_reusable_negative_lookups() {
+        let object = crate::value::ObjectCell::new(
+            (0..256)
+                .map(|i| (format!("key{i}"), Value::Number(i as f64)))
+                .collect(),
+            None,
+        );
+        assert_eq!(object.own_index("new"), None);
+        assert_eq!(object.shape_id(), None);
+        assert_eq!(object.own_index("new"), None);
+        assert!(object.shape_id().is_some());
+        object
+            .write_data_slot(None, "new", Value::Number(7.0))
+            .unwrap();
+        assert_eq!(object.own_index("new"), Some(256));
+        assert_eq!(object.own_index("absent"), None);
+        object.borrow_mut()[0].0 = "absent".into();
+        assert_eq!(object.own_index("absent"), Some(0));
     }
 
     #[test]

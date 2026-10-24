@@ -1,7 +1,7 @@
 mod shared;
 pub(crate) mod weak;
 pub use shared::{SharedGrowError, SharedMemory, SharedWaitRegistration, SharedWaitResult};
-use std::cell::{Cell, Ref, RefCell, RefMut};
+use std::cell::{BorrowError, BorrowMutError, Cell, Ref, RefCell, RefMut};
 use std::ptr::NonNull;
 use std::rc::Rc;
 #[cfg(target_has_atomic = "8")]
@@ -970,16 +970,17 @@ pub struct ObjectCell {
     slots: RefCell<Vec<(String, Value)>>,
     pub meta: RefCell<ObjectMeta>,
     /// Cached canonical layout of the slot keys, built lazily on the
-    /// second indexed read (see `own_index`). A cache, never authority:
-    /// every indexed read verifies the key at the slot, and any mismatch
-    /// rebuilds from the slots — so mutations that bypass the maintaining
-    /// methods (host bridges writing through the `Deref`) only cost a
-    /// rebuild.
+    /// second indexed read (see `own_index`). Hits verify the actual slot;
+    /// mutable slot access invalidates the layout. Explicit RefCell exposure
+    /// disables cached absence because a retained reference can mutate later.
     shape: RefCell<Option<Rc<crate::shape::Shape>>>,
     /// An indexed scan already ran on this object. Single-read objects —
     /// serialization, conversion, one-shot lookups — scan and stop here,
     /// never allocating a shape; only a repeat read builds the layout.
     read_once: Cell<bool>,
+    // Explicit exposure of the underlying RefCell permits future mutations
+    // through a retained reference. Such objects keep verified linear misses.
+    cache_absence: Cell<bool>,
 }
 
 impl ObjectCell {
@@ -994,6 +995,7 @@ impl ObjectCell {
             }),
             shape: RefCell::new(None),
             read_once: Cell::new(false),
+            cache_absence: Cell::new(true),
         }
     }
 
@@ -1009,6 +1011,7 @@ impl ObjectCell {
             }),
             shape: RefCell::new(None),
             read_once: Cell::new(false),
+            cache_absence: Cell::new(true),
         }
     }
 
@@ -1024,7 +1027,49 @@ impl ObjectCell {
 
     /// Uncontended access to the slots.
     pub fn slots_mut(&mut self) -> &mut Vec<(String, Value)> {
+        *self.shape.get_mut() = None;
         self.slots.get_mut()
+    }
+
+    pub fn borrow(&self) -> Ref<'_, Vec<(String, Value)>> {
+        self.slots.borrow()
+    }
+
+    pub fn try_borrow(&self) -> Result<Ref<'_, Vec<(String, Value)>>, BorrowError> {
+        self.slots.try_borrow()
+    }
+
+    /// Raw mutable slot access may change any key; invalidate before exposing
+    /// it. Shape-maintaining writes below use the private storage directly.
+    pub fn borrow_mut(&self) -> RefMut<'_, Vec<(String, Value)>> {
+        self.note_mutated();
+        self.slots.borrow_mut()
+    }
+
+    pub fn try_borrow_mut(&self) -> Result<RefMut<'_, Vec<(String, Value)>>, BorrowMutError> {
+        let slots = self.slots.try_borrow_mut()?;
+        self.note_mutated();
+        Ok(slots)
+    }
+
+    pub(crate) fn write_data_slot(
+        &self,
+        index: Option<usize>,
+        key: &str,
+        value: Value,
+    ) -> Result<(), VmErr> {
+        let mut slots = self.slots.borrow_mut();
+        if let Some(index) = index {
+            slots[index].1.assign_for_execution(value);
+            return Ok(());
+        }
+        if slots.len() >= MAX_OBJECT_PROPS {
+            return Err(limit_err("Maximum object property count exceeded"));
+        }
+        slots.push((key.to_owned(), value));
+        drop(slots);
+        self.note_key_added(key);
+        Ok(())
     }
 
     /// Child values for the cycle collector's marker: slot values plus the
@@ -1126,16 +1171,14 @@ impl ObjectCell {
     }
 
     /// Own slot index of `key`: the cached shape answers in O(1) when it
-    /// agrees with the slots, and any disagreement — a key the shape does
-    /// not know, an index whose key moved — falls back to the linear scan
-    /// and rebuilds the shape from the slots. Absence the shape and the
-    /// scan agree on keeps the shape untouched, so prototype-chain misses
-    /// cost exactly what they always did.
+    /// agrees with the slots. Shape-maintaining writes and invalidating raw
+    /// mutation APIs make absence reusable too. When a host explicitly exposes
+    /// the underlying RefCell, misses retain a linear verification scan.
     ///
     /// Shapes build on the *second* indexed read that finds its key. The
-    /// first scan only marks the cell, so single-read objects never
-    /// allocate a layout, and pure-miss traffic (prototype walks over
-    /// foreign keys) never builds one either.
+    /// first scan only marks the cell, so single-read objects never allocate
+    /// a layout. Wide write-only objects also build after repeated misses;
+    /// small prototype objects keep the inexpensive linear miss path.
     pub(crate) fn own_index(&self, key: &str) -> Option<usize> {
         let slots = self.slots.borrow();
         let cached = self.shape.borrow().clone();
@@ -1145,11 +1188,18 @@ impl ObjectCell {
         {
             return Some(index);
         }
+        if self.cache_absence.get()
+            && let Some(shape) = &cached
+            && shape.key_count() == slots.len()
+            && shape.slot_of(key).is_none()
+        {
+            return None;
+        }
         let found = slots.iter().position(|(k, _)| k == key);
         match &cached {
             None => {
                 let second = self.read_once.replace(true);
-                if second && found.is_some() {
+                if second && (found.is_some() || self.cache_absence.get() && slots.len() >= 128) {
                     *self.shape.borrow_mut() = Some(crate::shape::Shape::rebuild(
                         slots.iter().map(|(k, _)| k.as_str()),
                     ));
@@ -1229,6 +1279,8 @@ impl ObjectCell {
 impl std::ops::Deref for ObjectCell {
     type Target = RefCell<Vec<(String, Value)>>;
     fn deref(&self) -> &Self::Target {
+        self.cache_absence.set(false);
+        self.note_mutated();
         &self.slots
     }
 }
@@ -1244,7 +1296,7 @@ fn set_cell_prop(props: &ObjectCell, key: String, val: Value) -> Result<(), VmEr
     };
     if let Some(index) = index {
         if writable {
-            let mut slots = props.borrow_mut();
+            let mut slots = props.slots.borrow_mut();
             if props.meta.borrow().is_arguments
                 && let Value::Binding(cell) = &slots[index].1
             {
@@ -1258,7 +1310,7 @@ fn set_cell_prop(props: &ObjectCell, key: String, val: Value) -> Result<(), VmEr
     if props.meta.borrow().non_extensible {
         return Ok(());
     }
-    let mut slots = props.borrow_mut();
+    let mut slots = props.slots.borrow_mut();
     if slots.len() >= MAX_OBJECT_PROPS {
         return Err(limit_err("Maximum object property count exceeded"));
     }
