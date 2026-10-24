@@ -4,6 +4,7 @@ mod collections;
 mod date;
 pub(crate) mod disposable;
 mod error;
+mod eval_empty;
 mod function;
 pub(crate) mod intl;
 pub(crate) mod iterator;
@@ -482,6 +483,9 @@ pub(crate) fn is_intrinsic_eval(value: &Value, global: &Env) -> bool {
 pub(crate) fn eval_direct(interp: &mut Interpreter, args: Vec<Value>) -> Result<Value, VmErr> {
     match args.first() {
         Some(Value::String(source)) => {
+            if eval_empty::try_empty_blocks(interp, source)? {
+                return Ok(Value::Undefined);
+            }
             let mut parser = crate::Parser::new_with_spans(
                 crate::Lexer::from_js_string(source).tokenize_with_spans(),
             );
