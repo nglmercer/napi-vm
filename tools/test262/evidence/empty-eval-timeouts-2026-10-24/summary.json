@@ -1,0 +1,48 @@
+{
+  "base": "d571b5b4ba06be6c74ffae12479a7d89b42a5a86",
+  "source_commit": "e1dbb0443d27509614c4db5c486b89c3fa95489a",
+  "initial_source_commit": "1357ceba0c3338c6b358c7ab49bbd599e4b35f0b",
+  "rust": "1.99.1",
+  "profile": "release, thin LTO, one codegen unit",
+  "historical_before": {
+    "pass": 32,
+    "fail": 0,
+    "skip": 0,
+    "timeout": 20,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "historical_after": {
+    "pass": 32,
+    "fail": 0,
+    "skip": 0,
+    "timeout": 20,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "historical_total": 52,
+  "new_passes": 0,
+  "lost_passes": 0,
+  "regression_counts": {
+    "pass": 2737,
+    "fail": 2,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "regression_total": 2739,
+  "regression_status_changes": 0,
+  "remaining_categories": {
+    "Date": 16,
+    "URI": 4
+  },
+  "validation": {
+    "core_tests": 380,
+    "integration_tests": 65,
+    "runner_tests": 12,
+    "clippy_all_targets_warnings_denied": "pass",
+    "format": "pass"
+  },
+  "limitation": "All remaining timeouts are not fixed. Thirty-second diagnostic requests are not conformance passes; all conformance reports retain five seconds."
+}

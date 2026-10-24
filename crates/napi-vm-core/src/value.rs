@@ -3144,9 +3144,10 @@ impl GeneratorInner {
 
 impl Value {
     pub fn instance_properties() -> Rc<ObjectCell> {
-        let properties = ObjectCell::new_with_default_proto(vec![]);
-        // Exotic default prototypes depend on their builtin kind, not Object.
-        properties.meta.borrow_mut().proto = None;
+        // Exotic instances resolve their own builtin prototype; avoid looking up
+        // Object.prototype merely to discard it on every allocation.
+        let properties = ObjectCell::new(vec![], None);
+        properties.meta.borrow_mut().uses_default_prototype = true;
         crate::heap::tracked(Rc::new(properties))
     }
 

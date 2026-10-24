@@ -480,9 +480,17 @@ pub(crate) fn is_intrinsic_eval(value: &Value, global: &Env) -> bool {
             .is_none_or(|owner| std::rc::Rc::ptr_eq(&owner, global))
 }
 
+mod empty_eval;
+
 pub(crate) fn eval_direct(interp: &mut Interpreter, args: Vec<Value>) -> Result<Value, VmErr> {
     match args.first() {
         Some(Value::String(source)) => {
+            if let Some(cost) = empty_eval::statement_count(interp, source)? {
+                if cost > 0 {
+                    interp.consume_fuel(cost)?;
+                }
+                return Ok(Value::Undefined);
+            }
             let mut parser = crate::Parser::new_with_spans(
                 crate::Lexer::from_js_string(source).tokenize_with_spans(),
             );
