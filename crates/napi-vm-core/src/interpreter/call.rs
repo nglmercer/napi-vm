@@ -2342,6 +2342,8 @@ impl Interpreter {
                         args,
                         #[cfg(stackful_coroutines)]
                         coroutine: None,
+                        #[cfg(stackful_coroutines)]
+                        yielded_result: Rc::new(std::cell::Cell::new(false)),
                         #[cfg(not(stackful_coroutines))]
                         buffered: std::collections::VecDeque::new(),
                         started: false,
@@ -3078,6 +3080,13 @@ impl Interpreter {
 #[cfg(stackful_coroutines)]
 const GENERATOR_STACK_SIZE: usize = 8 * 1024 * 1024;
 
+#[cfg(stackful_coroutines)]
+struct GeneratorContinuation {
+    realm: super::Realm,
+    suspension: Option<Rc<std::cell::Cell<crate::value::GenSuspension>>>,
+    yielded_result: Rc<std::cell::Cell<bool>>,
+}
+
 /// Build the coroutine that runs a generator body.
 ///
 /// The body executes on its own stack but on the *calling thread*, switching
@@ -3092,16 +3101,17 @@ fn make_generator_coroutine(
     args: Vec<Value>,
     builtins_env: Option<super::Env>,
     gen_depth: u32,
-    continuation: (
-        super::Realm,
-        Option<Rc<std::cell::Cell<crate::value::GenSuspension>>>,
-    ),
+    continuation: GeneratorContinuation,
 ) -> Option<crate::value::GenCoroutine> {
     use corosensei::Coroutine;
     use corosensei::stack::DefaultStack;
 
     let (params, parameters_initialized) = parameters;
-    let (realm, suspension) = continuation;
+    let GeneratorContinuation {
+        realm,
+        suspension,
+        yielded_result,
+    } = continuation;
     let asynchronous = suspension.is_some();
     let stack = DefaultStack::new(GENERATOR_STACK_SIZE).ok()?;
 
@@ -3136,7 +3146,9 @@ fn make_generator_coroutine(
             // dropped when this closure returns or unwinds, so the handle cannot
             // outlive its referent, and `GenYielder` is `!Send`, so it cannot
             // leave this thread. See `crate::value::GenYielder`.
-            interp.gen_yielder = Some(unsafe { crate::value::GenYielder::new(yielder) });
+            interp.gen_yielder = Some(
+                unsafe { crate::value::GenYielder::new(yielder) }.with_result_flag(yielded_result),
+            );
             if let Some(state) = suspension {
                 // SAFETY: both handles live only on this coroutine's owner stack.
                 interp.gen_yielder = Some(unsafe {
@@ -3315,13 +3327,14 @@ pub(crate) fn generator_next_driver(
                     inner.args.clone(),
                     builtins_env,
                     interp.gen_depth + 1,
-                    (
-                        inner.realm.clone(),
-                        inner
+                    GeneratorContinuation {
+                        realm: inner.realm.clone(),
+                        suspension: inner
                             .async_state
                             .as_ref()
                             .map(|state| state.suspension.clone()),
-                    ),
+                        yielded_result: inner.yielded_result.clone(),
+                    },
                 );
                 if inner.coroutine.is_none() {
                     // Stack allocation failed; report an exhausted generator.
@@ -3351,7 +3364,7 @@ pub(crate) fn generator_next_driver(
         match outcome {
             corosensei::CoroutineResult::Yield(value) => {
                 inner.coroutine = Some(coroutine);
-                Ok(iter_result(value, false))
+                Ok(generator_yield_result(&inner, value))
             }
             corosensei::CoroutineResult::Return(GenOutcome::Returned(value)) => {
                 inner.done = true;
@@ -3475,7 +3488,7 @@ pub(crate) fn generator_throw_driver(
             corosensei::CoroutineResult::Yield(value) => {
                 // The body caught it and yielded again.
                 state.coroutine = Some(coroutine);
-                Ok(iter_result(value, false))
+                Ok(generator_yield_result(&state, value))
             }
             corosensei::CoroutineResult::Return(GenOutcome::Returned(value)) => {
                 state.done = true;
@@ -3551,7 +3564,7 @@ pub(crate) fn generator_return_driver(
         match outcome {
             corosensei::CoroutineResult::Yield(value) => {
                 state.coroutine = Some(coroutine);
-                Ok(iter_result(value, false))
+                Ok(generator_yield_result(&state, value))
             }
             corosensei::CoroutineResult::Return(outcome) => {
                 state.done = true;
@@ -3573,6 +3586,16 @@ pub(crate) fn generator_return_driver(
         state.done = true;
         state.buffered.clear();
         Ok(iter_result(value, true))
+    }
+}
+
+/// Forward a delegated result or wrap an ordinary yielded value.
+#[cfg(stackful_coroutines)]
+fn generator_yield_result(state: &GeneratorInner, value: Value) -> Value {
+    if state.yielded_result.replace(false) {
+        value
+    } else {
+        iter_result(value, false)
     }
 }
 

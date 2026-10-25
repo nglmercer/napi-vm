@@ -3742,14 +3742,23 @@ impl Interpreter {
                         return vm_err("TypeError: Iterator result must be an object");
                     }
                     let done = self.member(&step, "done")?.is_truthy();
-                    let value = self.member(&step, "value")?;
                     if done {
+                        let value = self.member(&step, "value")?;
                         return if returning {
                             vm_ret(self.prepare_return_value(value)?)
                         } else {
                             Ok(value)
                         };
                     }
+                    #[cfg(stackful_coroutines)]
+                    if !asynchronous {
+                        received = match self.gen_yielder.as_ref() {
+                            Some(yielder) => yielder.suspend_result(step),
+                            None => crate::value::GenResume::Next(None),
+                        };
+                        continue;
+                    }
+                    let value = self.member(&step, "value")?;
                     // Async delegation preserves values from real async
                     // iterators. The async-from-sync adapter awaits its own
                     // values before producing this result.

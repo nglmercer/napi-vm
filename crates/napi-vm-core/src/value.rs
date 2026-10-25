@@ -2908,6 +2908,7 @@ pub type GenCoroutine = corosensei::Coroutine<GenResume, Value, GenOutcome>;
 pub struct GenYielder {
     inner: *const corosensei::Yielder<GenResume, Value>,
     suspension: Option<(Rc<std::cell::Cell<GenSuspension>>, GenSuspension)>,
+    yielded_result: Option<Rc<std::cell::Cell<bool>>>,
     /// Pins this handle to one thread: a raw pointer is already `!Send`, and
     /// `PhantomData<*const ()>` makes that explicit and stable.
     _not_send: std::marker::PhantomData<*const ()>,
@@ -2924,6 +2925,7 @@ impl GenYielder {
         Self {
             inner: yielder as *const _,
             suspension: None,
+            yielded_result: None,
             _not_send: std::marker::PhantomData,
         }
     }
@@ -2931,6 +2933,23 @@ impl GenYielder {
     /// Suspend the generator, handing `value` to the caller of `next()`, and
     /// report why it was resumed.
     pub fn suspend(&self, value: Value) -> GenResume {
+        self.suspend_kind(value, false)
+    }
+
+    pub(crate) fn with_result_flag(mut self, flag: Rc<std::cell::Cell<bool>>) -> Self {
+        self.yielded_result = Some(flag);
+        self
+    }
+
+    /// Synchronous yield* forwards an IteratorResult without reading its value.
+    pub(crate) fn suspend_result(&self, result: Value) -> GenResume {
+        self.suspend_kind(result, true)
+    }
+
+    fn suspend_kind(&self, value: Value, result: bool) -> GenResume {
+        if let Some(flag) = &self.yielded_result {
+            flag.set(result);
+        }
         if let Some((state, kind)) = &self.suspension {
             state.set(*kind);
         }
@@ -2987,6 +3006,10 @@ pub struct GeneratorInner {
     /// which is how re-entrant `next()` is detected.
     #[cfg(stackful_coroutines)]
     pub coroutine: Option<GenCoroutine>,
+    /// Set by synchronous yield* when the suspension already carries an
+    /// IteratorResult. The driver must forward that object unchanged.
+    #[cfg(stackful_coroutines)]
+    pub(crate) yielded_result: Rc<std::cell::Cell<bool>>,
     /// Values the body produced, on targets with no stack switching.
     ///
     /// A target without stack switching cannot suspend a running body, so it
