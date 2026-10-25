@@ -139,3 +139,15 @@ fn native_symbol_getters_keep_display_names_after_descriptor_installation() {
 fn source_preserves_carriage_return_sequences() {
     assert_both("function\r\n/*a*/\rf( )\r{}; f.toString() === 'function\\r\\n/*a*/\\rf( )\\r{}'");
 }
+
+#[test]
+fn native_punctuation_names_use_computed_property_syntax() {
+    assert_both(
+        r#"
+        Object.getOwnPropertyDescriptor(RegExp,'$&').get.toString() ===
+            'function get ["$&"]() { [native code] }' &&
+        Object.getOwnPropertyDescriptor(RegExp,"$'").get.toString() ===
+            "function get [\"$'\"]() { [native code] }";
+    "#,
+    );
+}

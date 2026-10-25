@@ -290,7 +290,32 @@ fn function_to_string(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result
     };
     let mut text = crate::JsString::from("function ");
     if let Some(name) = name {
-        text.push_str(name);
+        let name = name.to_key();
+        let (prefix, property) = name
+            .strip_prefix("get ")
+            .map(|name| ("get ", name))
+            .or_else(|| name.strip_prefix("set ").map(|name| ("set ", name)))
+            .unwrap_or(("", name.as_str()));
+        let mut characters = property.chars();
+        let identifier = characters
+            .next()
+            .is_some_and(crate::lexer::is_identifier_start)
+            && characters.all(crate::lexer::is_identifier_continue);
+        // Well-known symbol names already spell a ComputedPropertyName.
+        let symbol = property
+            .strip_prefix("[Symbol.")
+            .and_then(|name| name.strip_suffix(']'))
+            .is_some_and(|name| {
+                !name.is_empty() && name.chars().all(crate::lexer::is_identifier_continue)
+            });
+        text.push_str(prefix);
+        if identifier || symbol || property.is_empty() {
+            text.push_str(property);
+        } else {
+            text.push_str("[");
+            text.push_str(serde_json::to_string(property).expect("native property name string"));
+            text.push_str("]");
+        }
     }
     text.push_str("() { [native code] }");
     Ok(Value::String(text))
