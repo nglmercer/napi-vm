@@ -22,9 +22,17 @@ clean committed source tree. No checkpoint outcomes were restored.
 contains the complete report, source/configuration identity, build log,
 comparison, triage, and the exact 287 remaining variants.
 
-## Candidate work outside the full score
+## Verified continuation outside the full score
 
-Current implementation work addresses these reproduced causes:
+Clean source `d30e770` passes **4,486 / 4,492** selected variants, gaining
+**35 passes with zero lost passes** against the matching projection of the
+completed full baseline. Two Function source-text failures and four BMP RegExp
+timeouts remain in this selection; all outcomes remain in the denominator.
+[Continuation evidence](../tools/test262/evidence/runtime-regexp-2026-10-25/)
+contains every outcome, the exact baseline projection, transitions, source and
+worker identities, and validation logs.
+
+The implementation addresses these reproduced causes:
 
 - Compiled call update targets throw before numeric coercion, and parentheses
   preserve valid update references.
@@ -36,16 +44,22 @@ Current implementation work addresses these reproduced causes:
   with directional captures, quantifiers, backreferences, and Unicode boundaries.
 - Unicode backreferences compare code points; the `space` property alias
   uses the existing Unicode White_Space data.
+- String-set classes preserve longest-alternative priority under lazy and
+  greedy repetition, using iterative backtracking with failed-state memoization.
 - String iterator next validates its receiver's own internal slots.
 - The isolated host exposes `$DONE` only for tests with the async flag.
 
-Native and focused conformance verification is in progress. These changes do
-not establish a new full percentage.
+All 373 core unit tests, 78 focused integration tests, and 23 worker tests pass.
+Formatting and core all-target Clippy with warnings denied also pass. The
+Unicode property spelling checks follow the
+[ECMAScript property table](https://tc39.es/ecma262/multipage/text-processing.html#table-binary-unicode-properties),
+which lists `White_Space` and `space` rather than ICU's short name `WSpace`.
+These focused results do not establish a new full percentage.
 
 ## Remaining gates
 
-1. Complete native and focused verification of the current candidate, compare
-   every selected identity against the full baseline, and retain any losses.
+1. Preserve the verified continuation and use the archived baseline and focused
+   transitions to drive the remaining work. Keep every measured loss visible.
 2. Close the remaining semantic cases, including decorator/auto-accessor syntax,
    source text and function behavior, generator delegation, scope semantics,
    and RegExp cases listed in the inventory.

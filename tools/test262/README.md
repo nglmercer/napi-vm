@@ -55,7 +55,9 @@ is `7300cfef39470c226f0879ed40baf247a3cf4b0235e86c1397a7bcb061da4dfb`.
 [Evidence](evidence/full-baseline-2026-10-25/) includes every outcome, the
 comparison, source identity, build log, and all 287 remaining variants.
 The [full-pass campaign](../../docs/test262-full-pass-progress.md) tracks the
-target of 102,956 passes; current candidate fixes are outside this full score.
+target of 102,956 passes. The subsequent clean `d30e770` continuation passes
+4,486 / 4,492 focused variants, gaining 35 passes with zero losses. Its
+[evidence](evidence/runtime-regexp-2026-10-25/) remains separate from this full score.
 
 ## Historical measurements
 
@@ -79,7 +81,8 @@ superseded by the completed 2026-10-25 baseline.
 
 Function/Proxy metadata and inheritance now pass **1,624 / 1,628** focused
 variants in an isolated optimized build: **12 gains, zero lost passes**.
-This later change is excluded from the active full run. See the
+This change was excluded from the unfinished `f708e0c` run and is included in
+the completed 2026-10-25 baseline. See the
 [Function/Proxy continuation](../../docs/test262-function-proxy-metadata-continuation.md).
 
 Bound functions now retain intermediate target identities and resolve deep
@@ -87,7 +90,7 @@ call, construction, and instanceof chains iteratively. Isolated optimized
 verification passes **1,831 / 1,837**, with **two gains and zero lost passes**.
 The subsequent primitive-operand ordering fix passes **107 / 107**
 focused debug instanceof variants, gaining **four passes with zero losses**.
-Both changes are excluded from the active full run. See the
+Both changes are included in the completed 2026-10-25 baseline. See the
 [bound-chain continuation](../../docs/test262-bound-function-chains-continuation.md) and
 [instanceof ordering continuation](../../docs/test262-instanceof-primitive-order-continuation.md).
 

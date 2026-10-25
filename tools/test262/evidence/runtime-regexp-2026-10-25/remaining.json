@@ -1,0 +1,44 @@
+[
+  {
+    "test": "annexB/built-ins/RegExp/RegExp-leading-escape-BMP.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "annexB/built-ins/RegExp/RegExp-leading-escape-BMP.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "annexB/built-ins/RegExp/RegExp-trailing-escape-BMP.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "annexB/built-ins/RegExp/RegExp-trailing-escape-BMP.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/Function/prototype/toString/method-computed-property-name.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Conforms to NativeFunction Syntax: \"undefined\" ([ { a(){} }.a ](){ })"
+    }
+  },
+  {
+    "test": "built-ins/Function/prototype/toString/method-computed-property-name.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Conforms to NativeFunction Syntax: \"undefined\" ([ { a(){} }.a ](){ })"
+    }
+  }
+]

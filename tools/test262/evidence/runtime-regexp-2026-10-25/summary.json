@@ -1,0 +1,54 @@
+{
+  "domain": "ECMAScript",
+  "suite": "Test262",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "selection": [
+    "annexB",
+    "built-ins/Function",
+    "built-ins/AsyncFromSyncIteratorPrototype",
+    "built-ins/StringIteratorPrototype",
+    "built-ins/RegExp/lookBehind",
+    "built-ins/RegExp/named-groups",
+    "built-ins/RegExp/unicodeSets",
+    "built-ins/RegExp/regexp-modifiers",
+    "built-ins/RegExp/property-escapes/generated/White_Space.js",
+    "built-ins/RegExp/S15.10.5_A1.js",
+    "language/statements/for-in",
+    "language/statements/for-of",
+    "staging/sm/RegExp/unicode-back-reference.js",
+    "staging/sm/RegExp/15.10.5-01.js",
+    "harness/asyncHelpers-asyncTest-without-async-flag.js"
+  ],
+  "groups": [],
+  "engine_sha256": "afa37ff6326af80779a3c977168e41f13d26200792be2694202a0cccb3f018f5",
+  "skip_features": [],
+  "denominator": "all selected variants, including skips and errors",
+  "worker_jobs": 2,
+  "timeout_seconds": 5.0,
+  "resumed_files": 0,
+  "total": 4492,
+  "counts": {
+    "pass": 4486,
+    "fail": 2,
+    "skip": 0,
+    "timeout": 4,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "pass_percentage": 99.86642920747997,
+  "limitations": [
+    "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
+  ],
+  "scope": "Focused verification; does not update the full score",
+  "source_commit": "d30e7706435de1409d475db44ae2d9e32d0f7d60",
+  "new_passes": 35,
+  "lost_passes": 0,
+  "baseline_projection": "full-baseline-2026-10-25/full.json.gz",
+  "native_checks": {
+    "core_unit_tests": 373,
+    "integration_tests": 78,
+    "worker_tests": 23,
+    "format": "pass",
+    "core_all_target_clippy": "pass"
+  }
+}
