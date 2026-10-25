@@ -1,0 +1,156 @@
+[
+  {
+    "test": "staging/sm/Function/configurable-length.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab0\u00bb, \u00abundefined\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Function/function-name-binding.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"\"\u00bb, \u00ab\"param1\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Function/function-name-binding.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"\"\u00bb, \u00ab\"param1\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Function/function-name-computed-01.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"\"\u00bb, \u00ab\"arrowFunc\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Function/function-name-computed-01.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"\"\u00bb, \u00ab\"arrowFunc\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Function/function-name-computed-02.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"\"\u00bb, \u00ab\"5\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Function/function-name-computed-02.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"\"\u00bb, \u00ab\"5\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Function/function-name-for.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"\"\u00bb, \u00ab\"forInHead\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/async-functions/async-property-name-error.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Function:({async async: 0}) Expected a SyntaxError to be thrown but no exception was thrown at all"
+    }
+  },
+  {
+    "test": "staging/sm/async-functions/async-property-name-error.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Function:({async async: 0}) Expected a SyntaxError to be thrown but no exception was thrown at all"
+    }
+  },
+  {
+    "test": "staging/sm/regress/regress-584355.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": " Expected SameValue(\u00ab\"function f () { ff (); }\"\u00bb, \u00ab\"null\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/regress/regress-584355.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": " Expected SameValue(\u00ab\"function f () { ff (); }\"\u00bb, \u00ab\"null\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/strict/primitive-this-getter.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00abundefined\u00bb, \u00ab\"get\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/strict/primitive-this-getter.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00abundefined\u00bb, \u00ab\"get\"\u00bb) to be true"
+    }
+  }
+]

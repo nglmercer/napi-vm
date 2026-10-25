@@ -13,13 +13,15 @@ and [exact remaining variants](../tools/test262/evidence/full-baseline-2026-10-2
 Subsequent committed fixes gained 35 passes in a 4,492-variant runtime/RegExp
 selection and 18 passes in a 3,418-variant generator selection, with zero losses
 in each comparison. These are focused results, not a replacement full score.
-Current HEAD is `63b4368`. Uncommitted function-source changes are unfinished;
-the latest compiler check reports a missing `ClassAssembly.source_text` field.
-Do not use the working tree as a verified release candidate yet.
+The source-text continuation on clean `d942b04` passes 1,006/1,020 selected
+variants, gaining 16 passes with zero losses. Source preservation and native
+syntax are implemented; compilation, native checks, and focused verification
+pass. [Evidence](../tools/test262/evidence/function-source-2026-10-25/) retains
+intermediate regressions and their resolution. The next gate is the full refresh.
 
 ## Ordered execution
 
-1. **Finish function source preservation and restore the build.** Carry original
+1. **Function source preservation — completed on `d942b04`.** Carry original
    UTF-16 source ranges through parsing, bytecode, AST execution, classes, eval,
    and dynamic Function constructors. Connect `Function.prototype.toString`,
    including native/bound/proxy behavior, without invoking guest name getters.
@@ -73,6 +75,6 @@ recent completed full result. Full AST/bytecode differential and wasm execution
 are separate coverage gates and must be reported separately from this worker's
 Test262 result.
 
-The next concrete milestone is a clean, tested function-source commit followed
-by a fresh full report. Estimate subsequent work from that refreshed inventory;
+The next concrete milestone is a fresh full report on the verified source-text
+candidate. Estimate subsequent work from that refreshed inventory;
 the present evidence does not support a reliable completion date.

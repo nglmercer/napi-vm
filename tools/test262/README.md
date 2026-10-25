@@ -65,6 +65,14 @@ source text; it records no timeouts or other non-passing outcomes.
 reports, exact identities, transitions, and native validation. This result also
 does not update the full score.
 
+The subsequent clean `d942b04` source-text continuation passes 1,006 / 1,020
+selected variants, gaining 16 passes with zero losses. It preserves exact UTF-16
+function/class source through both execution paths and reads corpus CR/CRLF bytes
+without newline translation. Fourteen semantic failures remain in the selection.
+[Source evidence](evidence/function-source-2026-10-25/) includes the initial
+regressions and their resolution, all final outcomes, and validation logs. The
+full score remains unchanged pending the next complete run.
+
 ## Historical measurements
 
 The preceding completed full pinned Test262 run (archived 2026-10-20, corpus

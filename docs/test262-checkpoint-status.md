@@ -19,6 +19,12 @@ The subsequent `f3d2d61` generator continuation passes 3,416 / 3,418 selected
 variants, gaining 18 passes with zero losses against the preceding verified
 worker. Its two remaining failures require function source text. These focused
 results also remain outside the full score.
+The subsequent clean `d942b04` source-text continuation passes 1,006 / 1,020
+selected variants, gaining 16 passes with zero losses. Its 14 residual failures
+are separate semantic cases. The runner preserves original CR/CRLF source bytes;
+intermediate regressions and their resolution are retained in
+[source evidence](../tools/test262/evidence/function-source-2026-10-25/).
+These focused results do not update the full score.
 The target is all
 102,956 variants passing; see the [full-pass campaign](test262-full-pass-progress.md).
 

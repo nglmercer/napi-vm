@@ -83,6 +83,35 @@ includes both full focused reports, every transition, exact source/worker
 identities, implementation patch, and validation logs. The full score remains
 the completed 102,669-pass baseline until a new full run completes.
 
+## Function source continuation
+
+Clean source `d942b04` passes **1,006 / 1,020** selected Function and related
+variants, up from 990: **16 new passes and zero lost passes**. Fourteen semantic
+failures remain in that selection, with no timeouts or other outcomes. The full
+score remains the completed 102,669-pass baseline pending a fresh full run.
+
+Functions, arrows, methods, accessors, classes, eval, and dynamic Function
+constructors retain shared original UTF-16 source ranges through AST and bytecode
+execution. Function toString returns exact source, including comments, original
+line endings, computed names, and lone surrogates. Native functions use internal
+display names and valid property syntax without reading guest name getters;
+bound functions and proxies retain native syntax. Callable string conversion
+uses the ordinary conversion hooks.
+
+The runner now reads corpus and harness text without Python universal newline
+translation. The initial comparison exposed eight losses: native symbol naming
+and CR/CRLF fixtures. A second comparison left two punctuation-name losses.
+Both intermediate reports are archived alongside the final zero-loss comparison;
+no outcomes were filtered or reclassified. Native formatting follows the
+[NativeFunction grammar](https://tc39.es/ecma262/multipage/fundamental-objects.html#sec-function.prototype.tostring).
+
+All 373 core tests, 11 new source regressions in both execution paths, 99
+neighboring integration tests, 23 worker integration tests, and seven runner
+tests pass. Formatting and core all-target Clippy with warnings denied pass.
+[Source evidence](../tools/test262/evidence/function-source-2026-10-25/)
+contains all comparisons, exact source/worker identities, implementation patch,
+and validation logs.
+
 ## Remaining gates
 
 1. Preserve the verified continuation and use the archived baseline and focused
