@@ -69,6 +69,7 @@ fn describe(token: &Token) -> String {
 
 pub struct Parser {
     toks: Vec<(Token, Span)>,
+    source_text: Option<crate::JsString>,
     pos: usize,
     /// Sentinel EOF token used as a fallback when pos is out of bounds.
     eof_tok: (Token, Span),
@@ -121,6 +122,7 @@ impl Parser {
     pub fn new(t: Vec<Token>) -> Self {
         Self {
             toks: t.into_iter().map(|t| (t, Span::unknown())).collect(),
+            source_text: None,
             pos: 0,
             eof_tok: (Token::EOF, Span::unknown()),
             depth: 0,
@@ -139,6 +141,7 @@ impl Parser {
     pub fn new_with_spans(t: Vec<(Token, Span)>) -> Self {
         Self {
             toks: t,
+            source_text: None,
             pos: 0,
             eof_tok: (Token::EOF, Span::unknown()),
             depth: 0,
@@ -152,6 +155,18 @@ impl Parser {
             single_statement: false,
             allow_annex_b_function: false,
         }
+    }
+
+    pub fn with_source_text(mut self, source: impl Into<crate::JsString>) -> Self {
+        self.source_text = Some(source.into());
+        self
+    }
+
+    pub(super) fn source_since(&self, start: usize) -> Option<SourceTextRef> {
+        let source = self.source_text.as_ref()?;
+        let begin = self.toks.get(start)?.1.source_range?.0;
+        let end = self.toks.get(self.pos.checked_sub(1)?)?.1.source_range?.1;
+        SourceText::new(source.clone(), begin, end)
     }
 
     /// Parse a whole program, recovering after errors so tooling still gets a

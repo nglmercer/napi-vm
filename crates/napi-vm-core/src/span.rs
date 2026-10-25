@@ -7,6 +7,8 @@ pub struct Span {
     pub col: usize,
     /// End line distinguishes token-internal newlines from intervening trivia.
     pub end_line: usize,
+    /// Half-open UTF-16 offsets into the original source, when available.
+    pub source_range: Option<(usize, usize)>,
 }
 
 impl Span {
@@ -15,6 +17,7 @@ impl Span {
             line,
             col,
             end_line: line,
+            source_range: None,
         }
     }
 
@@ -23,11 +26,17 @@ impl Span {
             line: 0,
             col: 0,
             end_line: 0,
+            source_range: None,
         }
     }
 
     pub fn is_unknown(&self) -> bool {
         self.line == 0
+    }
+
+    pub(crate) fn with_source_range(mut self, start: usize, end: usize) -> Self {
+        self.source_range = Some((start, end));
+        self
     }
 }
 

@@ -1772,6 +1772,7 @@ fn build_class_from_template(
         }
     }
     let class_val = interp.assemble_class(ClassAssembly {
+        source_text: template.source_text.clone(),
         name: template.name.clone(),
         super_cls,
         super_proto,
@@ -2077,7 +2078,8 @@ fn make_function(
         // The AST body is an empty placeholder (calls dispatch on
         // `bytecode`), and an empty body needs no hoisting.
         needs_hoisting: false,
-    }));
+    }))
+    .with_function_source(code.source_text.as_ref());
     Environment::initialize_function_name(&closure, expression_name, &function);
     function
 }
@@ -2117,7 +2119,8 @@ fn make_ast_function(
         bound: None,
         bytecode: None,
         needs_hoisting: crate::interpreter::body_needs_hoisting(&ast.body),
-    }));
+    }))
+    .with_function_source(ast.source_text.as_ref());
     Environment::initialize_function_name(&closure, expression_name, &function);
     function
 }

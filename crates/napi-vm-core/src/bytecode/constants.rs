@@ -110,6 +110,7 @@ pub enum ClassStaticTemplate {
 /// placeholders the deferred pass overwrites once each method compiles.
 #[derive(Debug, Clone)]
 pub struct ClassTemplate {
+    pub source_text: Option<crate::parser::SourceTextRef>,
     pub private_fields: Vec<String>,
     /// Lexically declared names for direct eval's static semantics.
     pub private_declarations: Vec<String>,
@@ -202,6 +203,7 @@ pub enum PropKind {
 /// variables must still resolve lexically, not through the caller's frame.
 #[derive(Debug, Clone)]
 pub struct AstFunction {
+    pub source_text: Option<crate::parser::SourceTextRef>,
     /// An explicit expression name owns an immutable lexical self binding.
     pub named_expression: bool,
     pub name: Option<String>,

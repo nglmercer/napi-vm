@@ -56,6 +56,7 @@ impl Parser {
     /// Parse a class declaration whose name may be omitted (`export default
     /// class { … }`), in which case `fallback` supplies the binding name.
     pub(crate) fn class_decl_named(&mut self, fallback: Option<&str>) -> Option<Statement> {
+        let source_start = self.pos;
         self.adv();
         let name_span = self.cur_span();
         let n = match (self.cur(), fallback) {
@@ -88,6 +89,7 @@ impl Parser {
             // `static` / `get` / `set` are modifiers only when a member name
             // follows; `get() {}` and `set = 1` declare members named `get`.
             let st = self.eat_modifier(&Token::KwStatic);
+            let member_start = self.pos;
             // `static { … }`: a static initialization block, not a member.
             if st && matches!(self.cur(), Token::LBrace) {
                 self.adv();
@@ -196,6 +198,7 @@ impl Parser {
                 let body = Self::function_body(&p, defaults, bd);
                 if is_getter {
                     b.push(ClassMember::Getter {
+                        source_text: self.source_since(member_start),
                         name: mn,
                         is_static: st,
                         body,
@@ -203,6 +206,7 @@ impl Parser {
                 } else if is_setter {
                     let param = p.first().cloned().unwrap_or_default();
                     b.push(ClassMember::Setter {
+                        source_text: self.source_since(member_start),
                         name: mn,
                         param,
                         is_static: st,
@@ -210,6 +214,7 @@ impl Parser {
                     });
                 } else {
                     b.push(ClassMember::Method {
+                        source_text: self.source_since(member_start),
                         name: mn,
                         is_static: st,
                         params: p,
@@ -238,6 +243,7 @@ impl Parser {
         self.expect(&Token::RBrace);
         self.pop_scope(class_scope);
         Some(Statement::ClassDecl {
+            source_text: self.source_since(source_start),
             name: n,
             superclass: sc,
             body: b,

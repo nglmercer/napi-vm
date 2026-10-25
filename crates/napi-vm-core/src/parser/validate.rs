@@ -489,6 +489,7 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             optional(init.as_deref(), ctx)
         }
         Statement::FnDecl {
+            source_text: _,
             name,
             params,
             body,
@@ -561,6 +562,7 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             statements(body, ctx)
         }
         Statement::ClassDecl {
+            source_text: _,
             name,
             superclass,
             body,
@@ -1270,6 +1272,7 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
             Ok(())
         }
         Expr::ArrowFn {
+            source_text: _,
             params,
             body,
             is_async,
@@ -1309,6 +1312,7 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
             }
         },
         Expr::FnExpr {
+            source_text: _,
             name,
             params,
             body,
@@ -1332,6 +1336,7 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
             )
         }
         Expr::ClassExpr {
+            source_text: _,
             name,
             superclass,
             body,
@@ -1526,6 +1531,7 @@ fn class(body: &[ClassMember], outer: &Context, derived: bool) -> Check {
         }
         match member {
             ClassMember::Method {
+                source_text: _,
                 name,
                 is_static,
                 params,

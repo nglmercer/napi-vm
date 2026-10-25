@@ -127,6 +127,7 @@ impl Parser {
                     // `async` and `*` modify the method that follows, and are
                     // contextual for the same reason `get` is: `{ async: 1 }`
                     // names a property.
+                    let method_start = self.pos;
                     let is_async = matches!(self.cur(), Token::KwAsync)
                         && !self.line_break_after_current()
                         && !matches!(
@@ -224,18 +225,21 @@ impl Parser {
                                     if let Some(key_str) = key_str {
                                         if is_method {
                                             p.push(ObjectProp::Getter {
+                                                source_text: self.source_since(method_start),
                                                 name: key_str,
                                                 body,
                                             });
                                         } else if is_setter {
                                             let param = params.first().cloned().unwrap_or_default();
                                             p.push(ObjectProp::Setter {
+                                                source_text: self.source_since(method_start),
                                                 name: key_str,
                                                 param,
                                                 body,
                                             });
                                         } else {
                                             p.push(ObjectProp::Method {
+                                                source_text: self.source_since(method_start),
                                                 name: key_str,
                                                 params,
                                                 body,
@@ -247,6 +251,7 @@ impl Parser {
                                         // Computed method with a non-literal key
                                         // (e.g. [Symbol.iterator]() { ... }).
                                         p.push(ObjectProp::ComputedMethod {
+                                            source_text: self.source_since(method_start),
                                             key: e,
                                             params,
                                             body,
@@ -278,6 +283,7 @@ impl Parser {
                         self.check_accessor_parameters(&params, &defaults, false, true);
                         let param = params.first().cloned().unwrap_or_default();
                         p.push(ObjectProp::Setter {
+                            source_text: self.source_since(method_start),
                             name: key,
                             param,
                             body: Self::function_body(&params, defaults, b),
@@ -288,9 +294,14 @@ impl Parser {
                         self.check_parameters(&params, &defaults, &b, true);
                         let body = Self::function_body(&params, defaults, b);
                         if is_method {
-                            p.push(ObjectProp::Getter { name: key, body });
+                            p.push(ObjectProp::Getter {
+                                source_text: self.source_since(method_start),
+                                name: key,
+                                body,
+                            });
                         } else {
                             p.push(ObjectProp::Method {
+                                source_text: self.source_since(method_start),
                                 name: key,
                                 params,
                                 body,
@@ -336,10 +347,11 @@ impl Parser {
                 })
             }
             Token::KwFunction => {
+                let source_start = self.pos;
                 self.adv();
                 // Generator expression: `function*`.
                 let is_generator = self.eat(&Token::Star);
-                self.fn_expr_tail(is_generator, false)
+                self.fn_expr_tail(is_generator, false, source_start)
             }
             Token::BigInt(digits) => {
                 let literal = Expr::BigIntLiteral(digits.clone());
@@ -355,6 +367,7 @@ impl Parser {
             // `class` in expression position.
             Token::KwClass => {
                 let Statement::ClassDecl {
+                    source_text,
                     name,
                     superclass,
                     body,
@@ -363,6 +376,7 @@ impl Parser {
                     return None;
                 };
                 Some(Expr::ClassExpr {
+                    source_text,
                     name: (name != ANONYMOUS_CLASS).then_some(name),
                     superclass,
                     body,
@@ -599,17 +613,28 @@ impl Parser {
         if newline {
             self.record_error("line terminator before arrow".into());
         }
-        Some(self.arrow_body_async(params, defaults, is_async))
+        Some(self.arrow_body_async(
+            params,
+            defaults,
+            is_async,
+            save.saturating_sub(usize::from(is_async)),
+        ))
     }
 
     /// Parse a function expression after its `function` (and any `*`) token.
-    fn fn_expr_tail(&mut self, is_generator: bool, is_async: bool) -> Option<Expr> {
+    fn fn_expr_tail(
+        &mut self,
+        is_generator: bool,
+        is_async: bool,
+        source_start: usize,
+    ) -> Option<Expr> {
         let n = self.with_grammar(is_async, is_generator, Self::ident);
         self.eat(&Token::LParen);
         let (p, defaults, b) = self.callable_parts(is_async, is_generator);
         self.check_parameters(&p, &defaults, &b, is_async || is_generator);
         let body = Self::function_body(&p, defaults, b);
         Some(Expr::FnExpr {
+            source_text: self.source_since(source_start),
             name: n,
             params: p,
             body,
@@ -618,8 +643,13 @@ impl Parser {
         })
     }
 
-    pub(super) fn arrow_body(&mut self, params: Vec<String>, defaults: Vec<Statement>) -> Expr {
-        self.arrow_body_async(params, defaults, false)
+    pub(super) fn arrow_body(
+        &mut self,
+        params: Vec<String>,
+        defaults: Vec<Statement>,
+        source_start: usize,
+    ) -> Expr {
+        self.arrow_body_async(params, defaults, false, source_start)
     }
 
     pub(super) fn arrow_body_async(
@@ -627,17 +657,21 @@ impl Parser {
         params: Vec<String>,
         defaults: Vec<Statement>,
         is_async: bool,
+        source_start: usize,
     ) -> Expr {
         // The parameters were consumed before the scope existed, so they are
         // recorded here, in the body's scope, where they belong.
         let arrow_scope = self.push_scope(true);
         let in_expression = self.in_expression;
-        let expr = self.with_grammar(is_async, false, |parser| {
+        let mut expr = self.with_grammar(is_async, false, |parser| {
             parser.with_in(in_expression, |parser| {
                 parser.arrow_body_in_scope(params, defaults, is_async)
             })
         });
         self.pop_scope(arrow_scope);
+        if let Expr::ArrowFn { source_text, .. } = &mut expr {
+            *source_text = self.source_since(source_start);
+        }
         expr
     }
 
@@ -653,6 +687,7 @@ impl Parser {
             self.check_parameters(&params, &defaults, &b, true);
             let body = Self::function_body(&params, defaults, b);
             Expr::ArrowFn {
+                source_text: None,
                 params,
                 body: Box::new(ExprOrBlock::Block(body)),
                 is_async,
@@ -662,6 +697,7 @@ impl Parser {
             self.check_parameters(&params, &defaults, &[], true);
             if defaults.is_empty() {
                 Expr::ArrowFn {
+                    source_text: None,
                     params,
                     body: Box::new(ExprOrBlock::Expr(Box::new(e))),
                     is_async,
@@ -673,6 +709,7 @@ impl Parser {
                     vec![Statement::Return(Some(Box::new(e)))],
                 );
                 Expr::ArrowFn {
+                    source_text: None,
                     params,
                     body: Box::new(ExprOrBlock::Block(body)),
                     is_async,
@@ -697,7 +734,7 @@ impl Parser {
             Token::KwFunction => {
                 self.adv();
                 let is_generator = self.eat(&Token::Star);
-                return self.fn_expr_tail(is_generator, true);
+                return self.fn_expr_tail(is_generator, true, save);
             }
             // `async x => …`
             Token::Identifier(_)
@@ -712,12 +749,19 @@ impl Parser {
             | Token::KwSet => {
                 let name = self.ident()?;
                 if self.eat(&Token::Arrow) {
-                    return Some(self.arrow_body_async(vec![name], Vec::new(), true));
+                    return Some(self.arrow_body_async(vec![name], Vec::new(), true, save));
                 }
             }
             Token::LParen => {
-                if let Some(Expr::ArrowFn { params, body, .. }) = self.try_arrow(true) {
+                if let Some(Expr::ArrowFn {
+                    params,
+                    body,
+                    source_text,
+                    ..
+                }) = self.try_arrow(true)
+                {
                     return Some(Expr::ArrowFn {
+                        source_text,
                         params,
                         body,
                         is_async: true,

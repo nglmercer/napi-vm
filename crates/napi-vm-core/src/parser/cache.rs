@@ -133,7 +133,7 @@ pub fn parse_cached_with_goal(
     let tokens = Lexer::new(source)
         .with_module_goal(goal == ParseGoal::Module)
         .tokenize_with_spans();
-    let mut parser = Parser::new_with_spans(tokens);
+    let mut parser = Parser::new_with_spans(tokens).with_source_text(source);
     let statements = match parser.parse_program_with_goal(goal) {
         Ok(statements) => statements,
         Err(error) => {

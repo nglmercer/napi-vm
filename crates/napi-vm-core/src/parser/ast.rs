@@ -1,3 +1,78 @@
+use std::sync::Arc;
+
+/// A shared view of exact source text, independent of inferred function names
+/// and parser desugaring. Offsets count original UTF-16 code units.
+#[derive(Debug)]
+pub struct SourceText {
+    source: crate::JsString,
+    start: usize,
+    end: usize,
+}
+
+pub type SourceTextRef = Arc<SourceText>;
+
+impl Expr {
+    pub(crate) fn source_text(&self) -> Option<&SourceTextRef> {
+        match self.unparenthesized() {
+            Self::FnExpr { source_text, .. }
+            | Self::ArrowFn { source_text, .. }
+            | Self::ClassExpr { source_text, .. } => source_text.as_ref(),
+            _ => None,
+        }
+    }
+}
+
+impl Statement {
+    pub(crate) fn source_text(&self) -> Option<&SourceTextRef> {
+        match self {
+            Self::FnDecl { source_text, .. } | Self::ClassDecl { source_text, .. } => {
+                source_text.as_ref()
+            }
+            _ => None,
+        }
+    }
+}
+
+impl ClassMember {
+    pub(crate) fn source_text(&self) -> Option<&SourceTextRef> {
+        match self {
+            Self::Method { source_text, .. }
+            | Self::Getter { source_text, .. }
+            | Self::Setter { source_text, .. } => source_text.as_ref(),
+            _ => None,
+        }
+    }
+}
+
+impl ObjectProp {
+    pub(crate) fn source_text(&self) -> Option<&SourceTextRef> {
+        match self {
+            Self::Method { source_text, .. }
+            | Self::ComputedMethod { source_text, .. }
+            | Self::Getter { source_text, .. }
+            | Self::Setter { source_text, .. } => source_text.as_ref(),
+            _ => None,
+        }
+    }
+}
+
+impl SourceText {
+    pub(crate) fn new(source: crate::JsString, start: usize, end: usize) -> Option<SourceTextRef> {
+        (start <= end && end <= source.len()).then(|| Arc::new(Self { source, start, end }))
+    }
+
+    pub fn text(&self) -> crate::JsString {
+        self.source.slice(self.start, self.end)
+    }
+}
+
+impl PartialEq for SourceText {
+    fn eq(&self, other: &Self) -> bool {
+        self.source.units()[self.start..self.end] == other.source.units()[other.start..other.end]
+    }
+}
+impl Eq for SourceText {}
+
 /// Binary operators, resolved at parse time so evaluation matches an integer
 /// discriminant instead of a string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,6 +255,7 @@ pub enum Expr {
         alternate: Box<Expr>,
     },
     ArrowFn {
+        source_text: Option<SourceTextRef>,
         params: Vec<String>,
         body: Box<ExprOrBlock>,
         is_async: bool,
@@ -187,11 +263,13 @@ pub enum Expr {
     /// `class { … }` / `class Named extends Base { … }` in expression
     /// position. The name, when present, binds only inside the class body.
     ClassExpr {
+        source_text: Option<SourceTextRef>,
         name: Option<String>,
         superclass: Option<Box<Expr>>,
         body: Vec<ClassMember>,
     },
     FnExpr {
+        source_text: Option<SourceTextRef>,
         name: Option<String>,
         params: Vec<String>,
         body: Vec<Statement>,
@@ -239,6 +317,7 @@ pub enum ObjectProp {
     KeyValue(String, Expr),
     Computed(Expr, Expr),
     ComputedMethod {
+        source_text: Option<SourceTextRef>,
         key: Expr,
         params: Vec<String>,
         body: Vec<Statement>,
@@ -248,6 +327,7 @@ pub enum ObjectProp {
         is_setter: bool,
     },
     Method {
+        source_text: Option<SourceTextRef>,
         name: String,
         params: Vec<String>,
         body: Vec<Statement>,
@@ -255,10 +335,12 @@ pub enum ObjectProp {
         is_generator: bool,
     },
     Getter {
+        source_text: Option<SourceTextRef>,
         name: String,
         body: Vec<Statement>,
     },
     Setter {
+        source_text: Option<SourceTextRef>,
         name: String,
         param: String,
         body: Vec<Statement>,
@@ -310,6 +392,7 @@ pub enum Statement {
         destructuring: Option<Box<Pattern>>,
     },
     FnDecl {
+        source_text: Option<SourceTextRef>,
         name: String,
         params: Vec<String>,
         body: Vec<Statement>,
@@ -320,6 +403,7 @@ pub enum Statement {
         annex_b_statement: bool,
     },
     ClassDecl {
+        source_text: Option<SourceTextRef>,
         name: String,
         superclass: Option<Box<Expr>>,
         body: Vec<ClassMember>,
@@ -486,6 +570,7 @@ pub enum MemberName {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClassMember {
     Method {
+        source_text: Option<SourceTextRef>,
         name: MemberName,
         is_static: bool,
         params: Vec<String>,
@@ -502,11 +587,13 @@ pub enum ClassMember {
     /// are installed, with `this` bound to the class.
     StaticBlock { body: Vec<Statement> },
     Getter {
+        source_text: Option<SourceTextRef>,
         name: MemberName,
         is_static: bool,
         body: Vec<Statement>,
     },
     Setter {
+        source_text: Option<SourceTextRef>,
         name: MemberName,
         param: String,
         is_static: bool,

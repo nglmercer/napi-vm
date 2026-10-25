@@ -259,15 +259,35 @@ pub(crate) fn is_default_has_instance_method(value: &Value) -> bool {
     }
 }
 
-// The VM retains parsed bodies rather than original source text. The standard
-// permits NativeFunction syntax when source text is unavailable.
 fn function_to_string(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     if !crate::interpreter::is_callable_value(&this) && !matches!(this, Value::Class(_)) {
         return Err(VmErr::Msg(
             "TypeError: Function.prototype.toString requires a callable".into(),
         ));
     }
-    Ok(Value::String("function () { [native code] }".into()))
+    let source = match &this {
+        Value::Function(function) => function.properties.meta.borrow().function_source.clone(),
+        Value::Class(class) => class.statics.meta.borrow().function_source.clone(),
+        _ => None,
+    };
+    if let Some(source) = source {
+        return Ok(Value::String(source.text()));
+    }
+    // Internal names do not consult guest properties or unwrap proxies/bound functions.
+    let name = match &this {
+        Value::Function(function) if function.native.is_some() && function.bound.is_none() => {
+            function.name.as_deref().map(crate::JsString::from)
+        }
+        Value::NativeFunction { name, .. } => Some(crate::JsString::from(name.as_ref())),
+        Value::Object { props } => props.meta.borrow().native_function_name.clone(),
+        _ => None,
+    };
+    let mut text = crate::JsString::from("function ");
+    if let Some(name) = name {
+        text.push_str(name);
+    }
+    text.push_str("() { [native code] }");
+    Ok(Value::String(text))
 }
 
 pub(super) fn function_bind(
@@ -478,7 +498,7 @@ fn new_function_kind(
         asynchronous,
         generator,
     )?;
-    let (params, body) =
+    let (params, body, source_text) =
         parse_dynamic_function(&parameter_source, &body_source, asynchronous, generator)?;
 
     let uses_arguments = crate::parser::stmts_need_arguments(&body);
@@ -507,15 +527,22 @@ fn new_function_kind(
         bytecode: None,
         needs_hoisting,
         bound: None,
-    })))
+    }))
+    .with_function_source(source_text.as_ref()))
 }
+
+type ParsedDynamicFunction = (
+    Vec<String>,
+    Vec<crate::parser::Statement>,
+    Option<crate::parser::SourceTextRef>,
+);
 
 fn parse_dynamic_function(
     params: &crate::JsString,
     body: &crate::JsString,
     asynchronous: bool,
     generator: bool,
-) -> Result<(Vec<String>, Vec<crate::parser::Statement>), VmErr> {
+) -> Result<ParsedDynamicFunction, VmErr> {
     // P has no implicit leading line terminator. Inserting one would make
     // an initial HTML close comment legal when parsing formal parameters.
     let mut source = crate::JsString::from(match (asynchronous, generator) {
@@ -529,7 +556,8 @@ fn parse_dynamic_function(
     source.push_str(body.clone());
     source.push_str("\n}");
     let mut parser =
-        crate::Parser::new_with_spans(crate::Lexer::from_js_string(&source).tokenize_with_spans());
+        crate::Parser::new_with_spans(crate::Lexer::from_js_string(&source).tokenize_with_spans())
+            .with_source_text(&source);
     let mut parsed = parser
         .parse_program_with_goal(crate::parser::ParseGoal::Script)
         .map_err(|error| VmErr::Msg(format!("SyntaxError: {}", error.message)))?;
@@ -540,8 +568,12 @@ fn parse_dynamic_function(
     }
     match parsed.pop() {
         Some(crate::parser::Statement::FnDecl {
-            name, params, body, ..
-        }) if name == "anonymous" => Ok((params, body)),
+            name,
+            params,
+            body,
+            source_text,
+            ..
+        }) if name == "anonymous" => Ok((params, body, source_text)),
         _ => Err(VmErr::Msg(
             "SyntaxError: invalid dynamic function source".into(),
         )),

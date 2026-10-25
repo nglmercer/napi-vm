@@ -918,7 +918,8 @@ export default { createRequire, isBuiltin, builtinModules };
         }
         let mut lexer = crate::Lexer::from_js_string(source)
             .with_module_goal(goal == crate::parser::ParseGoal::Module);
-        let mut parser = crate::Parser::new_with_spans(lexer.tokenize_with_spans());
+        let mut parser =
+            crate::Parser::new_with_spans(lexer.tokenize_with_spans()).with_source_text(source);
         let statements = parser
             .parse_program_with_goal(goal)
             .map_err(|error| VmErr::Msg(format!("SyntaxError: {}", error.message)))?;

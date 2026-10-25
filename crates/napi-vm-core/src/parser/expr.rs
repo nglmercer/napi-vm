@@ -617,6 +617,7 @@ impl Parser {
     }
 
     fn postfix(&mut self) -> Option<Expr> {
+        let source_start = self.pos;
         let mut e = self.primary()?;
         loop {
             match self.cur() {
@@ -730,7 +731,7 @@ impl Parser {
                     }
                     if let Expr::Identifier(n) = e {
                         self.adv();
-                        e = self.arrow_body(vec![n], vec![]);
+                        e = self.arrow_body(vec![n], vec![], source_start);
                     } else {
                         break;
                     }

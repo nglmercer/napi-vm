@@ -37,6 +37,7 @@ pub struct SlotInfo {
 /// zero-parameter function whose outer scope is the global environment).
 #[derive(Debug, Clone)]
 pub struct BytecodeFunction {
+    pub source_text: Option<crate::parser::SourceTextRef>,
     /// An explicit expression name owns an immutable lexical self binding.
     pub named_expression: bool,
     /// Own strict directive; inherited strictness is captured at instantiation.

@@ -230,6 +230,7 @@ struct LexicalMember {
 
 pub struct Lexer {
     src: Vec<char>,
+    source_offsets: Vec<usize>,
     pos: usize,
     line: usize,
     col: usize,
@@ -269,8 +270,17 @@ pub struct Lexer {
 
 impl Lexer {
     pub fn new(s: &str) -> Self {
+        let src: Vec<char> = s.chars().collect();
+        let mut source_offsets = Vec::with_capacity(src.len() + 1);
+        let mut offset = 0;
+        for c in &src {
+            source_offsets.push(offset);
+            offset += c.len_utf16();
+        }
+        source_offsets.push(offset);
         Self {
-            src: s.chars().collect(),
+            src,
+            source_offsets,
             pos: 0,
             line: 1,
             col: 1,
@@ -308,7 +318,27 @@ impl Lexer {
     pub fn from_js_string(source: &crate::JsString) -> Self {
         let mut lexer = Self::new(&source.to_key());
         lexer.encoded_source = true;
+        // The key encoding expands lone surrogates and the reserved marker.
+        // Map those characters back to their original UTF-16 boundaries.
+        let mut offsets = Vec::with_capacity(lexer.src.len() + 1);
+        let mut offset = 0;
+        for scalar in char::decode_utf16(source.units().iter().copied()) {
+            let (encoded, units) = match scalar {
+                Ok('\u{FDD0}') => (2, 1),
+                Ok(c) => (1, c.len_utf16()),
+                Err(_) => (6, 1),
+            };
+            offsets.extend(std::iter::repeat_n(offset, encoded));
+            offset += units;
+        }
+        offsets.push(offset);
+        lexer.source_offsets = offsets;
         lexer
+    }
+
+    fn source_span(&self, line: usize, col: usize, start: usize, end: usize) -> crate::span::Span {
+        crate::span::Span::new(line, col)
+            .with_source_range(self.source_offsets[start], self.source_offsets[end])
     }
     fn source_unit_string(&mut self, c: char) -> crate::JsString {
         if self.encoded_source && c == '\u{FDD0}' {
@@ -361,7 +391,7 @@ impl Lexer {
             }
         }
         toks.append(&mut self.lexical_errors);
-        let eof_span = crate::span::Span::new(self.line, self.col);
+        let eof_span = self.source_span(self.line, self.col, self.pos, self.pos);
         toks.push((Token::EOF, eof_span));
         toks
     }
@@ -458,30 +488,40 @@ impl Lexer {
     /// raw text of each quasi, with ECMAScript line-ending normalization. Emits:
     /// `Backtick Quasi (DollarLBrace <expr tokens> RBrace Quasi)* Backtick`.
     fn read_template(&mut self) -> Vec<crate::span::SpannedToken> {
+        let opening = self.pos;
         self.pos += 1; // consume opening backtick
         self.col += 1;
         let mut toks = vec![(
             Token::Backtick,
-            crate::span::Span::new(self.line, self.col - 1),
+            self.source_span(self.line, self.col - 1, opening, self.pos),
         )];
         let mut quasi = TemplateChunk::default();
+        let mut quasi_start = self.pos;
         while self.pos < self.src.len() {
             let c = self.src[self.pos];
             if c == '`' {
+                let closing = self.pos;
                 self.pos += 1;
                 self.col += 1;
-                let span = crate::span::Span::new(self.line, self.col - 1);
-                toks.push((Token::TemplateQuasi(quasi), span));
+                let span = self.source_span(self.line, self.col - 1, closing, self.pos);
+                toks.push((
+                    Token::TemplateQuasi(quasi),
+                    self.source_span(self.line, self.col - 1, quasi_start, closing),
+                ));
                 toks.push((Token::Backtick, span));
                 return toks;
             } else if c == '$' && self.pos + 1 < self.src.len() && self.src[self.pos + 1] == '{' {
                 self.pos += 2;
                 self.col += 2;
-                let span = crate::span::Span::new(self.line, self.col - 2);
-                toks.push((Token::TemplateQuasi(quasi), span));
+                let span = self.source_span(self.line, self.col - 2, self.pos - 2, self.pos);
+                toks.push((
+                    Token::TemplateQuasi(quasi),
+                    self.source_span(self.line, self.col - 2, quasi_start, self.pos - 2),
+                ));
                 quasi = TemplateChunk::default();
                 toks.push((Token::DollarLBrace, span));
                 self.lex_interp(&mut toks);
+                quasi_start = self.pos;
             } else if c == '\\' && self.pos + 1 < self.src.len() {
                 let start = self.pos;
                 self.pos += 1;
@@ -518,7 +558,7 @@ impl Lexer {
             }
         }
         // Unterminated template: flush what we have.
-        let span = crate::span::Span::new(self.line, self.col);
+        let span = self.source_span(self.line, self.col, quasi_start, self.pos);
         toks.push((Token::TemplateQuasi(quasi), span));
         toks.push((Token::Unknown('`'), span));
         toks
@@ -589,6 +629,7 @@ impl Lexer {
     }
 
     fn next_with_span(&mut self) -> Option<crate::span::SpannedToken> {
+        let start = self.pos;
         let mut span = crate::span::Span::new(self.line, self.col);
         let mut t = self.next()?;
         if matches!(
@@ -603,6 +644,12 @@ impl Lexer {
         if !matches!(t, Token::Backtick) {
             span.end_line = self.line;
         }
+        let end = if matches!(t, Token::Backtick) {
+            start + 1
+        } else {
+            self.pos
+        };
+        span.source_range = Some((self.source_offsets[start], self.source_offsets[end]));
         Some((t, span))
     }
 

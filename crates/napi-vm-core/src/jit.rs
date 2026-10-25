@@ -273,6 +273,7 @@ mod tests {
     /// the mocks ignore it; the real call site passes the running function.
     fn fake_func() -> BytecodeFunction {
         BytecodeFunction {
+            source_text: None,
             named_expression: false,
             strict: false,
             name: None,

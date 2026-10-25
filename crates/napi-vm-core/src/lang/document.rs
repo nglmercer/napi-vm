@@ -982,10 +982,19 @@ impl Builder<'_> {
                                 },
                             );
                         }
-                        ObjectProp::Getter { name, body } => {
+                        ObjectProp::Getter {
+                            source_text: _,
+                            name,
+                            body,
+                        } => {
                             fields.insert(name.clone(), self.function_result(&[], body, env));
                         }
-                        ObjectProp::Setter { name, param, body } => {
+                        ObjectProp::Setter {
+                            source_text: _,
+                            name,
+                            param,
+                            body,
+                        } => {
                             fields.insert(
                                 name.clone(),
                                 Type::Function {
@@ -1198,6 +1207,7 @@ impl Builder<'_> {
                     );
                 }
                 ClassMember::Getter {
+                    source_text: _,
                     name: MemberName::Static(field_name) | MemberName::Private(field_name),
                     is_static,
                     body,
@@ -1205,6 +1215,7 @@ impl Builder<'_> {
                     fields.insert(field_name.clone(), self.function_result(&[], body, outer));
                 }
                 ClassMember::Setter {
+                    source_text: _,
                     name: MemberName::Static(field_name) | MemberName::Private(field_name),
                     is_static,
                     param,

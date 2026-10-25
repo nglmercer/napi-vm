@@ -466,6 +466,7 @@ impl Parser {
         is_async: bool,
         fallback: Option<&str>,
     ) -> Option<Statement> {
+        let source_start = self.pos.saturating_sub(usize::from(is_async));
         self.adv(); // consume `function`
         // Generator declaration: `function*`.
         let is_generator = self.eat(&Token::Star);
@@ -496,6 +497,7 @@ impl Parser {
         self.check_parameters(&p, &defaults, &b, is_async || is_generator);
         let body = Self::function_body(&p, defaults, b);
         Some(Statement::FnDecl {
+            source_text: self.source_since(source_start),
             annex_b_statement,
             name: n,
             params: p,

@@ -508,6 +508,12 @@ impl Interpreter {
     /// `console.*` — where a custom `toString` is what a caller expects.
     #[doc(hidden)]
     pub fn display_string(&mut self, value: &Value) -> Result<crate::JsString, VmErr> {
+        if matches!(
+            value,
+            Value::Function(_) | Value::NativeFunction { .. } | Value::Class(_) | Value::Proxy(_)
+        ) {
+            return self.ecmascript_to_string(value);
+        }
         let has_custom = matches!(value, Value::Object { .. } | Value::Error(_));
         if has_custom {
             let method = self.member(value, "toString")?;

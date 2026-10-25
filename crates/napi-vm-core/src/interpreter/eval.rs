@@ -62,6 +62,7 @@ pub(crate) enum ClassStaticElement {
 /// the constructor plus gathered prototype/static members, with static
 /// blocks to run once the class value exists.
 pub(crate) struct ClassAssembly {
+    pub source_text: Option<crate::parser::SourceTextRef>,
     pub name: String,
     pub super_cls: Option<Value>,
     pub super_proto: Option<Rc<Value>>,
@@ -377,13 +378,20 @@ impl Interpreter {
         key: &Value,
     ) -> Result<Value, VmErr> {
         if let Expr::ClassExpr {
+            source_text: _,
             name: None,
             superclass,
             body,
         } = initializer.unparenthesized()
         {
             let name = self.property_function_name(key)?;
-            return self.build_class_with_name("", &name, superclass.as_deref(), body);
+            return self.build_class_with_name(
+                "",
+                &name,
+                superclass.as_deref(),
+                body,
+                initializer.source_text(),
+            );
         }
         let value = self.eval_expr(initializer)?;
         if matches!(
@@ -510,6 +518,7 @@ impl Interpreter {
     /// each tier; everything from the prototype object on is shared.
     pub(crate) fn assemble_class(&mut self, asm: ClassAssembly) -> Result<Value, VmErr> {
         let ClassAssembly {
+            source_text,
             name,
             super_cls,
             super_proto,
@@ -639,7 +648,8 @@ impl Interpreter {
             constructor: Box::new(constructor),
             prototype: Rc::new(prototype),
             statics: static_properties,
-        }));
+        }))
+        .with_function_source(source_text.as_ref());
         if let Value::Class(class) = &class_val {
             if !has_constructor_member {
                 class
@@ -741,12 +751,14 @@ impl Interpreter {
         name: &str,
         superclass: Option<&Expr>,
         body: &[ClassMember],
+        source_text: Option<&crate::parser::SourceTextRef>,
     ) -> Result<Value, VmErr> {
         self.build_class_with_name(
             name,
             crate::parser::declaration_display_name(name),
             superclass,
             body,
+            source_text,
         )
     }
 
@@ -756,6 +768,7 @@ impl Interpreter {
         name: &str,
         superclass: Option<&Expr>,
         body: &[ClassMember],
+        source_text: Option<&crate::parser::SourceTextRef>,
     ) -> Result<Value, VmErr> {
         let member_scope = Self::class_environment(self.global.clone(), binding_name);
         let saved = std::mem::replace(&mut self.global, member_scope.clone());
@@ -808,6 +821,7 @@ impl Interpreter {
         for member in body {
             match member {
                 ClassMember::Method {
+                    source_text: _,
                     name,
                     is_static: st,
                     params: mp,
@@ -859,6 +873,8 @@ impl Interpreter {
                         needs_hoisting: body_needs_hoisting(mb),
                         bound: None,
                     }));
+
+                    let fn_val = fn_val.with_function_source(member.source_text());
                     if matches!(name, MemberName::Private(_)) {
                         define_class_private_element(
                             &member_scope,
@@ -918,6 +934,7 @@ impl Interpreter {
                     }
                 }
                 ClassMember::Getter {
+                    source_text: _,
                     name,
                     is_static: st,
                     body: gb,
@@ -960,6 +977,8 @@ impl Interpreter {
                         needs_hoisting: body_needs_hoisting(gb),
                         bound: None,
                     }));
+
+                    let getter_fn = getter_fn.with_function_source(member.source_text());
                     if matches!(name, MemberName::Private(_)) {
                         define_class_private_element(
                             &member_scope,
@@ -987,6 +1006,7 @@ impl Interpreter {
                     }
                 }
                 ClassMember::Setter {
+                    source_text: _,
                     name,
                     param,
                     is_static: st,
@@ -1030,6 +1050,8 @@ impl Interpreter {
                         needs_hoisting: body_needs_hoisting(sb),
                         bound: None,
                     }));
+
+                    let setter_fn = setter_fn.with_function_source(member.source_text());
                     if matches!(name, MemberName::Private(_)) {
                         define_class_private_element(
                             &member_scope,
@@ -1139,6 +1161,7 @@ impl Interpreter {
         }));
 
         self.assemble_class(ClassAssembly {
+            source_text: source_text.cloned(),
             name: name.to_string(),
             super_cls,
             super_proto,
@@ -1516,7 +1539,8 @@ impl Interpreter {
                 bytecode: None,
                 needs_hoisting: body_needs_hoisting(body),
                 bound: None,
-            })),
+            }))
+            .with_function_source(statement.source_text()),
         )?;
         Ok(Value::Undefined)
     }
@@ -1598,11 +1622,13 @@ impl Interpreter {
             }
             Statement::FnDecl { .. } => self.evaluate_function_declaration(s),
             Statement::ClassDecl {
+                source_text: _,
                 name,
                 superclass,
                 body,
             } => {
-                let class_val = self.build_class(name, superclass.as_deref(), body)?;
+                let class_val =
+                    self.build_class(name, superclass.as_deref(), body, s.source_text())?;
                 self.set_binding(name, class_val)?;
                 Ok(Value::Undefined)
             }
@@ -2654,6 +2680,7 @@ impl Interpreter {
                     );
                 }
                 ObjectProp::ComputedMethod {
+                    source_text: _,
                     key,
                     params,
                     body,
@@ -2680,14 +2707,16 @@ impl Interpreter {
                     } else {
                         display
                     };
-                    let function = self.object_literal_callable(
-                        &home,
-                        &function_name,
-                        params,
-                        body,
-                        *is_async,
-                        *is_generator,
-                    );
+                    let function = self
+                        .object_literal_callable(
+                            &home,
+                            &function_name,
+                            params,
+                            body,
+                            *is_async,
+                            *is_generator,
+                        )
+                        .with_function_source(prop.source_text());
                     insert_object_property(
                         &mut object,
                         &mut positions,
@@ -2721,20 +2750,23 @@ impl Interpreter {
                     }
                 }
                 ObjectProp::Method {
+                    source_text: _,
                     name,
                     params,
                     body,
                     is_async,
                     is_generator,
                 } => {
-                    let function = self.object_literal_callable(
-                        &home,
-                        name,
-                        params,
-                        body,
-                        *is_async,
-                        *is_generator,
-                    );
+                    let function = self
+                        .object_literal_callable(
+                            &home,
+                            name,
+                            params,
+                            body,
+                            *is_async,
+                            *is_generator,
+                        )
+                        .with_function_source(prop.source_text());
                     insert_object_property(
                         &mut object,
                         &mut positions,
@@ -2744,15 +2776,21 @@ impl Interpreter {
                         None,
                     );
                 }
-                ObjectProp::Getter { name, body } => {
-                    let function = self.object_literal_callable(
-                        &home,
-                        &format!("get {name}"),
-                        &[],
-                        body,
-                        false,
-                        false,
-                    );
+                ObjectProp::Getter {
+                    source_text: _,
+                    name,
+                    body,
+                } => {
+                    let function = self
+                        .object_literal_callable(
+                            &home,
+                            &format!("get {name}"),
+                            &[],
+                            body,
+                            false,
+                            false,
+                        )
+                        .with_function_source(prop.source_text());
                     insert_object_property(
                         &mut object,
                         &mut positions,
@@ -2762,15 +2800,22 @@ impl Interpreter {
                         Some(ObjectAccessorKind::Getter),
                     );
                 }
-                ObjectProp::Setter { name, param, body } => {
-                    let function = self.object_literal_callable(
-                        &home,
-                        &format!("set {name}"),
-                        std::slice::from_ref(param),
-                        body,
-                        false,
-                        false,
-                    );
+                ObjectProp::Setter {
+                    source_text: _,
+                    name,
+                    param,
+                    body,
+                } => {
+                    let function = self
+                        .object_literal_callable(
+                            &home,
+                            &format!("set {name}"),
+                            std::slice::from_ref(param),
+                            body,
+                            false,
+                            false,
+                        )
+                        .with_function_source(prop.source_text());
                     insert_object_property(
                         &mut object,
                         &mut positions,
@@ -3469,12 +3514,12 @@ impl Interpreter {
             }
             // A class expression's own name is visible only inside its body,
             // which a child scope provides.
-            Expr::ClassExpr {
+            Expr::ClassExpr { source_text: _,
                 name,
                 superclass,
                 body,
-            } => self.build_class(name.as_deref().unwrap_or(""), superclass.as_deref(), body),
-            Expr::ArrowFn {
+            } => self.build_class(name.as_deref().unwrap_or(""), superclass.as_deref(), body, e.source_text()),
+            Expr::ArrowFn { source_text: _,
                 params,
                 body,
                 is_async,
@@ -3505,8 +3550,8 @@ impl Interpreter {
                 is_generator: false,
                 bytecode: None,
                 bound: None,
-            }))),
-            Expr::FnExpr {
+            })).with_function_source(e.source_text())),
+            Expr::FnExpr { source_text: _,
                 name,
                 params,
                 body,
@@ -3537,7 +3582,7 @@ impl Interpreter {
                     bytecode: None,
                     needs_hoisting: body_needs_hoisting(body),
                     bound: None,
-                }));
+                })).with_function_source(e.source_text());
                 Environment::initialize_function_name(&closure, name.as_deref(), &function);
                 Ok(function)
             }

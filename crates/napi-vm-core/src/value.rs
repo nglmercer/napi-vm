@@ -183,6 +183,8 @@ pub(crate) enum CollectionKind {
 /// one binding they were applied to.
 #[derive(Default)]
 pub struct ObjectMeta {
+    pub(crate) function_source: Option<crate::parser::SourceTextRef>,
+    pub(crate) native_function_name: Option<crate::JsString>,
     /// Host-only legacy HTMLDDA brand. Never inherited or forwarded by proxies.
     pub(crate) html_dda: bool,
     /// The realm that owns native methods and implicit intrinsic prototypes.
@@ -3114,6 +3116,23 @@ impl GeneratorInner {
 }
 
 impl Value {
+    pub(crate) fn with_function_source(
+        self,
+        source: Option<&crate::parser::SourceTextRef>,
+    ) -> Self {
+        if let Some(source) = source {
+            let properties = match &self {
+                Self::Function(function) => Some(&function.properties),
+                Self::Class(class) => Some(&class.statics),
+                _ => None,
+            };
+            if let Some(properties) = properties {
+                properties.meta.borrow_mut().function_source = Some(source.clone());
+            }
+        }
+        self
+    }
+
     pub fn instance_properties() -> Rc<ObjectCell> {
         let properties = ObjectCell::new_with_default_proto(vec![]);
         // Exotic default prototypes depend on their builtin kind, not Object.

@@ -165,6 +165,7 @@ impl<T> std::ops::Deref for SharedSlice<'_, T> {
 /// A function definition to compile, borrowed from the parsed unit.
 #[derive(Clone)]
 struct FuncDef<'a> {
+    source_text: Option<crate::parser::SourceTextRef>,
     named_expression: bool,
     name: Option<String>,
     params: SharedSlice<'a, String>,
@@ -867,6 +868,7 @@ fn addr_target(addr: usize) -> Result<Target, Decline> {
 
 /// A function declaration directly in one block, borrowed for compilation.
 struct FnDeclRef<'a> {
+    source_text: Option<crate::parser::SourceTextRef>,
     name: &'a str,
     params: &'a [String],
     body: &'a [Statement],
@@ -886,6 +888,7 @@ fn block_fn_decls<'a>(stmts: &'a [Statement], out: &mut Vec<FnDeclRef<'a>>) {
                 ..
             } => {
                 out.push(FnDeclRef {
+                    source_text: stmt.source_text().cloned(),
                     name,
                     params,
                     body,
@@ -961,6 +964,7 @@ impl<'a> Compiler<'a> {
         block_fn_decls(stmts, &mut fns);
         for decl in fns {
             let value = self.defer_function(FuncDef {
+                source_text: decl.source_text.clone(),
                 named_expression: false,
                 name: Some(crate::parser::declaration_display_name(decl.name).to_owned()),
                 params: SharedSlice::Borrowed(decl.params),
@@ -1025,6 +1029,7 @@ impl<'a> Compiler<'a> {
         for decl in fns {
             let slot = self.declare_slot_if_absent(decl.name, SlotKind::Var)?;
             let value = self.defer_function(FuncDef {
+                source_text: decl.source_text.clone(),
                 named_expression: false,
                 name: Some(crate::parser::declaration_display_name(decl.name).to_owned()),
                 params: SharedSlice::Borrowed(decl.params),
@@ -1082,6 +1087,7 @@ impl<'a> Compiler<'a> {
         block_fn_decls(stmts, &mut fns);
         for decl in fns {
             let value = self.defer_function(FuncDef {
+                source_text: decl.source_text.clone(),
                 named_expression: false,
                 name: Some(crate::parser::declaration_display_name(decl.name).to_owned()),
                 params: SharedSlice::Borrowed(decl.params),
@@ -1139,6 +1145,7 @@ impl<'a> Compiler<'a> {
                 )
             });
         Ok(BytecodeFunction {
+            source_text: None,
             named_expression: false,
             strict: false,
             name,
@@ -1306,6 +1313,7 @@ impl<'a> Compiler<'a> {
         let mut code =
             self.build_function(name.clone(), parameter_count, *is_arrow, *is_constructor)?;
         code.named_expression = def.named_expression;
+        code.source_text = def.source_text.clone();
         code.strict = matches!(body, FuncBody::Stmts(stmts) if crate::parser::use_strict(stmts));
         Ok(code)
     }
@@ -1541,11 +1549,18 @@ impl<'a> Compiler<'a> {
             } => self.compile_try(body, catch, finally),
             Statement::Switch { disc, cases } => self.compile_switch(disc, cases),
             Statement::ClassDecl {
+                source_text: _,
                 name,
                 superclass,
                 body,
             } => {
-                let value = self.compile_class(name, None, superclass.as_deref(), body)?;
+                let value = self.compile_class(
+                    name,
+                    None,
+                    superclass.as_deref(),
+                    body,
+                    stmt.source_text(),
+                )?;
                 match self.resolve(name)? {
                     Binding::Slot(slot) => self.emit(Instr::InitLocal { slot, src: value }),
                     Binding::Global => {
@@ -1974,6 +1989,7 @@ impl<'a> Compiler<'a> {
         expr_name: Option<String>,
         superclass: Option<&'a Expr>,
         body: &'a [ClassMember],
+        source_text: Option<&crate::parser::SourceTextRef>,
     ) -> Result<Reg, Decline> {
         // Heritage, computed names and method closures share one class scope.
         let mut boxed = HashSet::new();
@@ -2020,6 +2036,7 @@ impl<'a> Compiler<'a> {
         for member in body {
             match member {
                 ClassMember::Method {
+                    source_text: _,
                     name: member_name,
                     is_static: st,
                     params,
@@ -2055,6 +2072,7 @@ impl<'a> Compiler<'a> {
                             index: members.len(),
                         },
                         FuncDef {
+                            source_text: member.source_text().cloned(),
                             named_expression: false,
                             name: display,
                             params: SharedSlice::Borrowed(params),
@@ -2100,6 +2118,7 @@ impl<'a> Compiler<'a> {
                     }
                 }
                 ClassMember::Getter {
+                    source_text: _,
                     name: member_name,
                     is_static: st,
                     body: getter_body,
@@ -2118,6 +2137,7 @@ impl<'a> Compiler<'a> {
                             index: members.len(),
                         },
                         FuncDef {
+                            source_text: member.source_text().cloned(),
                             named_expression: false,
                             name: display,
                             params: SharedSlice::Borrowed(&[]),
@@ -2136,6 +2156,7 @@ impl<'a> Compiler<'a> {
                     });
                 }
                 ClassMember::Setter {
+                    source_text: _,
                     name: member_name,
                     param,
                     is_static: st,
@@ -2155,6 +2176,7 @@ impl<'a> Compiler<'a> {
                             index: members.len(),
                         },
                         FuncDef {
+                            source_text: member.source_text().cloned(),
                             named_expression: false,
                             name: display,
                             params: SharedSlice::Borrowed(std::slice::from_ref(param)),
@@ -2181,6 +2203,7 @@ impl<'a> Compiler<'a> {
                         self.captures_arguments = true;
                     }
                     let ast = build_ast_function(&FuncDef {
+                        source_text: None,
                         named_expression: false,
                         name: None,
                         params: SharedSlice::Borrowed(&[]),
@@ -2224,6 +2247,7 @@ impl<'a> Compiler<'a> {
         deferred.push((
             PatchTarget::ClassCtor { tmpl: u16::MAX },
             FuncDef {
+                source_text: None,
                 named_expression: false,
                 // The evaluator names the constructor after the class.
                 name: Some(crate::parser::declaration_display_name(name).to_owned()),
@@ -2237,6 +2261,7 @@ impl<'a> Compiler<'a> {
         ));
 
         let tmpl = self.push_const(Constant::ClassTemplate(ClassTemplate {
+            source_text: source_text.cloned(),
             private_fields,
             private_declarations,
             name: crate::parser::declaration_display_name(name).to_owned(),
@@ -3603,6 +3628,7 @@ impl<'a> Compiler<'a> {
                 Ok(join)
             }
             Expr::ArrowFn {
+                source_text: _,
                 params,
                 body,
                 is_async,
@@ -3612,6 +3638,7 @@ impl<'a> Compiler<'a> {
                     ExprOrBlock::Expr(expr) => FuncBody::Expr(expr),
                 };
                 self.defer_function(FuncDef {
+                    source_text: expr.source_text().cloned(),
                     named_expression: false,
                     name: None,
                     params: SharedSlice::Borrowed(params),
@@ -3623,12 +3650,14 @@ impl<'a> Compiler<'a> {
                 })
             }
             Expr::FnExpr {
+                source_text: _,
                 name,
                 params,
                 body,
                 is_async,
                 is_generator,
             } => self.defer_function(FuncDef {
+                source_text: expr.source_text().cloned(),
                 named_expression: name.is_some(),
                 name: name.clone(),
                 params: SharedSlice::Borrowed(params),
@@ -3659,6 +3688,7 @@ impl<'a> Compiler<'a> {
             Expr::This => self.compile_this(),
             Expr::Object { props, .. } => self.compile_object(props),
             Expr::ClassExpr {
+                source_text: _,
                 name,
                 superclass,
                 body,
@@ -3667,6 +3697,7 @@ impl<'a> Compiler<'a> {
                 name.clone(),
                 superclass.as_deref(),
                 body,
+                expr.source_text(),
             ),
             Expr::TaggedTemplate {
                 site,
@@ -3857,6 +3888,7 @@ impl<'a> Compiler<'a> {
                     }
                 }
                 ObjectProp::Method {
+                    source_text: _,
                     name,
                     params,
                     body,
@@ -3864,6 +3896,7 @@ impl<'a> Compiler<'a> {
                     is_generator,
                 } => {
                     let val = self.defer_function(FuncDef {
+                        source_text: prop.source_text().cloned(),
                         named_expression: false,
                         name: Some(name.clone()),
                         params: SharedSlice::Borrowed(params),
@@ -3881,8 +3914,13 @@ impl<'a> Compiler<'a> {
                         kind: PropKind::Method,
                     });
                 }
-                ObjectProp::Getter { name, body } => {
+                ObjectProp::Getter {
+                    source_text: _,
+                    name,
+                    body,
+                } => {
                     let val = self.defer_function(FuncDef {
+                        source_text: prop.source_text().cloned(),
                         named_expression: false,
                         name: Some(format!("get {name}")),
                         params: SharedSlice::Borrowed(&[]),
@@ -3899,8 +3937,14 @@ impl<'a> Compiler<'a> {
                         kind: PropKind::Getter,
                     });
                 }
-                ObjectProp::Setter { name, param, body } => {
+                ObjectProp::Setter {
+                    source_text: _,
+                    name,
+                    param,
+                    body,
+                } => {
                     let val = self.defer_function(FuncDef {
+                        source_text: prop.source_text().cloned(),
                         named_expression: false,
                         name: Some(format!("set {name}")),
                         params: SharedSlice::Borrowed(std::slice::from_ref(param)),
@@ -4982,12 +5026,14 @@ impl<'a> Compiler<'a> {
     ) -> Result<Reg, Decline> {
         match value.unparenthesized() {
             Expr::FnExpr {
+                source_text: _,
                 name: None,
                 params,
                 body,
                 is_async,
                 is_generator,
             } => self.defer_function(FuncDef {
+                source_text: value.source_text().cloned(),
                 named_expression: false,
                 name: Some(name.into()),
                 params: SharedSlice::Borrowed(params),
@@ -4998,10 +5044,12 @@ impl<'a> Compiler<'a> {
                 is_constructor: !is_async && !is_generator,
             }),
             Expr::ArrowFn {
+                source_text: _,
                 params,
                 body,
                 is_async,
             } => self.defer_function(FuncDef {
+                source_text: value.source_text().cloned(),
                 named_expression: false,
                 name: Some(name.into()),
                 params: SharedSlice::Borrowed(params),
@@ -5015,11 +5063,13 @@ impl<'a> Compiler<'a> {
                 is_constructor: false,
             }),
             Expr::ClassExpr {
+                source_text: _,
                 name: None,
                 superclass,
                 body,
             } => {
-                let dst = self.compile_class("", None, superclass.as_deref(), body)?;
+                let dst =
+                    self.compile_class("", None, superclass.as_deref(), body, value.source_text())?;
                 let template = self
                     .code
                     .iter()
@@ -5313,6 +5363,7 @@ fn build_ast_function(def: &FuncDef<'_>) -> Rc<AstFunction> {
         crate::parser::stmts_need_arguments(&body)
     };
     Rc::new(AstFunction {
+        source_text: def.source_text.clone(),
         named_expression: def.named_expression,
         name: def.name.clone(),
         params: def.params.to_vec(),

@@ -101,7 +101,11 @@ pub fn setup_builtins(env: &Env) {
         "JSON",
         "ShadowRealm",
     ] {
-        e.set(name, Value::object(vec![]));
+        let namespace = Value::object(vec![]);
+        if let Value::Object { props } = &namespace {
+            props.meta.borrow_mut().native_function_name = Some(name.into());
+        }
+        e.set(name, namespace);
     }
     e.set("globalThis", Value::GlobalObject);
 
@@ -484,7 +488,8 @@ pub(crate) fn eval_direct(interp: &mut Interpreter, args: Vec<Value>) -> Result<
         Some(Value::String(source)) => {
             let mut parser = crate::Parser::new_with_spans(
                 crate::Lexer::from_js_string(source).tokenize_with_spans(),
-            );
+            )
+            .with_source_text(source);
             let body = parser
                 .parse_eval_context(crate::interpreter::Environment::eval_context(
                     &interp.global,
