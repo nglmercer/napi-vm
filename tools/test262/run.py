@@ -46,11 +46,18 @@ def outcome(report, data):
     return "pass" if report.get("status") == "ok" else "fail"
 
 
+def read_source(path):
+    # Source text is observable through Function.prototype.toString. Universal
+    # newline translation would silently change CR and CRLF corpus fixtures.
+    with path.open(encoding="utf-8", newline="") as source:
+        return source.read()
+
+
 def safe_harness(root, name):
     path = (root / "harness" / name).resolve()
     if not path.is_relative_to((root / "harness").resolve()):
         raise ValueError("harness include escapes corpus")
-    return path.read_text(encoding="utf-8")
+    return read_source(path)
 
 
 def run_variant(engine, root, test, source, data, mode, strict, timeout):
@@ -183,7 +190,7 @@ def main():
         rows = []
         name = test.relative_to(root / "test").as_posix()
         try:
-            source = test.read_text(encoding="utf-8")
+            source = read_source(test)
             data = metadata(source)
             for mode, strict in variants(data):
                 skipped = sorted(set(data.get("features", [])) & set(args.skip_feature))

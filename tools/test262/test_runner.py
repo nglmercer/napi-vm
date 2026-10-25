@@ -1,5 +1,5 @@
 import unittest
-from run import metadata, outcome, variants, selected_files, resume_checkpoint, validate_engine
+from run import metadata, outcome, variants, selected_files, resume_checkpoint, validate_engine, read_source, safe_harness
 import json
 import subprocess
 import sys
@@ -7,6 +7,16 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 class RunnerTests(unittest.TestCase):
+    def test_source_and_harness_preserve_original_line_terminators(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'harness').mkdir()
+            source = b'function\r\n/* comment */\rf(){}\n'
+            path = root / 'harness' / 'source.js'
+            path.write_bytes(source)
+            self.assertEqual(read_source(path), source.decode('utf-8'))
+            self.assertEqual(safe_harness(root, 'source.js'), source.decode('utf-8'))
+
     def test_invalid_worker_is_a_driver_error_before_corpus_selection(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -122,3 +122,20 @@ fn callable_string_conversion_honors_guest_hooks() {
     "#,
     );
 }
+
+#[test]
+fn native_symbol_getters_keep_display_names_after_descriptor_installation() {
+    assert_both(
+        r#"
+        Object.getOwnPropertyDescriptor(Array,Symbol.species).get.toString() ===
+            'function get [Symbol.species]() { [native code] }' &&
+        Object.getOwnPropertyDescriptor(RegExp,Symbol.species).get.toString() ===
+            'function get [Symbol.species]() { [native code] }';
+    "#,
+    );
+}
+
+#[test]
+fn source_preserves_carriage_return_sequences() {
+    assert_both("function\r\n/*a*/\rf( )\r{}; f.toString() === 'function\\r\\n/*a*/\\rf( )\\r{}'");
+}

@@ -399,6 +399,7 @@ pub(crate) fn native_method(
         ],
         prototype.map(std::rc::Rc::new),
     )));
+    properties.meta.borrow_mut().native_function_name = Some(name.into());
     for key in ["name", "length"] {
         properties.meta.borrow_mut().set_attrs(
             key,

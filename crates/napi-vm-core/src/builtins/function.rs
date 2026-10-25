@@ -276,7 +276,13 @@ fn function_to_string(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result
     // Internal names do not consult guest properties or unwrap proxies/bound functions.
     let name = match &this {
         Value::Function(function) if function.native.is_some() && function.bound.is_none() => {
-            function.name.as_deref().map(crate::JsString::from)
+            function
+                .properties
+                .meta
+                .borrow()
+                .native_function_name
+                .clone()
+                .or_else(|| function.name.as_deref().map(crate::JsString::from))
         }
         Value::NativeFunction { name, .. } => Some(crate::JsString::from(name.as_ref())),
         Value::Object { props } => props.meta.borrow().native_function_name.clone(),
