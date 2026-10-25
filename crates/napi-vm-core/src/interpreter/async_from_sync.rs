@@ -123,7 +123,7 @@ fn perform(
         let awaited = match vm.promise_resolve_intrinsic(value) {
             Ok(promise) => promise,
             Err(error) => {
-                if !done && matches!(operation, Operation::Next) {
+                if !done && matches!(operation, Operation::Next | Operation::Throw) {
                     let _ = vm.close_guest_iterator(&iterator, false);
                 }
                 return Err(error);
@@ -145,7 +145,7 @@ fn perform(
                 .async_from_sync = Some(Slots::Reaction {
                 iterator: iterator.clone(),
                 done,
-                close_on_rejection: matches!(operation, Operation::Next),
+                close_on_rejection: matches!(operation, Operation::Next | Operation::Throw),
             });
             callback
         };

@@ -11,7 +11,7 @@ mkdir -p artifacts/test262
 python3 tools/test262/run.py .napi-vm/test262 \
   --engine target/release/napi-vm-test262 \
   --revision 5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81 \
-  --jobs 2 --timeout 10 --output artifacts/test262/full-results.json
+  --jobs 2 --timeout 5 --output artifacts/test262/full-results.json
 python3 tools/test262/dashboard.py artifacts/test262/full-results.json \
   --output artifacts/test262/compatibility.html
 ```
@@ -42,7 +42,24 @@ Resume rejects changes to the corpus revision, worker digest, selection, skips,
 worker count, or timeout. An interrupted final journal write is rerun. The final
 report still contains all selected outcomes and records the restored file count.
 
-The latest completed full pinned Test262 run (archived 2026-10-20, corpus
+## Current full result
+
+The full pinned run archived **2026-10-25** on clean source `39f6a97` passes
+**102,669 / 102,956 variants (99.7212%)**, with 224 failures, 63 timeouts,
+and zero skips, crashes, or harness errors. It gains **691 passes with zero
+lost passes** against the previous complete full run. Configuration is two
+workers and five-second deadlines, with no exclusions or resumed outcomes.
+The corpus is `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81` and worker SHA-256
+is `7300cfef39470c226f0879ed40baf247a3cf4b0235e86c1397a7bcb061da4dfb`.
+
+[Evidence](evidence/full-baseline-2026-10-25/) includes every outcome, the
+comparison, source identity, build log, and all 287 remaining variants.
+The [full-pass campaign](../../docs/test262-full-pass-progress.md) tracks the
+target of 102,956 passes; current candidate fixes are outside this full score.
+
+## Historical measurements
+
+The preceding completed full pinned Test262 run (archived 2026-10-20, corpus
 `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `daadb9b`)
 passes **101,978 / 102,956 variants (99.0501%)**, with 753 failures,
 225 timeouts, and zero skips, crashes, or harness errors. It gains 54 passes
@@ -56,9 +73,9 @@ Reports and comparison are archived in [full Array-string evidence](evidence/ful
 
 This snapshot excludes subsequent sparse indices, logical Array lengths,
 core constructor metadata/unscopables, and String semantic fixes. Focused
-results remain separate from this full score. A new full run is active on detached clean source `f708e0c` (worker
-`8dab6498…`), including the verified built-in and tagged-constructor fixes.
-The completed full score remains authoritative until that report finishes.
+results remained separate from that full score. The run started on detached
+source `f708e0c` (worker `8dab6498…`) never completed; its partial journal is
+superseded by the completed 2026-10-25 baseline.
 
 Function/Proxy metadata and inheritance now pass **1,624 / 1,628** focused
 variants in an isolated optimized build: **12 gains, zero lost passes**.

@@ -1,0 +1,27 @@
+{
+  "source_commit": "39f6a97b77e7de1001581cc242b8c0cafb5bd4b6",
+  "source_status": "",
+  "rust": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "engine_sha256": "7300cfef39470c226f0879ed40baf247a3cf4b0235e86c1397a7bcb061da4dfb",
+  "started_utc": "2026-10-25T10:05:19.783529+00:00",
+  "jobs": 2,
+  "timeout_seconds": 5,
+  "skip_features": [],
+  "command": [
+    "python3",
+    "tools/test262/run.py",
+    ".napi-vm/test262",
+    "--engine",
+    "target/release/napi-vm-test262",
+    "--revision",
+    "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "--jobs",
+    "2",
+    "--timeout",
+    "5",
+    "--checkpoint",
+    "artifacts/test262/full-39f6a97-2026-10-25.checkpoint.jsonl",
+    "--output",
+    "artifacts/test262/full-39f6a97-2026-10-25.json"
+  ]
+}

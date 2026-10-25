@@ -149,6 +149,7 @@ fn update_legacy(
 
 pub(super) fn install(e: &mut Environment) {
     if let Some(namespace) = e.get("RegExp") {
+        super::install_constructor_metadata(&namespace, "RegExp", 2);
         e.regexp_legacy = Some(Rc::new(RefCell::new(LegacyState::default())));
         super::make_callable(&namespace, regexp_call, Some(regexp_construct));
         let fp = e.get("Function").and_then(|f| f.get_prop("prototype"));

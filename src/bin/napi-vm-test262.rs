@@ -429,13 +429,15 @@ fn execute(request: Request) -> Json {
         .virtual_loader
         .insert(request.id.clone(), request.source.clone());
     vm.set_module_loader(Rc::new(loader));
-    vm.global.borrow_mut().set(
-        "$DONE",
-        Value::NativeFunction {
-            name: "$DONE".into(),
-            callable: done,
-        },
-    );
+    if request.asynchronous {
+        vm.global.borrow_mut().set(
+            "$DONE",
+            Value::NativeFunction {
+                name: "$DONE".into(),
+                callable: done,
+            },
+        );
+    }
     vm.global
         .borrow_mut()
         .set("__test262_done_count", Value::Number(0.0));

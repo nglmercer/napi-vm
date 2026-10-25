@@ -83,6 +83,18 @@ fn worker_requires_exact_async_completion() {
         "TypeError"
     );
 }
+
+#[test]
+fn worker_only_exposes_done_to_tests_with_the_async_flag() {
+    for module in [false, true] {
+        let result = worker(json!({
+            "source":"if(typeof $DONE !== 'undefined' || Object.hasOwn(globalThis,'$DONE')) throw new Error('unexpected async completion hook');",
+            "harness":"if(Object.hasOwn(globalThis,'$DONE')) throw new Error('hook exposed to synchronous harness');",
+            "module":module,
+        }));
+        assert_eq!(result["status"], "ok", "{result}");
+    }
+}
 #[test]
 fn worker_loads_module_fixtures() {
     let result = worker(json!({"id":"pkg/test.js", "module":true,

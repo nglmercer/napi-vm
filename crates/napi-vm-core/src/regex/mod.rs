@@ -12,16 +12,15 @@
 //! error instead of hanging the host — the same treatment loops, recursion and
 //! the job queue get.
 //!
-//! Positions are indices into a `Vec<char>`, so one index is one Unicode
-//! scalar value. JavaScript indexes UTF-16 code units, so a pattern matching
-//! text outside the Basic Multilingual Plane reports different offsets here.
+//! Positions index UTF-16 code units. Unicode matching consumes surrogate
+//! pairs as code points in either direction, while capture offsets stay UTF-16.
 
 mod emoji_tables;
 mod parse;
 mod unicode;
 
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub use parse::{Anchor, ClassItem, Node, Shorthand};
 
@@ -166,6 +165,7 @@ impl Regex {
             // flat budget so only super-linear blowups trip it.
             budget: MAX_STEPS.saturating_add(input.len().saturating_mul(STEPS_PER_INPUT_UNIT)),
             depth: Cell::new(0),
+            forward: Cell::new(true),
             modifiers: Cell::new(
                 u8::from(self.ignore_case)
                     | (u8::from(self.multiline) << 1)
@@ -209,6 +209,7 @@ struct Matcher<'a> {
     steps: Cell<usize>,
     budget: usize,
     depth: Cell<usize>,
+    forward: Cell<bool>,
     modifiers: Cell<u8>,
 }
 
@@ -262,6 +263,24 @@ impl Matcher<'_> {
             1
         }
     }
+    /// Read the next character in the current match direction, returning
+    /// its code point and the boundary after consuming it.
+    fn character(&self, pos: usize) -> Option<(u32, usize)> {
+        if self.forward.get() {
+            return self
+                .scalar(pos)
+                .map(|c| (c, pos + if c > 0xFFFF { 2 } else { 1 }));
+        }
+        let mut start = pos.checked_sub(1)?;
+        if self.regex.unicode
+            && (0xDC00..=0xDFFF).contains(self.input.get(start)?)
+            && start > 0
+            && (0xD800..=0xDBFF).contains(&self.input[start - 1])
+        {
+            start -= 1;
+        }
+        self.scalar(start).map(|c| (c, start))
+    }
     fn same_char(&self, a: u32, b: u32) -> bool {
         a == b
             || ((self.modifiers.get() & 1 != 0)
@@ -282,9 +301,8 @@ impl Matcher<'_> {
         self.union_matches(items, c) != negated
     }
 
-    /// Possible end positions for a class match at `pos`: string
-    /// alternatives in source order, then one scalar advance. Callers
-    /// backtrack across every end through their continuation.
+    /// Class alternatives match longest strings first, independently of
+    /// the surrounding quantifier's greediness or match direction.
     fn class_ends(
         &self,
         negated: bool,
@@ -293,8 +311,8 @@ impl Matcher<'_> {
     ) -> Result<Vec<usize>, String> {
         if negated {
             // Negated classes never hold strings (rejected at parse).
-            return Ok(match self.scalar(pos) {
-                Some(c) if !self.union_matches(items, c) => vec![self.advance(pos)],
+            return Ok(match self.character(pos) {
+                Some((c, end)) if !self.union_matches(items, c) => vec![end],
                 _ => vec![],
             });
         }
@@ -304,6 +322,7 @@ impl Matcher<'_> {
                 ends.push(end);
             }
         }
+        ends.sort_unstable_by_key(|end| std::cmp::Reverse(pos.abs_diff(*end)));
         Ok(ends)
     }
 
@@ -314,15 +333,27 @@ impl Matcher<'_> {
         for item in items {
             match item {
                 ClassItem::Strings(strings) => {
-                    if self.modifiers.get() & 1 == 0 && pos < self.input.len() {
+                    if self.forward.get() && self.modifiers.get() & 1 == 0 && pos < self.input.len()
+                    {
                         self.string_table_ends(strings, pos, &mut ends);
                         if strings.has_empty() {
                             ends.push(pos);
                         }
                     } else {
                         for alternative in strings.all() {
-                            if self.string_at(alternative, pos) {
-                                ends.push(pos + alternative.len());
+                            let start = if self.forward.get() {
+                                Some(pos)
+                            } else {
+                                pos.checked_sub(alternative.len())
+                            };
+                            if let Some(start) = start
+                                && self.string_at(alternative, start)
+                            {
+                                ends.push(if self.forward.get() {
+                                    pos + alternative.len()
+                                } else {
+                                    start
+                                });
                             }
                         }
                     }
@@ -330,8 +361,10 @@ impl Matcher<'_> {
                 ClassItem::Nested { negated, items } => {
                     let sub = self.union_ends(items, pos)?;
                     if *negated {
-                        if sub.is_empty() && self.scalar(pos).is_some() {
-                            ends.push(self.advance(pos));
+                        if sub.is_empty()
+                            && let Some((_, end)) = self.character(pos)
+                        {
+                            ends.push(end);
                         }
                     } else {
                         ends.extend(sub);
@@ -362,10 +395,10 @@ impl Matcher<'_> {
                 _ => {}
             }
         }
-        if let Some(c) = self.scalar(pos)
+        if let Some((c, end)) = self.character(pos)
             && self.union_matches(items, c)
         {
-            ends.push(self.advance(pos));
+            ends.push(end);
         }
         Ok(ends)
     }
@@ -544,13 +577,16 @@ impl Matcher<'_> {
                 result
             }
             Node::Empty => Ok(k(pos, caps)),
-            Node::Char(want) => match self.scalar(pos) {
-                Some(c) if self.same_char(c, *want) => Ok(k(self.advance(pos), caps)),
+            Node::Char(want) => match self.character(pos) {
+                Some((c, end)) if self.same_char(c, *want) => Ok(k(end, caps)),
                 _ => Ok(false),
             },
-            Node::AnyChar => match self.input.get(pos) {
-                Some(c) if (self.modifiers.get() & 4 != 0) || !Self::is_line_terminator(*c) => {
-                    Ok(k(self.advance(pos), caps))
+            Node::AnyChar => match self.character(pos) {
+                Some((c, end))
+                    if (self.modifiers.get() & 4 != 0)
+                        || !matches!(c, 10 | 13 | 0x2028 | 0x2029) =>
+                {
+                    Ok(k(end, caps))
                 }
                 _ => Ok(false),
             },
@@ -589,7 +625,7 @@ impl Matcher<'_> {
                     let previous = caps.get(index).copied().flatten();
                     let matched = self.node(node, pos, caps, &mut |end, caps| {
                         let before = caps[index];
-                        caps[index] = Some((start, end));
+                        caps[index] = Some((start.min(end), start.max(end)));
                         if k(end, caps) {
                             return true;
                         }
@@ -650,21 +686,12 @@ impl Matcher<'_> {
                 node,
             } => {
                 let saved = caps.clone();
-                let hit = if *ahead {
-                    self.node(node, pos, caps, &mut |_, _| true)?
-                } else {
-                    // Lookbehind: try every start position that could end here.
-                    // Bounded by `pos`, so it is linear in the offset rather
-                    // than in the whole input.
-                    let mut found = false;
-                    for start in (0..=pos).rev() {
-                        if self.node(node, start, caps, &mut |end, _| end == pos)? {
-                            found = true;
-                            break;
-                        }
-                    }
-                    found
-                };
+                // Assertions choose their own direction, including when
+                // nested in an assertion of the opposite direction.
+                let outer = self.forward.replace(*ahead);
+                let hit = self.node(node, pos, caps, &mut |_, _| true);
+                self.forward.set(outer);
+                let hit = hit?;
                 if hit == *negative {
                     *caps = saved;
                     return Ok(false);
@@ -689,18 +716,36 @@ impl Matcher<'_> {
             return Ok(k(pos, caps));
         };
         let len = end - start;
-        if pos + len > self.input.len() {
+        let begin = if self.forward.get() {
+            pos
+        } else if let Some(begin) = pos.checked_sub(len) {
+            begin
+        } else {
+            return Ok(false);
+        };
+        if begin + len > self.input.len() {
             return Ok(false);
         }
-        for offset in 0..len {
-            if !self.same_char(
-                self.input[pos + offset] as u32,
-                self.input[start + offset] as u32,
-            ) {
+        if self.regex.unicode
+            && begin > 0
+            && self
+                .input
+                .get(begin)
+                .is_some_and(|unit| (0xDC00..=0xDFFF).contains(unit))
+            && (0xD800..=0xDBFF).contains(&self.input[begin - 1])
+        {
+            return Ok(false);
+        }
+        let mut offset = 0;
+        while offset < len {
+            let actual = self.scalar(begin + offset).expect("input range checked");
+            let captured = self.scalar(start + offset).expect("capture range");
+            if !self.same_char(actual, captured) {
                 return Ok(false);
             }
+            offset += if captured > 0xFFFF { 2 } else { 1 };
         }
-        Ok(k(pos + len, caps))
+        Ok(k(if self.forward.get() { pos + len } else { begin }, caps))
     }
 
     fn sequence(
@@ -710,7 +755,12 @@ impl Matcher<'_> {
         caps: &mut Captures,
         k: Cont<'_>,
     ) -> Result<bool, String> {
-        match nodes.split_first() {
+        let split = if self.forward.get() {
+            nodes.split_first()
+        } else {
+            nodes.split_last()
+        };
+        match split {
             None => Ok(k(pos, caps)),
             Some((head, rest)) => {
                 let mut error = None;
@@ -827,17 +877,9 @@ impl Matcher<'_> {
         Ok(greedy && k(pos, caps))
     }
 
-    // Character repeats need no capture stack: retain code-point boundaries
-    // for greedy backtracking and consume lazy repeats only when needed.
-    /// Repeat a class without nesting one frame per iteration. Each
-    /// layer holds the end positions reachable in exactly that many
-    /// iterations; expansion stops at `max` or when no new end appears
-    /// (ends range over a finite slice of the input, so this terminates).
-    /// Backtracking then tries (count, end) pairs highest-count-first for
-    /// greedy quantifiers and lowest-first for lazy ones; the continuation
-    /// never observes the count, so each distinct end is tried once.
-    /// Scalar-only classes produce one end per layer, exactly the order
-    /// the historical positions loop used.
+    /// Repeat classes without nesting Rust frames. Scalar classes walk one
+    /// boundary vector; string classes retain depth-first alternative order
+    /// and memoize failed states to avoid exponential overlapping paths.
     #[allow(clippy::too_many_arguments)]
     fn repeat_class(
         &self,
@@ -873,13 +915,13 @@ impl Matcher<'_> {
                 if max.is_some_and(|limit| ends.len() > limit as usize) {
                     break;
                 }
-                let Some(c) = self.scalar(current) else {
+                let Some((c, end)) = self.character(current) else {
                     break;
                 };
                 if !self.class_matches(negated, items, c) {
                     break;
                 }
-                current = self.advance(current);
+                current = end;
                 ends.push(current);
             }
             let top = ends.len() - 1;
@@ -898,89 +940,65 @@ impl Matcher<'_> {
             }
             return Ok(false);
         }
-        let mut layers: Vec<Vec<usize>> = vec![vec![pos]];
-        // Every end ever produced, so the fixed-point check below stays
-        // linear instead of rescanning all previous layers per end. Layers
-        // keep their full end sets (including ends seen at lower counts)
-        // because greedy/lazy backtracking order depends on which counts
-        // can reach each end.
-        let mut seen = vec![false; self.input.len() + 1];
-        seen[pos] = true;
-        loop {
-            let count = layers.len() - 1;
-            if max.is_some_and(|m| count as u64 >= m as u64) {
-                break;
-            }
-            if strings {
-                self.step()?;
-            }
-            let mut next = Vec::new();
-            // Pure string tables dominate long runs (RGI has ~4k entries):
-            // expand inline without one allocation per end, then sort and
-            // deduplicate. The end multiset matches `class_ends` exactly.
-            let table_only = !negated
-                && self.modifiers.get() & 1 == 0
-                && matches!(items, [parse::ClassItem::Strings(_)]);
-            if table_only {
-                let [parse::ClassItem::Strings(strings)] = items else {
-                    unreachable!("table-only match checked above")
-                };
-                for &start in layers.last().expect("layer") {
-                    if start < self.input.len() {
-                        self.string_table_ends(strings, start, &mut next);
-                    } else if strings.has_empty() {
-                        next.push(start);
-                    }
-                }
-                next.sort_unstable();
-                next.dedup();
-            } else {
-                for &start in layers.last().expect("layer") {
-                    for end in self.class_ends(negated, items, start)? {
-                        if !next.contains(&end) {
-                            next.push(end);
-                        }
-                    }
-                }
-                next.sort_unstable();
-            }
-            if next.iter().all(|end| {
-                let already = seen[*end];
-                seen[*end] = true;
-                already
-            }) {
-                layers.push(next);
-                break;
-            }
-            layers.push(next);
+        struct Frame {
+            pos: usize,
+            count: u32,
+            ends: Vec<usize>,
+            next: usize,
+            tried_stop: bool,
         }
-        // Counts beyond the frozen layers repeat the same ends; extend to
-        // `min` so empty-matching iterations can still satisfy it.
-        while ((layers.len() - 1) as u64) < min as u64 {
-            layers.push(layers.last().expect("layer").clone());
-        }
-        let top = layers.len() - 1;
-        let mut counts: Vec<usize> = (min as usize..=top).collect();
-        if greedy {
-            counts.reverse();
-        }
-        let mut tried = vec![false; self.input.len() + 1];
-        for count in counts {
-            let mut ends = layers[count].clone();
-            if greedy {
-                ends.sort_unstable_by(|a, b| b.cmp(a));
-            } else {
-                ends.sort_unstable();
-            }
-            for end in ends {
-                if tried[end] {
-                    continue;
-                }
-                tried[end] = true;
-                if k(end, caps) {
+        let make_frame = |pos, count| -> Result<Frame, String> {
+            Ok(Frame {
+                pos,
+                count,
+                ends: if max.is_none_or(|limit| count < limit) {
+                    self.class_ends(negated, items, pos)?
+                } else {
+                    Vec::new()
+                },
+                next: 0,
+                tried_stop: false,
+            })
+        };
+        let saved = caps.clone();
+        let mut failed = HashSet::new();
+        let mut stack = vec![make_frame(pos, 0)?];
+        while let Some(frame) = stack.last_mut() {
+            self.step()?;
+            if !greedy && frame.count >= min && !frame.tried_stop {
+                frame.tried_stop = true;
+                if k(frame.pos, caps) {
                     return Ok(true);
                 }
+                caps.copy_from_slice(&saved);
             }
+            if let Some(&next) = frame.ends.get(frame.next) {
+                frame.next += 1;
+                // Empty matches may satisfy a minimum, but may not repeat
+                // once it is met. The count then saturates for an unbounded
+                // repeat: all later states at the same position are equal.
+                if next == frame.pos && frame.count >= min {
+                    continue;
+                }
+                let count = if max.is_none() && frame.count >= min {
+                    min
+                } else {
+                    frame.count + 1
+                };
+                if !failed.contains(&(next, count)) {
+                    stack.push(make_frame(next, count)?);
+                }
+                continue;
+            }
+            if greedy && frame.count >= min && !frame.tried_stop {
+                frame.tried_stop = true;
+                if k(frame.pos, caps) {
+                    return Ok(true);
+                }
+                caps.copy_from_slice(&saved);
+            }
+            let frame = stack.pop().expect("active class repeat");
+            failed.insert((frame.pos, frame.count));
         }
         Ok(false)
     }
@@ -1010,20 +1028,21 @@ impl Matcher<'_> {
             if max.is_some_and(|max| count >= max) {
                 break;
             }
+            let Some((c, end)) = self.character(pos) else {
+                break;
+            };
             let matches = match atom {
-                Node::Char(want) => self.scalar(pos).is_some_and(|c| self.same_char(c, *want)),
-                Node::AnyChar => self.input.get(pos).is_some_and(|c| {
-                    (self.modifiers.get() & 4 != 0) || !Self::is_line_terminator(*c)
-                }),
-                Node::Class { negated, items } => self
-                    .scalar(pos)
-                    .is_some_and(|c| self.class_matches(*negated, items, c)),
+                Node::Char(want) => self.same_char(c, *want),
+                Node::AnyChar => {
+                    (self.modifiers.get() & 4 != 0) || !matches!(c, 10 | 13 | 0x2028 | 0x2029)
+                }
+                Node::Class { negated, items } => self.class_matches(*negated, items, c),
                 _ => unreachable!("character atom"),
             };
             if !matches {
                 break;
             }
-            pos = self.advance(pos);
+            pos = end;
             count += 1;
             if greedy {
                 positions.push(pos);

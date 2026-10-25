@@ -2,7 +2,23 @@
 
 ## Current measured state
 
-The latest completed full pinned Test262 run (archived 2026-10-20, corpus
+The full pinned run archived **2026-10-25** on clean source `39f6a97`
+passes **102,669 / 102,956 variants (99.7212%)**. It records 224 failures,
+63 timeouts, and zero skips, crashes, or harness errors. Against the previous
+completed full report it gains **691 passes with zero lost passes**.
+The corpus remains `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`; the run uses
+two workers, five-second deadlines, no feature exclusions, and worker SHA-256
+`7300cfef39470c226f0879ed40baf247a3cf4b0235e86c1397a7bcb061da4dfb`.
+It completed without resuming a checkpoint.
+
+All 287 non-passing variants and the complete report are archived in
+[full baseline evidence](../tools/test262/evidence/full-baseline-2026-10-25/).
+Current candidate fixes remain outside this full score. The target is all
+102,956 variants passing; see the [full-pass campaign](test262-full-pass-progress.md).
+
+## Previous checkpoint (2026-10-20)
+
+The full pinned Test262 run archived 2026-10-20 (corpus
 `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `daadb9b`)
 passes **101,978 / 102,956 variants (99.0501%)**, with 753 failures,
 225 timeouts, and zero skips, crashes, or harness errors. It gains 54 passes
@@ -16,9 +32,9 @@ Reports and comparison are archived in [full Array-string evidence](../tools/tes
 
 This snapshot excludes subsequent sparse indices, logical Array lengths,
 core constructor metadata/unscopables, and String semantic fixes. Focused
-results remain separate from this full score. A new full run is active on detached clean source `f708e0c` (worker
-`8dab6498…`), including the verified built-in and tagged-constructor fixes.
-The completed full score remains authoritative until that report finishes.
+results remained separate from that full score. A run on detached source
+`f708e0c` (worker `8dab6498…`) was started but never completed; its partial
+journal is superseded by the completed 2026-10-25 baseline.
 
 Function/Proxy metadata and inheritance now pass **1,624 / 1,628** focused
 variants in an isolated optimized build: **12 gains, zero lost passes**.

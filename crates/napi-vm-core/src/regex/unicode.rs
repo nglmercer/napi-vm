@@ -54,6 +54,13 @@ fn ranges(property: &str) -> Option<Vec<RangeInclusive<u32>>> {
                 .collect(),
         );
     }
+    // Unicode PropertyAliases gives White_Space the additional alias `space`,
+    // beyond the long and short names accepted by ICU's ECMA-262 lookup.
+    let property = if property == "space" {
+        "White_Space"
+    } else {
+        property
+    };
     Some(
         CodePointSetData::new_for_ecma262(property.as_bytes())?
             .iter_ranges()

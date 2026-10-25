@@ -2230,15 +2230,17 @@ fn string_iter(
     })
 }
 
-/// `next()` for the lazy string iterator. The cursor is a UTF-8 byte offset,
-/// but the yielded value is always one complete Unicode scalar value.
+/// `next()` for the lazy string iterator. The cursor is a UTF-16 offset,
+/// and each step consumes a code point, including lone surrogates.
 fn string_iter_next(
     _interp: &mut super::Interpreter,
     this: super::Value,
     _args: Vec<super::Value>,
 ) -> Result<super::Value, crate::error::VmErr> {
     let super::Value::StringIterator { inner } = &this else {
-        return Ok(super::call::iter_result(super::Value::Undefined, true));
+        return Err(VmErr::Msg(
+            "TypeError: String Iterator next requires a String Iterator receiver".into(),
+        ));
     };
     let mut state = inner.borrow_mut();
     if state.cursor >= state.source.len() {
@@ -2276,6 +2278,24 @@ fn is_primitive(value: &Value) -> bool {
             | Value::Symbol(_)
             | Value::BigInt(_)
     )
+}
+
+#[cfg(test)]
+mod string_iterator_tests {
+    use crate::{Interpreter, Value, parser::parse_cached};
+
+    #[test]
+    fn next_requires_own_internal_slots_even_after_exhaustion() {
+        let source = "var iterator='𝄞a'[Symbol.iterator](),next=iterator.next,caught=0;
+            for(var receiver of [null,undefined,{},Object.create(iterator),new Proxy(iterator,{}),Object.getPrototypeOf(iterator)]){
+                try{next.call(receiver)}catch(e){if(e instanceof TypeError)caught++}
+            }
+            caught===6&&next.call(iterator).value==='𝄞'&&next.call(iterator).value==='a'&&next.call(iterator).done&&next.call(iterator).done;";
+        let prepared = Interpreter::with_builtins().eval_source(source);
+        assert!(matches!(prepared, Ok(Value::Bool(true))), "{prepared:?}");
+        let ast = Interpreter::with_builtins().run_program_body(&parse_cached(source).unwrap());
+        assert!(matches!(ast, Ok(Value::Bool(true))), "{ast:?}");
+    }
 }
 
 fn is_callable(value: &Value) -> bool {

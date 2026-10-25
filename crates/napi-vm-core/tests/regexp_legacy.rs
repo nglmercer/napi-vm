@@ -9,6 +9,32 @@ fn truth(vm: &mut Interpreter, source: &str) {
 }
 
 #[test]
+fn constructor_metadata_can_be_deleted_without_changing_regexp_calls() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        "var d=Object.getOwnPropertyDescriptor(RegExp,'length');RegExp.length===2&&RegExp.name==='RegExp'&&!d.writable&&!d.enumerable&&d.configurable;",
+    );
+    truth(
+        &mut vm,
+        "delete RegExp.length;delete RegExp.name;!Object.hasOwn(RegExp,'length')&&!Object.hasOwn(RegExp,'name')&&RegExp('a','g').test('a')&&new RegExp('b').test('b');",
+    );
+}
+
+#[test]
+fn unicode_space_alias_keeps_unicode_property_membership_and_strict_spelling() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r"/^\p{space}+$/u.test('\u0085\u00a0\u2028')&&/^\p{White_Space}+$/v.test('\u0085')&&!/\p{space}/u.test('\ufeff')&&/\P{space}/u.test('\ufeff')&&/\s/u.test('\ufeff')&&!/\s/u.test('\u0085');",
+    );
+    truth(
+        &mut vm,
+        r"var caught=0;for(var name of ['WSpace','Space','white_space','white space']){try{new RegExp('\\p{'+name+'}','u')}catch(e){if(e instanceof SyntaxError)caught++}}caught===4;",
+    );
+}
+
+#[test]
 fn legacy_match_state_tracks_captures_context_and_input_aliases() {
     let mut vm = Interpreter::with_builtins();
     truth(

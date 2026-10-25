@@ -1424,6 +1424,19 @@ fn property_update_fast_paths_preserve_observable_operations() {
 }
 
 #[test]
+fn call_update_targets_throw_before_numeric_coercion_and_parentheses_keep_references() {
+    for source in [
+        "var n=0;function f(){n++;return {valueOf(){throw 'coerced'}}}try{f()++}catch(e){e instanceof ReferenceError&&n===1}",
+        "var n=0;function f(){n++;throw 42}try{--f()}catch(e){e===42&&n===1}",
+        "var x=1,o={x:2};var old=(x)++;var next=++(o.x);old===1&&x===2&&next===3&&o.x===3;",
+        "var err='outer',during,after;try{throw 'exception'}catch(err){for(var err of ['key']){during=err}after=err}during==='key'&&after==='key'&&err==='outer';",
+        "function test(){var err='outer',during;try{throw 'exception'}catch(err){{for(var err in {key:0}){during=err}}}return during==='key'&&err==='outer'}test();",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
 fn empty_lexical_iteration_patterns_own_and_unwind_runtime_scopes() {
     for (source, expect_bytecode) in [
         ("var n=0;for(let [] of [[],[]]){n++;}n", false),

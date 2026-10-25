@@ -516,11 +516,13 @@ fn parse_dynamic_function(
     asynchronous: bool,
     generator: bool,
 ) -> Result<(Vec<String>, Vec<crate::parser::Statement>), VmErr> {
+    // P has no implicit leading line terminator. Inserting one would make
+    // an initial HTML close comment legal when parsing formal parameters.
     let mut source = crate::JsString::from(match (asynchronous, generator) {
-        (true, true) => "async function* anonymous(\n",
-        (true, false) => "async function anonymous(\n",
-        (false, true) => "function* anonymous(\n",
-        _ => "function anonymous(\n",
+        (true, true) => "async function* anonymous(",
+        (true, false) => "async function anonymous(",
+        (false, true) => "function* anonymous(",
+        _ => "function anonymous(",
     });
     source.push_str(params.clone());
     source.push_str("\n) {\n");

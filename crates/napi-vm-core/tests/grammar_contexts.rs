@@ -308,7 +308,7 @@ fn with_syntax_uses_object_records_and_restores_lexical_scope() {
 }
 
 #[test]
-fn newer_syntax_retains_metadata_and_reports_runtime_gaps_explicitly() {
+fn newer_syntax_retains_metadata_and_resource_scope_semantics() {
     for source in [
         "async function f(){await using x=null,y=null;}",
         "{using x=null;}",
@@ -339,10 +339,10 @@ fn newer_syntax_retains_metadata_and_reports_runtime_gaps_explicitly() {
         );
     }
     let mut vm = napi_vm_core::Interpreter::with_builtins();
-    assert!(vm.eval_source("{using x=null;}").is_err_and(|e| {
-        e.to_string()
-            .contains("resource disposal execution is not implemented")
-    }));
+    assert!(matches!(
+        vm.eval_source("var disposed=0;{using empty=null;using x={[Symbol.dispose](){disposed++}};}disposed===1;"),
+        Ok(napi_vm_core::Value::Bool(true))
+    ));
 }
 
 #[test]
@@ -1358,9 +1358,11 @@ fn sloppy_call_assignment_targets_evaluate_before_reference_error() {
             "accepted strict {source}"
         );
     }
-    for expression in ["f()=g()", "f()+=g()", "f()++", "++f()"] {
+    for expression in [
+        "f()=g()", "f()+=g()", "f()++", "++f()", "f()--", "--f()", "(f())++",
+    ] {
         let source = format!(
-            "var log='';function f(){{log+='f';return 1}}function g(){{log+='g'}}try{{{expression}}}catch(e){{if(!(e instanceof ReferenceError))throw e}}log==='f';"
+            "var log='',caught=false;function f(){{log+='f';return {{valueOf(){{log+='coerce';return 1}}}}}}function g(){{log+='g'}}try{{{expression}}}catch(e){{caught=e instanceof ReferenceError}}caught&&log==='f';"
         );
         let result = napi_vm_core::Interpreter::with_builtins().eval_source(&source);
         assert!(

@@ -2748,31 +2748,21 @@ impl<'a> Compiler<'a> {
 
     /// Resolve a head after its lexical scope has been prepared.
     fn prepare_for_head(&mut self, name: &str) -> Result<ForHead, Decline> {
-        if self.top_level {
-            return Ok(ForHead::Global(self.intern_string(name)?));
+        // Var names are already hoisted. Their iteration assignments resolve
+        // through intervening scopes, including an Annex B catch parameter.
+        // Lexical heads resolve to the fresh environment installed above.
+        match self.resolve(name)? {
+            Binding::Slot(slot) => Ok(ForHead::Slot(slot)),
+            Binding::Global => Ok(ForHead::Global(self.intern_string(name)?)),
         }
-        if self.scopes.len() == 1 {
-            let slot = self.declare_slot_if_absent(name, SlotKind::Var)?;
-            // A captured head lives in the frame environment, like any
-            // other captured function-scope name.
-            if self.captured.contains(name) {
-                return Ok(ForHead::Global(self.intern_string(name)?));
-            }
-            return Ok(ForHead::Slot(slot));
-        }
-        // A boxed head binds in the enclosing pushed scope (one shared cell,
-        // like the evaluator); anything else keeps its slot — a nested
-        // capture of it still declines the unit.
-        if self.is_boxed_here(name) {
-            return Ok(ForHead::Global(self.intern_string(name)?));
-        }
-        Ok(ForHead::Slot(self.declare_slot(name, SlotKind::Var)?))
     }
 
-    /// One head write per iteration: an unchecked initialize, matching the
-    /// evaluator's kind- and zone-ignoring head assignment.
+    /// Var heads assign an existing binding; lexical heads initialize it.
     fn bind_for_head(&mut self, head: &ForHead, src: Reg, kind: &VarKind) {
         match head {
+            ForHead::Slot(slot) if *kind == VarKind::Var => {
+                self.emit(Instr::StoreLocal { slot: *slot, src })
+            }
             ForHead::Slot(slot) => self.emit(Instr::InitLocal { slot: *slot, src }),
             ForHead::Global(name) => {
                 if *kind == VarKind::Var {
@@ -4133,7 +4123,7 @@ impl<'a> Compiler<'a> {
             return Ok(if prefix { updated } else { previous });
         }
         let delta = if op == UnOp::Inc { 1 } else { -1 };
-        match operand {
+        match operand.unparenthesized() {
             Expr::Identifier(name) => {
                 let dst = self.alloc_reg()?;
                 match self.resolve(name)? {
@@ -4175,12 +4165,13 @@ impl<'a> Compiler<'a> {
                 });
                 Ok(dst)
             }
-            // Anything else evaluates, then converts without storing.
+            // Annex B call targets evaluate for their effects, then throw
+            // before ToNumeric. A returned object must not be coerced.
             _ => {
-                let src = self.compile_expr(operand)?;
-                let dst = self.alloc_reg()?;
-                self.emit(Instr::Unary { dst, op, src });
-                Ok(dst)
+                let _ = self.compile_expr(operand)?;
+                let msg = self.intern_string("ReferenceError: invalid assignment target")?;
+                self.emit(Instr::Raise { msg });
+                self.load_undefined()
             }
         }
     }
