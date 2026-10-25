@@ -56,12 +56,39 @@ Unicode property spelling checks follow the
 which lists `White_Space` and `space` rather than ICU's short name `WSpace`.
 These focused results do not establish a new full percentage.
 
+## Generator result continuation
+
+Clean source `f3d2d61` passes **3,416 / 3,418** selected generator variants,
+up from 3,398 on the preceding verified release worker: **18 new passes and
+zero lost passes**. The selection includes synchronous and async generator
+groups, yield expressions, and SpiderMonkey generator staging cases. Its only
+remaining failures are both variants of `staging/sm/generators/runtime.js`,
+which require preserved function source text. There are no timeouts, skips,
+crashes, or harness errors in this selection.
+
+Synchronous `yield*` now forwards each incomplete delegate result unchanged,
+without eagerly reading its `value` property. A private suspension flag tells
+the shared driver whether to forward that object or create a result for an
+ordinary yield. Next, throw, and return share this handling. Async generators
+retain their existing value/await path. Regressions cover object and proxy
+identity, getter ordering, nested delegation, abrupt completion, and ordinary
+yields after delegation.
+
+All 373 core unit tests, 12 focused integration tests, 23 async generator
+foundation tests, and 36 generator stress tests pass, as do formatting and core
+all-target Clippy with warnings denied. The comparison uses the same pinned
+corpus, two workers, five-second deadline, and selected variant identities.
+[Archived evidence](../tools/test262/evidence/generator-result-2026-10-25/)
+includes both full focused reports, every transition, exact source/worker
+identities, implementation patch, and validation logs. The full score remains
+the completed 102,669-pass baseline until a new full run completes.
+
 ## Remaining gates
 
 1. Preserve the verified continuation and use the archived baseline and focused
    transitions to drive the remaining work. Keep every measured loss visible.
 2. Close the remaining semantic cases, including decorator/auto-accessor syntax,
-   source text and function behavior, generator delegation, scope semantics,
+   source text and function behavior, scope semantics,
    and RegExp cases listed in the inventory.
 3. Profile and fix all remaining timeout workloads, including exhaustive Date,
    URI and RegExp loops, TypedArray copying/sorting, and large buffer fixtures.

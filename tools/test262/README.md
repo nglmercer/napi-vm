@@ -58,6 +58,12 @@ The [full-pass campaign](../../docs/test262-full-pass-progress.md) tracks the
 target of 102,956 passes. The subsequent clean `d30e770` continuation passes
 4,486 / 4,492 focused variants, gaining 35 passes with zero losses. Its
 [evidence](evidence/runtime-regexp-2026-10-25/) remains separate from this full score.
+The subsequent clean `f3d2d61` generator continuation passes 3,416 / 3,418 selected
+variants, gaining 18 passes with zero losses. Its two failures require generator
+source text; it records no timeouts or other non-passing outcomes.
+[Generator evidence](evidence/generator-result-2026-10-25/) includes both focused
+reports, exact identities, transitions, and native validation. This result also
+does not update the full score.
 
 ## Historical measurements
 
