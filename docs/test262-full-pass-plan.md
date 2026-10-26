@@ -100,6 +100,11 @@ variants with zero losses. The remaining two staging arguments tests conflict
 with the pinned normative arguments test; the alternate candidate and its
 regression are archived. All 418 core tests and the standard timing slice pass.
 
+The [Date parsing follow-up](../tools/test262/evidence/date-parsing-2026-10-26/)
+passes **1,718 / 1,734** focused variants, gaining four passes with zero losses;
+sixteen prior DST-caching timeouts remain. All 419 core tests and the standard
+timing slice pass. The four Date gains need full-run confirmation.
+
 ## Ordered execution
 
 1. **Confirm decorator gains in a full run.** Class, method, getter/setter,
@@ -111,9 +116,8 @@ regression are archived. All 418 core tests and the standard timing slice pass.
 
 2. **Close the other runtime causes.** Two Annex B labeled-declaration variants now pass in focused runs. Two
    staging arguments variants conflict with the pinned normative test and need
-   a corpus resolution or an explicit change to the acceptance scope. Four
-   legacy Date variants need two-digit-year heuristics, written months, compact
-   timezone offsets, and strict ISO rejection. The ten resource-limit variants now pass focused runs: six large-string,
+   a corpus resolution or an explicit change to the acceptance scope. Four legacy Date variants now pass focused runs after adding two-digit-year
+   heuristics, written months, compact timezone offsets, and strict ISO checks. The ten resource-limit variants now pass focused runs: six large-string,
    two DataView, and two large JSON-array variants. Confirm them in the next
    complete run. Array ToLength (two), object primitive conversion (one), and legacy NUL
    option validation (two) now pass in focused runs and require full-run

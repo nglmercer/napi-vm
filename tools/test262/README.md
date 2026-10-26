@@ -113,6 +113,11 @@ zero losses. Two staging arguments variants conflict with the pinned normative
 arguments test; the candidate that passes staging loses that normative test.
 All 418 core tests and the standard timing slice pass.
 
+The [Date parsing follow-up](evidence/date-parsing-2026-10-26/) passes
+**1,718 / 1,734** selected variants, gaining four passes with zero losses;
+sixteen previous DST-caching timeouts remain. All 419 core tests and the
+standard timing slice pass.
+
 ## Historical measurements
 
 The preceding completed full pinned Test262 run (archived 2026-10-20, corpus

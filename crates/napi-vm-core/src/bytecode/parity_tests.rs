@@ -2419,3 +2419,20 @@ fn annex_b_labeled_and_duplicate_functions_are_block_hoisted() {
         );
     }
 }
+
+#[test]
+fn legacy_date_parsing_and_iso_time_validation() {
+    for source in [
+        "new Date('5/1/0').getUTCFullYear()===2000&&new Date('5/1/49').getUTCFullYear()===2049&&new Date('5/1/50').getUTCFullYear()===1950&&new Date('99/1/99').getTime()!==new Date('99/1/99').getTime();",
+        "new Date('may 1 32').getTime()===new Date('32 may 1').getTime()&&new Date('1 32 may').getTime()===new Date('5/1/32').getTime();",
+        "new Date('1997-03-08 11:19:10-07').getTime()===new Date('1997-03-08 11:19:10-0700').getTime()&&isNaN(new Date('1997-03-08T11:19:10-07').getTime());",
+        "isNaN(new Date('1997-3-8T11:19:20').getTime())&&isNaN(new Date('1997-03-08T1:1').getTime())&&isNaN(new Date('1997-03-08T').getTime());",
+        "isNaN(new Date('1997-03-08T10:00+éé').getTime())&&isNaN(new Date('ééé may 1').getTime());",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}

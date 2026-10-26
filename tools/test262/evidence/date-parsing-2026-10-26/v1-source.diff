@@ -1,0 +1,237 @@
+diff --git a/crates/napi-vm-core/src/builtins/date.rs b/crates/napi-vm-core/src/builtins/date.rs
+index 86d32ee..68d6ade 100644
+--- a/crates/napi-vm-core/src/builtins/date.rs
++++ b/crates/napi-vm-core/src/builtins/date.rs
+@@ -895,6 +895,72 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i128 {
+     era * 146_097 + doe - 719_468
+ }
+ 
++fn legacy_year(year: i64) -> i64 {
++    match year {
++        0..=49 => year + 2000,
++        50..=99 => year + 1900,
++        _ => year,
++    }
++}
++
++fn legacy_civil(year: i64, month: i64, day: i64) -> Option<f64> {
++    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
++        return None;
++    }
++    Some(utc_ms(legacy_year(year), month, day, 0, 0, 0, 0))
++}
++
++fn parse_legacy_civil(text: &str) -> Option<f64> {
++    if text.contains('/') {
++        let parts: Vec<_> = text.split('/').collect();
++        if parts.len() != 3
++            || parts
++                .iter()
++                .any(|part| part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()))
++        {
++            return None;
++        }
++        let a: i64 = parts[0].parse().ok()?;
++        let b: i64 = parts[1].parse().ok()?;
++        let c: i64 = parts[2].parse().ok()?;
++        return if a > 31 {
++            legacy_civil(a, b, c)
++        } else {
++            legacy_civil(c, a, b)
++        };
++    }
++    let words: Vec<_> = text.split_whitespace().collect();
++    if words.len() != 3 {
++        return None;
++    }
++    let month_index = words.iter().position(|word| {
++        word.get(..3).is_some_and(|prefix| {
++            MONTHS
++                .iter()
++                .any(|month| prefix.eq_ignore_ascii_case(month))
++        })
++    })?;
++    let word = words[month_index];
++    let prefix = word.get(..3)?;
++    let month = MONTHS
++        .iter()
++        .position(|name| prefix.eq_ignore_ascii_case(name))? as i64
++        + 1;
++    let nums: Vec<i64> = words
++        .iter()
++        .enumerate()
++        .filter(|(index, _)| *index != month_index)
++        .map(|(_, word)| word.trim_end_matches(',').parse())
++        .collect::<Result<_, _>>()
++        .ok()?;
++    let (year, day) = if nums[0] > 31 {
++        (nums[0], nums[1])
++    } else {
++        (nums[1], nums[0])
++    };
++    legacy_civil(year, month, day)
++}
++
+ /// Parse an ISO-8601 string (`YYYY-MM-DD[THH:mm[:ss[.sss]]][Z|±HH:mm]`) into
+ /// epoch milliseconds. Returns `None` when the string is not recognizable.
+ fn parse_iso(s: &str) -> Option<f64> {
+@@ -926,6 +992,19 @@ fn parse_iso(s: &str) -> Option<f64> {
+             0,
+         ));
+     }
++    if s.contains('/')
++        || s.split_whitespace().any(|word| {
++            word.len() >= 3
++                && word.get(..3).is_some_and(|prefix| {
++                    MONTHS
++                        .iter()
++                        .any(|month| prefix.eq_ignore_ascii_case(month))
++                })
++        })
++    {
++        return parse_legacy_civil(s);
++    }
++    let strict_iso_time = s.contains('T');
+     let (date_part, time_part) = if let Some(idx) = s.find('T') {
+         (&s[..idx], Some(&s[idx + 1..]))
+     } else if let Some(idx) = s.find(' ') {
+@@ -939,6 +1018,28 @@ fn parse_iso(s: &str) -> Option<f64> {
+         .trim_start_matches(['-', '+'])
+         .split(['-', '/'])
+         .collect();
++    if dseps.is_empty()
++        || dseps.len() > 3
++        || dseps
++            .iter()
++            .any(|part| part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()))
++    {
++        return None;
++    }
++    if strict_iso_time {
++        let year_width = if date_part.starts_with(['+', '-']) {
++            6
++        } else {
++            4
++        };
++        if dseps.len() != 3
++            || dseps[0].len() != year_width
++            || dseps[1].len() != 2
++            || dseps[2].len() != 2
++        {
++            return None;
++        }
++    }
+     let mut year: i64 = dseps.first()?.parse().ok()?;
+     if negative {
+         if year == 0 {
+@@ -949,6 +1050,9 @@ fn parse_iso(s: &str) -> Option<f64> {
+     let month: i64 = dseps.get(1).and_then(|x| x.parse().ok()).unwrap_or(1);
+     let day: i64 = dseps.get(2).and_then(|x| x.parse().ok()).unwrap_or(1);
+ 
++    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
++        return None;
++    }
+     let mut hour = 0i64;
+     let mut minute = 0i64;
+     let mut second = 0i64;
+@@ -958,12 +1062,33 @@ fn parse_iso(s: &str) -> Option<f64> {
+     if let Some(mut t) = time_part {
+         // Peel off a trailing timezone designator first.
+         if let Some(zidx) = t.find('Z') {
++            if zidx + 1 != t.len() {
++                return None;
++            }
+             t = &t[..zidx];
+         } else if let Some(sign_idx) = t.rfind(['+', '-']) {
+             let sign = &t[sign_idx..sign_idx + 1];
+-            let tz_parts: Vec<&str> = t[sign_idx + 1..].split(':').collect();
+-            let tzh: i64 = tz_parts.first().and_then(|x| x.parse().ok()).unwrap_or(0);
+-            let tzm: i64 = tz_parts.get(1).and_then(|x| x.parse().ok()).unwrap_or(0);
++            let tz = &t[sign_idx + 1..];
++            if !tz.is_ascii() {
++                return None;
++            }
++            let (hh, mm) = if let Some((hours, minutes)) = tz.split_once(':') {
++                if hours.len() != 2 || minutes.len() != 2 {
++                    return None;
++                }
++                (hours, minutes)
++            } else if tz.len() == 4 {
++                (&tz[..2], &tz[2..])
++            } else if tz.len() == 2 && !strict_iso_time {
++                (tz, "00")
++            } else {
++                return None;
++            };
++            let tzh: i64 = hh.parse().ok()?;
++            let tzm: i64 = mm.parse().ok()?;
++            if tzh > 23 || tzm > 59 {
++                return None;
++            }
+             let mag = tzh * 3_600 + tzm * 60;
+             tz_offset_secs = if sign == "-" { -mag } else { mag };
+             t = &t[..sign_idx];
+@@ -974,12 +1099,35 @@ fn parse_iso(s: &str) -> Option<f64> {
+             None => (t, None),
+         };
+         let parts: Vec<&str> = hms.split(':').collect();
+-        hour = parts.first().and_then(|x| x.parse().ok()).unwrap_or(0);
+-        minute = parts.get(1).and_then(|x| x.parse().ok()).unwrap_or(0);
+-        second = parts.get(2).and_then(|x| x.parse().ok()).unwrap_or(0);
++        if !(2..=3).contains(&parts.len())
++            || parts.iter().any(|part| {
++                part.is_empty()
++                    || part.len() > 2
++                    || !part.bytes().all(|b| b.is_ascii_digit())
++                    || (strict_iso_time && part.len() != 2)
++            })
++        {
++            return None;
++        }
++        hour = parts[0].parse().ok()?;
++        minute = parts[1].parse().ok()?;
++        second = if parts.len() == 3 {
++            parts[2].parse().ok()?
++        } else {
++            0
++        };
++        if hour > 24 || minute > 59 || second > 59 || (hour == 24 && (minute != 0 || second != 0)) {
++            return None;
++        }
+         if let Some(fr) = frac {
++            if parts.len() != 3 || fr.is_empty() || !fr.bytes().all(|b| b.is_ascii_digit()) {
++                return None;
++            }
+             let digits: String = fr.chars().take(3).collect();
+             millis = format!("{:0<3}", digits).parse().unwrap_or(0);
++            if hour == 24 && millis != 0 {
++                return None;
++            }
+         }
+     }
+ 
+diff --git a/crates/napi-vm-core/src/bytecode/parity_tests.rs b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+index e5dea44..cb87902 100644
+--- a/crates/napi-vm-core/src/bytecode/parity_tests.rs
++++ b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+@@ -2419,3 +2419,20 @@ fn annex_b_labeled_and_duplicate_functions_are_block_hoisted() {
+         );
+     }
+ }
++
++#[test]
++fn legacy_date_parsing_and_iso_time_validation() {
++    for source in [
++        "new Date('5/1/0').getUTCFullYear()===2000&&new Date('5/1/49').getUTCFullYear()===2049&&new Date('5/1/50').getUTCFullYear()===1950&&new Date('99/1/99').getTime()!==new Date('99/1/99').getTime();",
++        "new Date('may 1 32').getTime()===new Date('32 may 1').getTime()&&new Date('1 32 may').getTime()===new Date('5/1/32').getTime();",
++        "new Date('1997-03-08 11:19:10-07').getTime()===new Date('1997-03-08 11:19:10-0700').getTime()&&isNaN(new Date('1997-03-08T11:19:10-07').getTime());",
++        "isNaN(new Date('1997-3-8T11:19:20').getTime())&&isNaN(new Date('1997-03-08T1:1').getTime())&&isNaN(new Date('1997-03-08T').getTime());",
++        "isNaN(new Date('1997-03-08T10:00+éé').getTime())&&isNaN(new Date('ééé may 1').getTime());",
++    ] {
++        check(source, true);
++        assert!(
++            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
++            "{source}"
++        );
++    }
++}
