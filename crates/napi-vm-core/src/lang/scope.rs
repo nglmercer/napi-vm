@@ -119,6 +119,7 @@ fn walk_stmt(s: &Statement, scope: &mut Scope, runtime_handlers: &HashMap<String
             walk_stmts(body, scope, runtime_handlers);
         }
         Statement::ClassDecl {
+            decorators: _,
             source_text: _,
             name,
             superclass,

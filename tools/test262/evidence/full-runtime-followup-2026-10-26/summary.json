@@ -1,0 +1,35 @@
+{
+  "domain": "ECMAScript",
+  "suite": "Test262",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "engine_sha256": "ef2a45bdc52273da6e8d3395881f4603ab7bc838c5ac7755e03ee4dfca43803e",
+  "worker_jobs": 2,
+  "timeout_seconds": 5.0,
+  "resumed_files": 0,
+  "total": 102956,
+  "counts": {
+    "pass": 102819,
+    "fail": 78,
+    "skip": 0,
+    "timeout": 59,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "pass_percentage": 99.86693344729788,
+  "source_commit": "42ae715ba57ee8b51bbf95e717851f63be0b4641",
+  "source_status": "uncommitted snapshot; source.diff records exact implementation",
+  "non_passing_phases": {
+    "timeout": 59,
+    "runtime": 36,
+    "parse": 42
+  },
+  "vs_0714": {
+    "new_passes": 36,
+    "lost_passes": 0
+  },
+  "vs_d942": {
+    "new_passes": 74,
+    "lost_passes": 0
+  },
+  "zero_lost_pass_gate": true
+}

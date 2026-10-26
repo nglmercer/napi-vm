@@ -49,6 +49,71 @@ impl Parser {
         false
     }
 
+    pub(super) fn decorator_list(&mut self) -> Option<Vec<Expr>> {
+        let mut decorators = Vec::new();
+        while self.eat(&Token::Unknown('@')) {
+            let expression = if self.eat(&Token::LParen) {
+                let expression = self.with_in(true, Self::expr)?;
+                self.expect(&Token::RParen);
+                Expr::Parenthesized(Box::new(expression))
+            } else {
+                if !matches!(
+                    self.cur(),
+                    Token::Identifier(_)
+                        | Token::EscapedIdentifier(_)
+                        | Token::KwYield
+                        | Token::KwAwait
+                        | Token::KwAsync
+                        | Token::KwAs
+                        | Token::KwLet
+                        | Token::KwStatic
+                        | Token::KwConstructor
+                        | Token::KwFrom
+                        | Token::KwGet
+                        | Token::KwOf
+                        | Token::KwSet
+                ) {
+                    self.record_error(
+                        "expected decorator identifier or parenthesized expression".into(),
+                    );
+                    return None;
+                }
+                let mut expression = self.primary()?;
+                while self.eat(&Token::Dot) {
+                    let property = if let Token::PrivateIdentifier(name) = self.cur() {
+                        let name = format!("#{name}");
+                        self.adv();
+                        name
+                    } else {
+                        self.ident_or_keyword()?
+                    };
+                    expression = Expr::Member {
+                        object: Box::new(expression),
+                        property: Box::new(Expr::String(property.into())),
+                        computed: false,
+                    };
+                }
+                if self.eat(&Token::LParen) {
+                    let mut args = Vec::new();
+                    while self.until(&Token::RParen) {
+                        args.push(self.with_in(true, Self::assign)?);
+                        if !matches!(self.cur(), Token::RParen) {
+                            self.expect(&Token::Comma);
+                        }
+                    }
+                    self.expect(&Token::RParen);
+                    expression = Expr::Call {
+                        callee: Box::new(expression),
+                        args,
+                    };
+                }
+                expression
+            };
+            decorators.push(expression);
+        }
+        Some(decorators)
+    }
+
     pub(super) fn class_decl(&mut self) -> Option<Statement> {
         self.class_decl_named(None)
     }
@@ -57,7 +122,33 @@ impl Parser {
     /// class { … }`), in which case `fallback` supplies the binding name.
     pub(crate) fn class_decl_named(&mut self, fallback: Option<&str>) -> Option<Statement> {
         let source_start = self.pos;
-        self.adv();
+        let decorators = self.decorator_list()?;
+        if matches!(self.cur(), Token::KwExport) && !decorators.is_empty() {
+            let mut statement = self.export()?;
+            let target = match &mut statement {
+                Statement::Declarations(statements) => statements.first_mut()?,
+                _ => {
+                    self.record_error("decorators require an exported class".into());
+                    return None;
+                }
+            };
+            if let Statement::ClassDecl {
+                decorators: inner, ..
+            } = target
+            {
+                if !inner.is_empty() {
+                    self.record_error("decorators cannot occur on both sides of export".into());
+                }
+                *inner = decorators;
+                return Some(statement);
+            }
+            self.record_error("decorators require an exported class".into());
+            return None;
+        }
+        if !self.eat(&Token::KwClass) {
+            self.record_error("expected class after decorators".into());
+            return None;
+        }
         let name_span = self.cur_span();
         let n = match (self.cur(), fallback) {
             (Token::LBrace | Token::KwExtends, Some(name)) => name.to_string(),
@@ -86,17 +177,30 @@ impl Parser {
             if self.eof() {
                 break;
             }
+            let member_decorators = self.decorator_list()?;
             // `static` / `get` / `set` are modifiers only when a member name
             // follows; `get() {}` and `set = 1` declare members named `get`.
             let st = self.eat_modifier(&Token::KwStatic);
             let member_start = self.pos;
             // `static { … }`: a static initialization block, not a member.
             if st && matches!(self.cur(), Token::LBrace) {
+                if !member_decorators.is_empty() {
+                    self.record_error("static blocks cannot be decorated".into());
+                }
                 self.adv();
                 let body = self.with_grammar(false, false, Self::block_body);
                 self.expect(&Token::RBrace);
                 b.push(ClassMember::StaticBlock { body });
                 continue;
+            }
+            let auto_accessor = matches!(self.cur(), Token::Identifier(name) if name == "accessor")
+                && !self.line_break_after_current()
+                && !matches!(
+                    self.peek(),
+                    Token::LParen | Token::Equal | Token::Semicolon | Token::RBrace
+                );
+            if auto_accessor {
+                self.adv();
             }
             let is_async = !self.line_break_after_current() && self.eat_modifier(&Token::KwAsync);
             let is_generator = self.eat(&Token::Star);
@@ -187,6 +291,9 @@ impl Parser {
                 );
             }
             if self.eat(&Token::LParen) {
+                if auto_accessor {
+                    self.record_error("auto-accessor cannot be a method".into());
+                }
                 let method_scope = self.push_scope(true);
                 let (p, defaults, bd) = self.callable_parts(is_async, is_generator);
                 self.check_accessor_parameters(&p, &defaults, is_getter, is_setter);
@@ -197,6 +304,9 @@ impl Parser {
                 self.check_parameters(&p, &defaults, &bd, true);
                 let body = Self::function_body(&p, defaults, bd);
                 if is_getter {
+                    if !member_decorators.is_empty() {
+                        self.record_error("getter decorators are not implemented".into());
+                    }
                     b.push(ClassMember::Getter {
                         source_text: self.source_since(member_start),
                         name: mn,
@@ -204,6 +314,9 @@ impl Parser {
                         body,
                     });
                 } else if is_setter {
+                    if !member_decorators.is_empty() {
+                        self.record_error("setter decorators are not implemented".into());
+                    }
                     let param = p.first().cloned().unwrap_or_default();
                     b.push(ClassMember::Setter {
                         source_text: self.source_since(member_start),
@@ -214,6 +327,7 @@ impl Parser {
                     });
                 } else {
                     b.push(ClassMember::Method {
+                        decorators: member_decorators,
                         source_text: self.source_since(member_start),
                         name: mn,
                         is_static: st,
@@ -233,9 +347,13 @@ impl Parser {
                     None
                 };
                 self.semi();
+                if !member_decorators.is_empty() {
+                    self.record_error("field decorators are not implemented".into());
+                }
                 b.push(ClassMember::Field {
                     name: mn,
                     is_static: st,
+                    auto_accessor,
                     init: i,
                 });
             }
@@ -243,6 +361,7 @@ impl Parser {
         self.expect(&Token::RBrace);
         self.pop_scope(class_scope);
         Some(Statement::ClassDecl {
+            decorators,
             source_text: self.source_since(source_start),
             name: n,
             superclass: sc,
@@ -257,7 +376,9 @@ impl Parser {
             // *declarations*, not expressions: bind the (possibly synthesized)
             // name first, then export that binding as the default.
             let decl = match self.cur() {
-                Token::KwClass => self.class_decl_named(Some(DEFAULT_BINDING)),
+                Token::KwClass | Token::Unknown('@') => {
+                    self.class_decl_named(Some(DEFAULT_BINDING))
+                }
                 Token::KwFunction => self.fn_decl_named(false, Some(DEFAULT_BINDING)),
                 Token::KwAsync
                     if matches!(self.peek(), Token::KwFunction)
@@ -390,7 +511,7 @@ impl Parser {
                 let n = decl_name(&d);
                 (d, n)
             }
-            Token::KwClass => {
+            Token::KwClass | Token::Unknown('@') => {
                 let d = self.class_decl()?;
                 let n = decl_name(&d);
                 (d, n)
@@ -655,7 +776,7 @@ impl Parser {
             if self.eof() {
                 break;
             }
-            if let Some(st) = self.stmt() {
+            if let Some(st) = self.statement_list_item() {
                 s.push(st);
             } else {
                 self.record_error("invalid statement in block".into());

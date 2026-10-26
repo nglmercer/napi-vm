@@ -1,0 +1,15 @@
+{
+  "source_commit": "42ae715ba57ee8b51bbf95e717851f63be0b4641",
+  "source_status": "uncommitted snapshot; diff includes new decorators.rs module",
+  "source_diff_sha256": "03083ebb46791afed4dc8c9a00202333e5325ae813013fa9cad7000735d74fb2",
+  "engine_sha256": "53f7de7fc6149b75fa16664d96295d9aec560d27e551782e45d49d5642ca9f2e",
+  "checks": {
+    "core_library_tests": 402,
+    "worker_tests": 5,
+    "clippy": "all targets, warnings denied; passed",
+    "root_all_target_check": "passed",
+    "format": "passed",
+    "diff_whitespace": "passed"
+  },
+  "revalidated_after_measurements": true
+}

@@ -7,12 +7,38 @@ use super::{
 use crate::lexer::Token;
 
 impl Parser {
+    /// Parse one statement-list item, collapsing consecutive empty block
+    /// statements. They have no declarations, effects, or completion value,
+    /// so a run is equivalent to a single empty block. Keeping this fast path
+    /// in statement lists preserves the one-statement grammar used by `if`,
+    /// loops, labels, and similar constructs.
+    pub(crate) fn statement_list_item(&mut self) -> Option<Statement> {
+        if !self.single_statement && matches!(self.cur(), Token::LBrace) {
+            let start = self.pos;
+            let mut end = start;
+            while matches!(
+                self.toks.get(end).map(|(token, _)| token),
+                Some(Token::LBrace)
+            ) && matches!(
+                self.toks.get(end + 1).map(|(token, _)| token),
+                Some(Token::RBrace)
+            ) {
+                end += 2;
+            }
+            if end > start {
+                self.pos = end;
+                return Some(Statement::Block(Vec::new()));
+            }
+        }
+        self.stmt()
+    }
+
     pub(crate) fn stmt(&mut self) -> Option<Statement> {
         // Nesting guard for nested blocks / control flow; see `Parser::enter`.
         if !self.enter() {
             return None;
         }
-        let r = self.stmt_inner();
+        let r = stacker::maybe_grow(1024 * 1024, 8 * 1024 * 1024, || self.stmt_inner());
         self.leave();
         r
     }
@@ -130,7 +156,7 @@ impl Parser {
                     Some(Statement::Expr(e))
                 }
             }
-            Token::KwClass => {
+            Token::KwClass | Token::Unknown('@') => {
                 if self.single_statement {
                     self.record_error("class declaration requires a statement list".into());
                 }

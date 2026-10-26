@@ -57,6 +57,19 @@ pub struct CallFrame<'a> {
     scopes: Vec<Env>,
 }
 
+/// Reusable storage detached from a completed call frame. Exception-heavy
+/// functions commonly push one handler per invocation, so retaining these
+/// vectors avoids a fresh allocation on every call.
+#[derive(Default)]
+pub(crate) struct ActivationBuffers {
+    registers: Vec<Value>,
+    slots: Vec<RunSlot>,
+    handlers: Vec<HandlerEntry>,
+    pending: Vec<VmErr>,
+    enumerators: Vec<(Reg, crate::interpreter::for_in::ForInEnumerator)>,
+    scopes: Vec<Env>,
+}
+
 /// One pushed exception handler: `target` resumes after an interception,
 /// `dst` receives the catch value (catch handlers), `catch_returns`
 /// selects finally handlers, which also intercept `return` unwinding.
@@ -79,7 +92,14 @@ impl<'a> CallFrame<'a> {
         this_value: Value,
         args: &[Value],
     ) -> Self {
-        let (mut registers, mut slots) = interp.activation_pool.pop().unwrap_or_default();
+        let ActivationBuffers {
+            mut registers,
+            mut slots,
+            handlers,
+            pending,
+            enumerators,
+            scopes,
+        } = interp.activation_pool.pop().unwrap_or_default();
         registers.resize(function.register_count as usize, Value::Undefined);
         slots.reserve(function.local_count as usize);
         for (index, info) in function.slots.iter().enumerate() {
@@ -122,10 +142,10 @@ impl<'a> CallFrame<'a> {
             registers,
             slots,
             this_value,
-            handlers: Vec::new(),
-            pending: Vec::new(),
-            enumerators: Vec::new(),
-            scopes: Vec::new(),
+            handlers,
+            pending,
+            enumerators,
+            scopes,
         }
     }
 }
@@ -133,11 +153,26 @@ impl<'a> CallFrame<'a> {
 fn recycle_activation(interp: &mut Interpreter, mut frame: CallFrame<'_>) {
     frame.registers.clear();
     frame.slots.clear();
+    frame.handlers.clear();
+    frame.pending.clear();
+    frame.enumerators.clear();
+    frame.scopes.clear();
     if interp.activation_pool.len() < 16
         && frame.registers.capacity() <= 4096
         && frame.slots.capacity() <= 4096
+        && frame.handlers.capacity() <= 4096
+        && frame.pending.capacity() <= 4096
+        && frame.enumerators.capacity() <= 4096
+        && frame.scopes.capacity() <= 4096
     {
-        interp.activation_pool.push((frame.registers, frame.slots));
+        interp.activation_pool.push(ActivationBuffers {
+            registers: frame.registers,
+            slots: frame.slots,
+            handlers: frame.handlers,
+            pending: frame.pending,
+            enumerators: frame.enumerators,
+            scopes: frame.scopes,
+        });
     }
 }
 
@@ -216,7 +251,7 @@ pub(crate) fn run_function(
 ) -> Result<Value, VmErr> {
     interp.check_execution()?;
     tier_check(interp, code, args);
-    let fe = Rc::new(RefCell::new(Environment::function_child(parent_env)));
+    let fe = interp.acquire_function_environment(parent_env);
     fe.borrow_mut().replace_strict(Some(strict));
     if !code.is_arrow {
         fe.borrow_mut().set("this", this_value.clone());
@@ -236,9 +271,10 @@ pub(crate) fn run_function(
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         run_loop(interp, &mut frame, false)
     }));
-    interp.global = saved;
+    let fe = std::mem::replace(&mut interp.global, saved);
     interp.cur_mod = saved_module;
     recycle_activation(interp, frame);
+    interp.recycle_function_environment(fe);
     result.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
 }
 
@@ -290,9 +326,10 @@ fn seed_captured(
     Ok(())
 }
 
-/// Property storage of the cell-backed receivers an inline cache serves:
-/// ordinary objects, classes, and functions. Arrays, strings, proxies,
-/// and primitives always take the slow path.
+/// Property storage of receivers an inline cache can guard directly:
+/// ordinary objects, classes, and functions. Primitive string prototype
+/// reads are handled separately because their guard is the current realm's
+/// String.prototype cell.
 fn cached_cell(obj: &Value) -> Option<&Rc<crate::value::ObjectCell>> {
     match obj {
         Value::Object { props } => Some(props),
@@ -333,11 +370,30 @@ fn get_prop_cached(
     obj: &Value,
     key: &Value,
 ) -> Result<Value, VmErr> {
-    let (Some(props), Value::String(name)) = (cached_cell(obj), key) else {
+    let Value::String(name) = key else {
         return interp.get_prop_value(obj, key);
     };
-    let encoded_name = name.to_key();
-    let name = encoded_name.as_str();
+    let encoded_name = name.to_key_cow();
+    let name = encoded_name.as_ref();
+    if let Value::String(string) = obj {
+        // String length and in-range indices are virtual own properties, so
+        // they must keep using the full exotic-property path. Other named
+        // reads can guard an own data slot on the current String.prototype.
+        if name == "length"
+            || crate::value::array_index(name).is_some_and(|index| index < string.len())
+        {
+            return interp.get_prop_value(obj, key);
+        }
+    }
+    let primitive_prototype = if matches!(obj, Value::String(_)) {
+        interp.primitive_reference_prototype(obj)
+    } else {
+        None
+    };
+    let props = cached_cell(obj).or_else(|| primitive_prototype.as_ref().and_then(cached_cell));
+    let Some(props) = props else {
+        return interp.get_prop_value(obj, key);
+    };
     let cache = &function.caches[site];
     if let Some(index) = cache.probe(props.shape_id())
         && let Some(value) = props.slot_verified(index, name)
@@ -377,9 +433,10 @@ fn set_prop_cached(
     obj: &Value,
     key: &Value,
     val: Value,
+    strict: bool,
 ) -> Result<(), VmErr> {
     let (Some(props), Value::String(name)) = (cached_cell(obj), key) else {
-        return interp.assign_member(obj, key, val);
+        return interp.assign_property_with_receiver(obj, key, val, obj, strict);
     };
     let encoded_name = name.to_key();
     let name = encoded_name.as_str();
@@ -401,7 +458,7 @@ fn set_prop_cached(
         }
         return Ok(());
     }
-    interp.assign_member(obj, key, val)?;
+    interp.assign_property_with_receiver(obj, key, val, obj, strict)?;
     if !props.meta.borrow().module_namespace
         && props.meta.borrow().attrs_of(name).writable
         && let Some(index) = props.own_index(name)
@@ -588,10 +645,13 @@ fn run_loop(
                             frame.registers[src as usize].clone(),
                         )?;
                     } else {
-                        interp.assign_member(
+                        let strict = current_scope(interp, frame).borrow().strict();
+                        interp.assign_property_with_receiver(
                             &frame.registers[obj as usize],
                             &frame.registers[key as usize],
                             frame.registers[src as usize].clone(),
+                            &frame.registers[obj as usize],
+                            strict,
                         )?;
                     }
                 }
@@ -792,11 +852,13 @@ fn run_loop(
                     delta,
                     prefix,
                 } => {
+                    let strict = current_scope(interp, frame).borrow().strict();
                     let value = interp.inc_prop_value(
                         &frame.registers[obj as usize],
                         &frame.registers[key as usize],
                         delta > 0,
                         prefix,
+                        strict,
                     )?;
                     frame.registers[dst as usize].assign_for_execution(value);
                 }
@@ -892,6 +954,7 @@ fn run_loop(
                     cache,
                 } => {
                     let val = frame.registers[val as usize].clone_for_execution();
+                    let strict = current_scope(interp, frame).borrow().strict();
                     set_prop_cached(
                         interp,
                         frame.function,
@@ -899,6 +962,7 @@ fn run_loop(
                         &frame.registers[obj as usize],
                         &frame.registers[key as usize],
                         val,
+                        strict,
                     )?;
                 }
                 Instr::DirectEval {
@@ -1613,6 +1677,7 @@ fn build_class_from_template(
         },
     )];
     let mut static_has_accessors = false;
+    let mut method_definitions = Vec::new();
     for member in &template.members {
         let property = match &member.name {
             ClassNameTemplate::Static(name) | ClassNameTemplate::Private(name) => {
@@ -1622,6 +1687,11 @@ fn build_class_from_template(
                 frame.registers[*reg as usize].clone_for_execution()
             }
         };
+        if let Some(storage) = &member.auto_accessor_storage {
+            member_scope
+                .borrow_mut()
+                .declare(storage, property.clone(), BindKind::Const, true);
+        }
         if member.is_static
             && !matches!(member.name, ClassNameTemplate::Private(_))
             && matches!(
@@ -1635,9 +1705,9 @@ fn build_class_from_template(
         let display_name = interp.property_function_name(&property)?;
         if !matches!(member.name, ClassNameTemplate::Private(_)) {
             if member.is_static {
-                static_keys.push(property);
+                static_keys.push(property.clone());
             } else {
-                proto_keys.push(property);
+                proto_keys.push(property.clone());
             }
         }
         // Computed names are known only now; static ones were set when
@@ -1657,6 +1727,30 @@ fn build_class_from_template(
                     .func
                     .ok_or_else(|| internal("method without function"))?;
                 let fn_val = class_function(interp, frame, func, closure.clone(), display(""))?;
+                if template.has_method_decorators {
+                    method_definitions.push(crate::interpreter::ClassMethodDefinition {
+                        kind: crate::interpreter::ClassMethodKind::Method,
+                        key: property.clone(),
+                        private: matches!(member.name, ClassNameTemplate::Private(_)),
+                        is_static: member.is_static,
+                        value: fn_val.clone(),
+                        decorators: member
+                            .decorators
+                            .iter()
+                            .map(|(value, receiver)| {
+                                (
+                                    frame.registers[*value as usize].clone_for_execution(),
+                                    receiver
+                                        .map(|reg| {
+                                            frame.registers[reg as usize].clone_for_execution()
+                                        })
+                                        .unwrap_or(Value::Undefined),
+                                )
+                            })
+                            .collect(),
+                    });
+                }
+
                 if matches!(member.name, ClassNameTemplate::Private(_)) {
                     define_class_private_element(
                         &member_scope,
@@ -1689,6 +1783,34 @@ fn build_class_from_template(
                     "set "
                 };
                 let fn_val = class_function(interp, frame, func, closure, display(prefix))?;
+                if template.has_method_decorators {
+                    method_definitions.push(crate::interpreter::ClassMethodDefinition {
+                        kind: if member.kind == ClassMemberKind::Getter {
+                            crate::interpreter::ClassMethodKind::Getter
+                        } else {
+                            crate::interpreter::ClassMethodKind::Setter
+                        },
+                        key: property.clone(),
+                        private: matches!(member.name, ClassNameTemplate::Private(_)),
+                        is_static: member.is_static,
+                        value: fn_val.clone(),
+                        decorators: member
+                            .decorators
+                            .iter()
+                            .map(|(value, receiver)| {
+                                (
+                                    frame.registers[*value as usize].clone_for_execution(),
+                                    receiver
+                                        .map(|reg| {
+                                            frame.registers[reg as usize].clone_for_execution()
+                                        })
+                                        .unwrap_or(Value::Undefined),
+                                )
+                            })
+                            .collect(),
+                    });
+                }
+
                 if matches!(member.name, ClassNameTemplate::Private(_)) {
                     let element = if member.kind == ClassMemberKind::Getter {
                         PrivateElement::Accessor {
@@ -1772,6 +1894,19 @@ fn build_class_from_template(
         }
     }
     let class_val = interp.assemble_class(ClassAssembly {
+        method_definitions,
+        decorators: template
+            .decorators
+            .iter()
+            .map(|(value, receiver)| {
+                (
+                    frame.registers[*value as usize].clone_for_execution(),
+                    receiver
+                        .map(|reg| frame.registers[reg as usize].clone_for_execution())
+                        .unwrap_or(Value::Undefined),
+                )
+            })
+            .collect(),
         source_text: template.source_text.clone(),
         name: template.name.clone(),
         super_cls,
@@ -2208,6 +2343,24 @@ mod tests {
         let (result, _) =
             run_module("let o = {x: 1}; let a = o.x; delete o.x; o.x = 2; let b = o.x; a + b;");
         assert_eq!(num(&result), 3.0);
+    }
+
+    #[test]
+    fn ic_caches_string_prototype_reads_and_observes_replacement() {
+        let (result, module) = run_module(
+            "let text = 'a'; let matched = 0; \
+             for (let i = 0; i < 6; i++) { \
+               if (i === 3) String.prototype.toUpperCase = function () { return 'later'; }; \
+               let actual = text.toUpperCase(); \
+               if (actual === (i < 3 ? 'A' : 'later')) matched++; \
+             } matched;",
+        );
+        assert_eq!(num(&result), 6.0);
+        let (hits, _, _, _) = cache_stats(&module);
+        assert!(
+            hits > 0,
+            "repeated primitive string reads should hit the cache"
+        );
     }
 
     #[test]

@@ -48,6 +48,28 @@ fn class_accessor_kind(value: &Value) -> Option<&'static str> {
     }
 }
 
+pub(super) fn decorator_add_initializer(
+    _: &mut Interpreter,
+    state: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    if !matches!(state.get_prop("active"), Some(Value::Bool(true))) {
+        return Err(VmErr::Msg(
+            "TypeError: decorator application has finished".into(),
+        ));
+    }
+    let initializer = args.first().cloned().unwrap_or(Value::Undefined);
+    if !super::is_callable_value(&initializer) {
+        return Err(VmErr::Msg("TypeError: initializer must be callable".into()));
+    }
+    let list = state
+        .get_prop("initializers")
+        .and_then(|list| list.as_array())
+        .expect("internal initializer list");
+    list.store_index(list.array_length(), initializer);
+    Ok(Value::Undefined)
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum ClassStaticElement {
     Field {
@@ -62,6 +84,8 @@ pub(crate) enum ClassStaticElement {
 /// the constructor plus gathered prototype/static members, with static
 /// blocks to run once the class value exists.
 pub(crate) struct ClassAssembly {
+    pub method_definitions: Vec<super::ClassMethodDefinition>,
+    pub decorators: Vec<(Value, Value)>,
     pub source_text: Option<crate::parser::SourceTextRef>,
     pub name: String,
     pub super_cls: Option<Value>,
@@ -343,12 +367,15 @@ impl Interpreter {
         key: &Value,
     ) -> Result<(Value, Value, Value), VmErr> {
         let receiver = self.resolve_this(scope)?;
-        let key = self.ecmascript_to_property_key(key)?;
         let home = scope
             .borrow()
             .get(HOME_OBJECT)
             .ok_or_else(|| VmErr::Msg("ReferenceError: missing super home object".into()))?;
         let base = self.get_prototype_of(&home)?;
+        // Capture the super base before user code in ToPropertyKey can change
+        // the home object's prototype. The reference keeps that base for both
+        // the read and write of a compound assignment or update.
+        let key = self.ecmascript_to_property_key(key)?;
         Ok((base, receiver, key))
     }
 
@@ -372,12 +399,35 @@ impl Interpreter {
     ///
     /// Shared by the declaration and the class *expression*, which differ
     /// only in whether the result is bound to a name.
+    pub(crate) fn evaluate_private_class_field(
+        &mut self,
+        initializer: &Expr,
+        key: &Value,
+    ) -> Result<Value, VmErr> {
+        let original_name = if let Value::String(storage) = key {
+            let storage = storage.to_key_cow();
+            if storage.starts_with("#\0auto-accessor:") {
+                match self.global.borrow().lookup(&storage) {
+                    super::Lookup::Value(value) => Some(value),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let key = original_name.as_ref().unwrap_or(key);
+        self.evaluate_class_field(initializer, key)
+    }
+
     pub(crate) fn evaluate_class_field(
         &mut self,
         initializer: &Expr,
         key: &Value,
     ) -> Result<Value, VmErr> {
         if let Expr::ClassExpr {
+            decorators,
             source_text: _,
             name: None,
             superclass,
@@ -390,6 +440,7 @@ impl Interpreter {
                 &name,
                 superclass.as_deref(),
                 body,
+                decorators,
                 initializer.source_text(),
             );
         }
@@ -518,6 +569,8 @@ impl Interpreter {
     /// each tier; everything from the prototype object on is shared.
     pub(crate) fn assemble_class(&mut self, asm: ClassAssembly) -> Result<Value, VmErr> {
         let ClassAssembly {
+            mut method_definitions,
+            decorators,
             source_text,
             name,
             super_cls,
@@ -535,7 +588,7 @@ impl Interpreter {
             instance_home,
             static_home,
             constructor_home,
-            private_statics,
+            mut private_statics,
         } = asm;
         let has_constructor_member = proto_props.iter().any(|(key, _)| key == "constructor");
         let constructor_property =
@@ -643,7 +696,7 @@ impl Interpreter {
             }
         }
 
-        let class_val = Value::Class(Box::new(ClassData {
+        let mut class_val = Value::Class(Box::new(ClassData {
             name: name.to_string(),
             constructor: Box::new(constructor),
             prototype: Rc::new(prototype),
@@ -681,14 +734,61 @@ impl Interpreter {
             }
         }
 
+        let static_method_initializers = self.decorate_class_methods(
+            &class_val,
+            &private_scope,
+            &mut method_definitions,
+            &mut private_statics,
+        )?;
+
         for (id, element) in private_statics {
             class_val.initialize_private_element(id, element)?;
+        }
+
+        let original_class = class_val.clone();
+        let extra_initializers = (!decorators.is_empty()).then(|| Value::array(Vec::new()));
+        for (decorator, receiver) in decorators.into_iter().rev() {
+            let state = Value::object(vec![
+                ("active".into(), Value::Bool(true)),
+                (
+                    "initializers".into(),
+                    extra_initializers
+                        .as_ref()
+                        .expect("decorated class")
+                        .clone(),
+                ),
+            ]);
+            let add_initializer = crate::builtins::bound_native_method(
+                "addInitializer",
+                1,
+                decorator_add_initializer,
+                None,
+                state.clone(),
+            );
+            let context = Value::object(vec![
+                ("kind".into(), Value::String("class".into())),
+                ("name".into(), Value::String(name.as_str().into())),
+                ("addInitializer".into(), add_initializer),
+            ]);
+            let result = self.call_this(&decorator, receiver, vec![class_val.clone(), context]);
+            state.set_prop("active".into(), Value::Bool(false))?;
+            let replacement = result?;
+            if super::is_callable_value(&replacement) {
+                class_val = replacement;
+            } else if !matches!(replacement, Value::Undefined) {
+                return Err(VmErr::Msg(
+                    "TypeError: class decorator must return a callable or undefined".into(),
+                ));
+            }
         }
 
         if !name.is_empty() && private_scope.borrow().own_binding(&name).is_some() {
             private_scope
                 .borrow_mut()
                 .declare(&name, class_val.clone(), BindKind::Const, true);
+        }
+        if let Some(initializers) = static_method_initializers {
+            self.run_method_initializers(&initializers, &class_val)?;
         }
         // Static methods/accessors are already installed. Fields and blocks
         // initialize in source order after every computed name was evaluated.
@@ -700,7 +800,7 @@ impl Interpreter {
             scope.borrow_mut().replace_strict(Some(true));
             scope.borrow_mut().set("this", class_val.clone());
             scope.borrow_mut().set_new_target(Value::Undefined);
-            scope.borrow_mut().set(HOME_OBJECT, class_val.clone());
+            scope.borrow_mut().set(HOME_OBJECT, original_class.clone());
             let saved = std::mem::replace(&mut self.global, scope);
             let result = (|| {
                 self.execution.check()?;
@@ -711,7 +811,11 @@ impl Interpreter {
                         private,
                         init,
                     } => {
-                        let value = self.evaluate_class_field(&init, &name)?;
+                        let value = if private {
+                            self.evaluate_private_class_field(&init, &name)?
+                        } else {
+                            self.evaluate_class_field(&init, &name)?
+                        };
                         if private {
                             let id = self
                                 .global
@@ -743,6 +847,18 @@ impl Interpreter {
             self.global = saved;
             result?;
         }
+        if let Some(extra_initializers) = extra_initializers {
+            let initializers = extra_initializers
+                .as_array()
+                .expect("internal initializer list");
+            for index in 0..initializers.array_length() {
+                self.check_execution_interrupt()?;
+                let initializer = initializers
+                    .index_value(index)
+                    .expect("dense initializer list");
+                self.call_this(&initializer, class_val.clone(), Vec::new())?;
+            }
+        }
         Ok(class_val)
     }
 
@@ -751,6 +867,7 @@ impl Interpreter {
         name: &str,
         superclass: Option<&Expr>,
         body: &[ClassMember],
+        decorators: &[Expr],
         source_text: Option<&crate::parser::SourceTextRef>,
     ) -> Result<Value, VmErr> {
         self.build_class_with_name(
@@ -758,6 +875,7 @@ impl Interpreter {
             crate::parser::declaration_display_name(name),
             superclass,
             body,
+            decorators,
             source_text,
         )
     }
@@ -768,8 +886,16 @@ impl Interpreter {
         name: &str,
         superclass: Option<&Expr>,
         body: &[ClassMember],
+        decorators: &[Expr],
         source_text: Option<&crate::parser::SourceTextRef>,
     ) -> Result<Value, VmErr> {
+        let mut evaluated_decorators = Vec::new();
+        for decorator in decorators {
+            evaluated_decorators.push(
+                self.evaluate_call_reference(decorator)?
+                    .unwrap_or((Value::Undefined, Value::Undefined)),
+            );
+        }
         let member_scope = Self::class_environment(self.global.clone(), binding_name);
         let saved = std::mem::replace(&mut self.global, member_scope.clone());
         let heritage = (|| {
@@ -817,10 +943,24 @@ impl Interpreter {
         let mut static_has_accessors = false;
         let mut private_statics = Vec::new();
         let mut static_elements = Vec::new();
+        let has_method_decorators = body.iter().any(|member| !member.decorators().is_empty());
+        let mut method_definitions = Vec::new();
 
-        for member in body {
+        for (member_index, member) in body.iter().enumerate() {
+            let saved = std::mem::replace(&mut self.global, member_scope.clone());
+            let member_decorators = member
+                .decorators()
+                .iter()
+                .map(|decorator| {
+                    self.evaluate_call_reference(decorator)
+                        .map(|reference| reference.unwrap_or((Value::Undefined, Value::Undefined)))
+                })
+                .collect::<Result<Vec<_>, VmErr>>();
+            self.global = saved;
+            let member_decorators = member_decorators?;
             match member {
                 ClassMember::Method {
+                    decorators: _,
                     source_text: _,
                     name,
                     is_static: st,
@@ -837,9 +977,9 @@ impl Interpreter {
                     let display_name = self.property_function_name(&key)?;
                     if !matches!(name, MemberName::Private(_)) {
                         if *st {
-                            static_keys.push(key);
+                            static_keys.push(key.clone());
                         } else {
-                            proto_keys.push(key);
+                            proto_keys.push(key.clone());
                         }
                     }
                     // Only a written-out `constructor` is the constructor; a
@@ -875,6 +1015,17 @@ impl Interpreter {
                     }));
 
                     let fn_val = fn_val.with_function_source(member.source_text());
+                    if has_method_decorators && (*st || !is_ctor_name) {
+                        method_definitions.push(super::ClassMethodDefinition {
+                            kind: super::ClassMethodKind::Method,
+                            key: key.clone(),
+                            private: matches!(name, MemberName::Private(_)),
+                            is_static: *st,
+                            value: fn_val.clone(),
+                            decorators: member_decorators,
+                        });
+                    }
+
                     if matches!(name, MemberName::Private(_)) {
                         define_class_private_element(
                             &member_scope,
@@ -909,9 +1060,126 @@ impl Interpreter {
                 ClassMember::Field {
                     name,
                     is_static: st,
+                    auto_accessor,
                     init,
                 } => {
                     let fname = self.class_member_name(&member_scope, name)?;
+                    if *auto_accessor {
+                        let storage = crate::parser::auto_accessor_storage(member_index);
+                        member_scope.borrow_mut().declare(
+                            &storage,
+                            fname.clone(),
+                            BindKind::Const,
+                            true,
+                        );
+                        let key = self.property_key(&fname)?;
+                        let display_name = self.property_function_name(&fname)?;
+                        let mut accessors = Vec::new();
+                        for setter in [false, true] {
+                            let body = crate::parser::auto_accessor_body(&storage, setter);
+                            let function = Value::Function(Rc::new(FunctionData {
+                                strict: true,
+                                native: None,
+                                identity: Rc::new(0),
+                                name: Some(
+                                    format!(
+                                        "{} {display_name}",
+                                        if setter { "set" } else { "get" }
+                                    )
+                                    .into(),
+                                ),
+                                properties: FunctionData::properties_with_default_prototype(
+                                    &self.persistent_global,
+                                ),
+                                standard_properties_initialized: Rc::new(std::cell::Cell::new(
+                                    false,
+                                )),
+                                params: Rc::new(if setter {
+                                    vec![Rc::from("value")]
+                                } else {
+                                    vec![]
+                                }),
+                                body: Rc::new(body),
+                                closure: Some(crate::heap::capture_env(if *st {
+                                    &static_member_closure
+                                } else {
+                                    &member_closure
+                                })),
+                                is_arrow: false,
+                                is_constructor: false,
+                                is_async: false,
+                                is_generator: false,
+                                uses_arguments: false,
+                                bytecode: None,
+                                needs_hoisting: false,
+                                bound: None,
+                            }));
+                            accessors.push(function);
+                        }
+                        let setter = accessors.pop().unwrap();
+                        let getter = accessors.pop().unwrap();
+                        if has_method_decorators {
+                            for (kind, value) in [
+                                (super::ClassMethodKind::Getter, getter.clone()),
+                                (super::ClassMethodKind::Setter, setter.clone()),
+                            ] {
+                                method_definitions.push(super::ClassMethodDefinition {
+                                    kind,
+                                    key: fname.clone(),
+                                    private: matches!(name, MemberName::Private(_)),
+                                    is_static: *st,
+                                    value,
+                                    decorators: Vec::new(),
+                                });
+                            }
+                        }
+
+                        if matches!(name, MemberName::Private(_)) {
+                            define_class_private_element(
+                                &member_scope,
+                                &mut private_statics,
+                                &key,
+                                *st,
+                                PrivateElement::Accessor {
+                                    get: Some(getter),
+                                    set: Some(setter),
+                                },
+                            )?;
+                        } else if *st {
+                            Self::check_static_method_key(&fname)?;
+                            static_keys.push(fname.clone());
+                            insert_class_accessor(&mut statics, &key, getter);
+                            insert_class_accessor(&mut statics, &key, setter);
+                            static_attrs.push((
+                                key,
+                                PropAttrs {
+                                    writable: false,
+                                    enumerable: false,
+                                    configurable: true,
+                                },
+                            ));
+                            static_has_accessors = true;
+                        } else {
+                            proto_keys.push(fname.clone());
+                            insert_class_accessor(&mut proto_props, &key, getter);
+                            insert_class_accessor(&mut proto_props, &key, setter);
+                        }
+                        if *st {
+                            static_elements.push(ClassStaticElement::Field {
+                                name: Value::String(crate::JsString::from_key(&storage)),
+                                private: true,
+                                init: init.clone().unwrap_or(Expr::Undefined),
+                            });
+                        } else {
+                            instance_fields.push((
+                                Expr::String(crate::JsString::from_key(&storage)),
+                                init.clone(),
+                                false,
+                            ));
+                        }
+                        continue;
+                    }
+
                     if *st {
                         static_elements.push(ClassStaticElement::Field {
                             name: fname,
@@ -947,9 +1215,9 @@ impl Interpreter {
                     let display_name = self.property_function_name(&key)?;
                     if !matches!(name, MemberName::Private(_)) {
                         if *st {
-                            static_keys.push(key);
+                            static_keys.push(key.clone());
                         } else {
-                            proto_keys.push(key);
+                            proto_keys.push(key.clone());
                         }
                     }
                     let getter_fn = Value::Function(Rc::new(FunctionData {
@@ -979,6 +1247,17 @@ impl Interpreter {
                     }));
 
                     let getter_fn = getter_fn.with_function_source(member.source_text());
+                    if has_method_decorators {
+                        method_definitions.push(super::ClassMethodDefinition {
+                            kind: super::ClassMethodKind::Getter,
+                            key: key.clone(),
+                            private: matches!(name, MemberName::Private(_)),
+                            is_static: *st,
+                            value: getter_fn.clone(),
+                            decorators: Vec::new(),
+                        });
+                    }
+
                     if matches!(name, MemberName::Private(_)) {
                         define_class_private_element(
                             &member_scope,
@@ -1020,9 +1299,9 @@ impl Interpreter {
                     let display_name = self.property_function_name(&key)?;
                     if !matches!(name, MemberName::Private(_)) {
                         if *st {
-                            static_keys.push(key);
+                            static_keys.push(key.clone());
                         } else {
-                            proto_keys.push(key);
+                            proto_keys.push(key.clone());
                         }
                     }
                     let setter_fn = Value::Function(Rc::new(FunctionData {
@@ -1052,6 +1331,17 @@ impl Interpreter {
                     }));
 
                     let setter_fn = setter_fn.with_function_source(member.source_text());
+                    if has_method_decorators {
+                        method_definitions.push(super::ClassMethodDefinition {
+                            kind: super::ClassMethodKind::Setter,
+                            key: key.clone(),
+                            private: matches!(name, MemberName::Private(_)),
+                            is_static: *st,
+                            value: setter_fn.clone(),
+                            decorators: Vec::new(),
+                        });
+                    }
+
                     if matches!(name, MemberName::Private(_)) {
                         define_class_private_element(
                             &member_scope,
@@ -1107,7 +1397,8 @@ impl Interpreter {
         }
         let fields = full_ctor_body;
         let mut full_ctor_body = Vec::new();
-        if super_cls.is_some()
+        if has_method_decorators
+            || super_cls.is_some()
             || !fields.is_empty()
             || !member_scope.borrow().private_instance_elements().is_empty()
         {
@@ -1161,6 +1452,8 @@ impl Interpreter {
         }));
 
         self.assemble_class(ClassAssembly {
+            method_definitions,
+            decorators: evaluated_decorators,
             source_text: source_text.cloned(),
             name: name.to_string(),
             super_cls,
@@ -1571,9 +1864,6 @@ impl Interpreter {
                     // A bare `var a;` re-declaration must not erase an
                     // existing value: `var a = 1; var a; a` is 1.
                     // Hoisting already created the binding.
-                    if self.global.borrow().get(name).is_none() {
-                        self.assign_or_set_binding(name, Value::Undefined)?;
-                    }
                     return Ok(Value::Undefined);
                 }
                 let v = match init {
@@ -1591,8 +1881,6 @@ impl Interpreter {
                             self.destructure_assignment(pat, &v)?;
                         } else if init.is_some() {
                             self.assign_or_set_binding(name, v.clone())?;
-                        } else if self.global.borrow().get(name).is_none() {
-                            self.assign_or_set_binding(name, Value::Undefined)?;
                         }
                     }
                     // `let`/`const` bind in *this* block, leaving the dead
@@ -1622,13 +1910,19 @@ impl Interpreter {
             }
             Statement::FnDecl { .. } => self.evaluate_function_declaration(s),
             Statement::ClassDecl {
+                decorators,
                 source_text: _,
                 name,
                 superclass,
                 body,
             } => {
-                let class_val =
-                    self.build_class(name, superclass.as_deref(), body, s.source_text())?;
+                let class_val = self.build_class(
+                    name,
+                    superclass.as_deref(),
+                    body,
+                    decorators,
+                    s.source_text(),
+                )?;
                 self.set_binding(name, class_val)?;
                 Ok(Value::Undefined)
             }
@@ -3154,7 +3448,8 @@ impl Interpreter {
                                 return if *prefix { Ok(new_val) } else { Ok(cur) };
                             }
                             let prop = self.eval_expr(property)?;
-                            self.inc_prop_value(&obj, &prop, *op == UnOp::Inc, *prefix)
+                            let strict = self.global.borrow().strict();
+                            self.inc_prop_value(&obj, &prop, *op == UnOp::Inc, *prefix, strict)
                         }
                         _ => {
                             let v = self.eval_expr(operand)?;
@@ -3522,11 +3817,11 @@ impl Interpreter {
             }
             // A class expression's own name is visible only inside its body,
             // which a child scope provides.
-            Expr::ClassExpr { source_text: _,
+            Expr::ClassExpr { decorators, source_text: _,
                 name,
                 superclass,
                 body,
-            } => self.build_class(name.as_deref().unwrap_or(""), superclass.as_deref(), body, e.source_text()),
+            } => self.build_class(name.as_deref().unwrap_or(""), superclass.as_deref(), body, decorators, e.source_text()),
             Expr::ArrowFn { source_text: _,
                 params,
                 body,

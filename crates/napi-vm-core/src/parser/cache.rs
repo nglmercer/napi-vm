@@ -240,13 +240,25 @@ mod tests {
     }
 
     #[test]
+    fn nested_functions_parse_on_a_small_native_stack() {
+        let source = "(function(){".repeat(32) + "0;" + &"})()".repeat(32);
+        std::thread::Builder::new()
+            .name("nested-function-parse-probe".into())
+            .stack_size(512 * 1024)
+            .spawn(move || assert!(parse_cached(&source).is_ok()))
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
     fn depth_failure_detail_survives_the_cache_boundary() {
         let deep = "(".repeat(200) + &")".repeat(200);
-        // Debug parser frames are fat: 65 guarded levels exceed the default
-        // test-thread stack, so run the probe on a roomy thread.
+        // Both successful descent and rejection at the resource limit must
+        // remain safe on embedding threads with small native stacks.
         let failure = std::thread::Builder::new()
             .name("cache-depth-probe".into())
-            .stack_size(8 * 1024 * 1024)
+            .stack_size(512 * 1024)
             .spawn(move || parse_cached(&deep).unwrap_err())
             .unwrap()
             .join()

@@ -1,0 +1,6951 @@
+{
+  "domain": "ECMAScript",
+  "suite": "Test262",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "selection": [
+    "built-ins/Set",
+    "language/statements/class/subclass/builtin-objects/Set"
+  ],
+  "groups": [],
+  "engine_sha256": "4735c525bb33e7bbd0daf643b1f0f7735498eb3d8685164ee9dd48ba8c0fbee8",
+  "skip_features": [],
+  "denominator": "all selected variants, including skips and errors",
+  "worker_jobs": 2,
+  "timeout_seconds": 5.0,
+  "resumed_files": 0,
+  "total": 768,
+  "counts": {
+    "pass": 764,
+    "fail": 4,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "pass_percentage": 99.47916666666667,
+  "limitations": [
+    "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
+  ],
+  "results": [
+    {
+      "test": "built-ins/Set/Symbol.species/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/Symbol.species/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/Symbol.species/return-value.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/Symbol.species/return-value.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/Symbol.species/symbol-species-name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/Symbol.species/symbol-species-name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/Symbol.species/symbol-species.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/Symbol.species/symbol-species.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/bigint-number-same-value.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/bigint-number-same-value.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/is-a-constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/is-a-constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/properties-of-the-set-prototype-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/properties-of-the-set-prototype-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/proto-from-ctor-realm.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/proto-from-ctor-realm.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/Symbol.iterator/not-a-constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/Symbol.iterator/not-a-constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/Symbol.iterator.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/Symbol.iterator.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/Symbol.toStringTag/property-descriptor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/Symbol.toStringTag/property-descriptor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/Symbol.toStringTag.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/Symbol.toStringTag.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/add.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/add.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/does-not-have-setdata-internal-slot-array.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/does-not-have-setdata-internal-slot-array.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/does-not-have-setdata-internal-slot-map.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/does-not-have-setdata-internal-slot-map.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/does-not-have-setdata-internal-slot-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/does-not-have-setdata-internal-slot-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/does-not-have-setdata-internal-slot-set-prototype.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/does-not-have-setdata-internal-slot-set-prototype.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/does-not-have-setdata-internal-slot-weakset.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/does-not-have-setdata-internal-slot-weakset.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/not-a-constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/not-a-constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/preserves-insertion-order.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/preserves-insertion-order.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/returns-this-when-ignoring-duplicate.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/returns-this-when-ignoring-duplicate.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/returns-this.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/returns-this.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/this-not-object-throw-boolean.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/this-not-object-throw-boolean.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/this-not-object-throw-null.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/this-not-object-throw-null.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/this-not-object-throw-number.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/this-not-object-throw-number.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/this-not-object-throw-string.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/this-not-object-throw-string.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/this-not-object-throw-symbol.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/this-not-object-throw-symbol.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/this-not-object-throw-undefined.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/this-not-object-throw-undefined.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/will-not-add-duplicate-entry-initial-iterable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/will-not-add-duplicate-entry-initial-iterable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/will-not-add-duplicate-entry-normalizes-zero.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/will-not-add-duplicate-entry-normalizes-zero.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/will-not-add-duplicate-entry.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/add/will-not-add-duplicate-entry.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/clear.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/clear.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/clears-all-contents-from-iterable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/clears-all-contents-from-iterable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/clears-all-contents.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/clears-all-contents.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/clears-an-empty-set.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/clears-an-empty-set.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/does-not-have-setdata-internal-slot-array.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/does-not-have-setdata-internal-slot-array.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/does-not-have-setdata-internal-slot-map.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/does-not-have-setdata-internal-slot-map.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/does-not-have-setdata-internal-slot-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/does-not-have-setdata-internal-slot-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/does-not-have-setdata-internal-slot-set.prototype.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/does-not-have-setdata-internal-slot-set.prototype.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/does-not-have-setdata-internal-slot-weakset.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/does-not-have-setdata-internal-slot-weakset.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/not-a-constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/not-a-constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/returns-undefined.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/returns-undefined.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/this-not-object-throw-boolean.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/this-not-object-throw-boolean.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/this-not-object-throw-null.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/this-not-object-throw-null.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/this-not-object-throw-number.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/this-not-object-throw-number.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/this-not-object-throw-string.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/this-not-object-throw-string.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/this-not-object-throw-symbol.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/this-not-object-throw-symbol.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/this-not-object-throw-undefined.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/clear/this-not-object-throw-undefined.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/constructor/set-prototype-constructor-intrinsic.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/constructor/set-prototype-constructor-intrinsic.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/constructor/set-prototype-constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/constructor/set-prototype-constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/delete-entry-initial-iterable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/delete-entry-initial-iterable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/delete-entry-normalizes-zero.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/delete-entry-normalizes-zero.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/delete-entry.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/delete-entry.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/delete.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/delete.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/does-not-have-setdata-internal-slot-array.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/does-not-have-setdata-internal-slot-array.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/does-not-have-setdata-internal-slot-map.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/does-not-have-setdata-internal-slot-map.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/does-not-have-setdata-internal-slot-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/does-not-have-setdata-internal-slot-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/does-not-have-setdata-internal-slot-set-prototype.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/does-not-have-setdata-internal-slot-set-prototype.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/does-not-have-setdata-internal-slot-weakset.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/does-not-have-setdata-internal-slot-weakset.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/not-a-constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/not-a-constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/returns-false-when-delete-is-noop.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/returns-false-when-delete-is-noop.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/returns-true-when-delete-operation-occurs.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/returns-true-when-delete-operation-occurs.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/this-not-object-throw-boolean.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/this-not-object-throw-boolean.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/this-not-object-throw-null.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/this-not-object-throw-null.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/this-not-object-throw-number.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/this-not-object-throw-number.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/this-not-object-throw-string.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/this-not-object-throw-string.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/this-not-object-throw-symbol.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/this-not-object-throw-symbol.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/this-not-object-throw-undefined.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/delete/this-not-object-throw-undefined.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/add-not-called.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/add-not-called.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/allows-set-like-class.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/allows-set-like-class.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/allows-set-like-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/allows-set-like-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/array-throws.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/array-throws.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/builtins.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/builtins.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/called-with-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/called-with-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/combines-Map.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/combines-Map.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/combines-empty-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/combines-empty-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/combines-itself.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/combines-itself.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/combines-same-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/combines-same-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/combines-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/combines-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/converts-negative-zero.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/converts-negative-zero.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/difference.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/difference.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/has-is-callable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/has-is-callable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/keys-is-callable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/keys-is-callable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/not-a-constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/not-a-constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/receiver-not-set.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/receiver-not-set.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/require-internal-slot.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/require-internal-slot.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/result-order.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/result-order.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/set-like-array.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/set-like-array.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/set-like-class-mutation.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/set-like-class-mutation.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/set-like-class-order.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/set-like-class-order.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/size-is-a-number.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/size-is-a-number.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/subclass-receiver-methods.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/subclass-receiver-methods.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/subclass-symbol-species.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/subclass-symbol-species.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/subclass.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/difference/subclass.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/does-not-have-setdata-internal-slot-array.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/does-not-have-setdata-internal-slot-array.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/does-not-have-setdata-internal-slot-map.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/does-not-have-setdata-internal-slot-map.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/does-not-have-setdata-internal-slot-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/does-not-have-setdata-internal-slot-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/does-not-have-setdata-internal-slot-set-prototype.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/does-not-have-setdata-internal-slot-set-prototype.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/does-not-have-setdata-internal-slot-weakset.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/does-not-have-setdata-internal-slot-weakset.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/entries.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/entries.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/not-a-constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/not-a-constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/returns-iterator-empty.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/returns-iterator-empty.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/returns-iterator.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/returns-iterator.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/this-not-object-throw-boolean.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/this-not-object-throw-boolean.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/this-not-object-throw-null.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/this-not-object-throw-null.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/this-not-object-throw-number.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/this-not-object-throw-number.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/this-not-object-throw-string.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/this-not-object-throw-string.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/this-not-object-throw-symbol.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/this-not-object-throw-symbol.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/this-not-object-throw-undefined.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/entries/this-not-object-throw-undefined.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/callback-not-callable-boolean.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/callback-not-callable-boolean.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/callback-not-callable-null.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/callback-not-callable-null.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/callback-not-callable-number.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/callback-not-callable-number.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/callback-not-callable-string.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/callback-not-callable-string.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/callback-not-callable-symbol.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/callback-not-callable-symbol.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/callback-not-callable-undefined.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/callback-not-callable-undefined.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/does-not-have-setdata-internal-slot-array.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/does-not-have-setdata-internal-slot-array.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/does-not-have-setdata-internal-slot-map.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/does-not-have-setdata-internal-slot-map.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/does-not-have-setdata-internal-slot-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/does-not-have-setdata-internal-slot-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/does-not-have-setdata-internal-slot-set-prototype.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/does-not-have-setdata-internal-slot-set-prototype.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/does-not-have-setdata-internal-slot-weakset.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/does-not-have-setdata-internal-slot-weakset.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/forEach.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/forEach.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/iterates-in-insertion-order.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/iterates-in-insertion-order.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/iterates-in-iterable-entry-order.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/iterates-in-iterable-entry-order.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/iterates-values-added-after-foreach-begins.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/iterates-values-added-after-foreach-begins.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/iterates-values-deleted-then-readded.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/iterates-values-deleted-then-readded.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/iterates-values-not-deleted.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/iterates-values-not-deleted.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/iterates-values-revisits-after-delete-re-add.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/iterates-values-revisits-after-delete-re-add.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/not-a-constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/not-a-constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/returns-undefined.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/returns-undefined.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/this-arg-explicit-cannot-override-lexical-this-arrow.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/this-arg-explicit-cannot-override-lexical-this-arrow.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/this-arg-explicit.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/this-arg-explicit.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/this-non-strict.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/this-not-object-throw-boolean.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/this-not-object-throw-boolean.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/this-not-object-throw-null.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/this-not-object-throw-null.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/this-not-object-throw-number.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/this-not-object-throw-number.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/this-not-object-throw-string.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/this-not-object-throw-string.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/this-not-object-throw-symbol.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/this-not-object-throw-symbol.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/this-not-object-throw-undefined.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/this-not-object-throw-undefined.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/this-strict.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/throws-when-callback-throws.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/forEach/throws-when-callback-throws.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/does-not-have-setdata-internal-slot-array.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/does-not-have-setdata-internal-slot-array.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/does-not-have-setdata-internal-slot-map.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/does-not-have-setdata-internal-slot-map.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/does-not-have-setdata-internal-slot-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/does-not-have-setdata-internal-slot-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/does-not-have-setdata-internal-slot-set-prototype.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/does-not-have-setdata-internal-slot-set-prototype.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/does-not-have-setdata-internal-slot-weakset.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/does-not-have-setdata-internal-slot-weakset.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/has.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/has.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/not-a-constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/not-a-constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-false-when-undefined-added-deleted-not-present-undefined.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-false-when-undefined-added-deleted-not-present-undefined.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-false-when-value-not-present-boolean.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-false-when-value-not-present-boolean.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-false-when-value-not-present-nan.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-false-when-value-not-present-nan.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-false-when-value-not-present-null.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-false-when-value-not-present-null.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-false-when-value-not-present-number.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-false-when-value-not-present-number.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-false-when-value-not-present-string.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-false-when-value-not-present-string.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-false-when-value-not-present-symbol.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-false-when-value-not-present-symbol.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-false-when-value-not-present-undefined.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-false-when-value-not-present-undefined.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-true-when-value-present-boolean.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-true-when-value-present-boolean.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-true-when-value-present-nan.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-true-when-value-present-nan.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-true-when-value-present-null.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-true-when-value-present-null.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-true-when-value-present-number.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-true-when-value-present-number.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-true-when-value-present-string.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-true-when-value-present-string.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-true-when-value-present-symbol.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-true-when-value-present-symbol.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-true-when-value-present-undefined.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/returns-true-when-value-present-undefined.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/this-not-object-throw-boolean.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/this-not-object-throw-boolean.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/this-not-object-throw-null.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/this-not-object-throw-null.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/this-not-object-throw-number.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/this-not-object-throw-number.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/this-not-object-throw-string.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/this-not-object-throw-string.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/this-not-object-throw-symbol.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/this-not-object-throw-symbol.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/this-not-object-throw-undefined.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/has/this-not-object-throw-undefined.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/add-not-called.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/add-not-called.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/allows-set-like-class.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/allows-set-like-class.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/allows-set-like-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/allows-set-like-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/array-throws.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/array-throws.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/builtins.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/builtins.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/called-with-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/called-with-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/combines-Map.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/combines-Map.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/combines-empty-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/combines-empty-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/combines-itself.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/combines-itself.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/combines-same-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/combines-same-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/combines-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/combines-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/converts-negative-zero.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/converts-negative-zero.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/has-is-callable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/has-is-callable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/intersection.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/intersection.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/keys-is-callable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/keys-is-callable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/not-a-constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/not-a-constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/receiver-not-set.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/receiver-not-set.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/require-internal-slot.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/require-internal-slot.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/result-order.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/result-order.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/set-like-array.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/set-like-array.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/set-like-class-mutation.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/set-like-class-mutation.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/set-like-class-order.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/set-like-class-order.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/size-is-a-number.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/size-is-a-number.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/subclass-receiver-methods.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/subclass-receiver-methods.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/subclass-symbol-species.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/subclass-symbol-species.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/subclass.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/intersection/subclass.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/allows-set-like-class.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/allows-set-like-class.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/allows-set-like-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/allows-set-like-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/array-throws.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/array-throws.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/builtins.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/builtins.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/called-with-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/called-with-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/compares-Map.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/compares-Map.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/compares-empty-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/compares-empty-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/compares-itself.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/compares-itself.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/compares-same-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/compares-same-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/compares-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/compares-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/converts-negative-zero.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/converts-negative-zero.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/has-is-callable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/has-is-callable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/isDisjointFrom.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/isDisjointFrom.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/keys-is-callable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/keys-is-callable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/not-a-constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/not-a-constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/receiver-not-set.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/receiver-not-set.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/require-internal-slot.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/require-internal-slot.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/set-like-array.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/set-like-array.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/set-like-class-mutation.js",
+      "variant": "script",
+      "status": "fail",
+      "engine": {
+        "status": "error",
+        "phase": "runtime",
+        "error_type": "Test262Error",
+        "message": "Set.prototype.isDisjointFrom should not call its argument's has method with values from this which have been deleted before visiting"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/set-like-class-mutation.js",
+      "variant": "strict",
+      "status": "fail",
+      "engine": {
+        "status": "error",
+        "phase": "runtime",
+        "error_type": "Test262Error",
+        "message": "Set.prototype.isDisjointFrom should not call its argument's has method with values from this which have been deleted before visiting"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/set-like-class-order.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/set-like-class-order.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/set-like-iter-return.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/set-like-iter-return.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/size-is-a-number.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/size-is-a-number.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/subclass-receiver-methods.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isDisjointFrom/subclass-receiver-methods.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/allows-set-like-class.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/allows-set-like-class.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/allows-set-like-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/allows-set-like-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/array-throws.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/array-throws.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/builtins.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/builtins.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/called-with-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/called-with-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/compares-Map.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/compares-Map.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/compares-empty-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/compares-empty-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/compares-itself.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/compares-itself.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/compares-same-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/compares-same-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/compares-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/compares-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/has-is-callable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/has-is-callable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/isSubsetOf.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/isSubsetOf.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/keys-is-callable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/keys-is-callable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/not-a-constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/not-a-constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/receiver-not-set.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/receiver-not-set.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/require-internal-slot.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/require-internal-slot.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/set-like-array.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/set-like-array.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/set-like-class-mutation.js",
+      "variant": "script",
+      "status": "fail",
+      "engine": {
+        "status": "error",
+        "phase": "runtime",
+        "error_type": "Test262Error",
+        "message": "Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/set-like-class-mutation.js",
+      "variant": "strict",
+      "status": "fail",
+      "engine": {
+        "status": "error",
+        "phase": "runtime",
+        "error_type": "Test262Error",
+        "message": "Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/set-like-class-order.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/set-like-class-order.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/size-is-a-number.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/size-is-a-number.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/subclass-receiver-methods.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSubsetOf/subclass-receiver-methods.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/allows-set-like-class.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/allows-set-like-class.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/allows-set-like-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/allows-set-like-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/array-throws.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/array-throws.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/builtins.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/builtins.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/called-with-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/called-with-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/compares-Map.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/compares-Map.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/compares-empty-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/compares-empty-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/compares-itself.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/compares-itself.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/compares-same-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/compares-same-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/compares-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/compares-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/converts-negative-zero.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/converts-negative-zero.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/has-is-callable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/has-is-callable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/isSupersetOf.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/isSupersetOf.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/keys-is-callable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/keys-is-callable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/not-a-constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/not-a-constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/receiver-not-set.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/receiver-not-set.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/require-internal-slot.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/require-internal-slot.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/set-like-array.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/set-like-array.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/set-like-class-mutation.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/set-like-class-mutation.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/set-like-class-order.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/set-like-class-order.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/set-like-iter-return.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/set-like-iter-return.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/size-is-a-number.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/size-is-a-number.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/subclass-receiver-methods.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/isSupersetOf/subclass-receiver-methods.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/keys/keys.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/keys/keys.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/size/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/size/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/size/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/size/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/size/returns-count-of-present-values-before-after-add-delete.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/size/returns-count-of-present-values-before-after-add-delete.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/size/returns-count-of-present-values-by-insertion.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/size/returns-count-of-present-values-by-insertion.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/size/returns-count-of-present-values-by-iterable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/size/returns-count-of-present-values-by-iterable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/size/size.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/size/size.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/add-not-called.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/add-not-called.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/allows-set-like-class.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/allows-set-like-class.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/allows-set-like-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/allows-set-like-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/array-throws.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/array-throws.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/builtins.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/builtins.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/called-with-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/called-with-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/combines-Map.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/combines-Map.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/combines-empty-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/combines-empty-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/combines-itself.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/combines-itself.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/combines-same-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/combines-same-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/combines-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/combines-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/converts-negative-zero.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/converts-negative-zero.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/has-is-callable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/has-is-callable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/keys-is-callable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/keys-is-callable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/not-a-constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/not-a-constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/receiver-not-set.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/receiver-not-set.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/require-internal-slot.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/require-internal-slot.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/result-order.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/result-order.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/set-like-array.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/set-like-array.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/set-like-class-mutation.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/set-like-class-mutation.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/set-like-class-order.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/set-like-class-order.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/size-is-a-number.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/size-is-a-number.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/subclass-receiver-methods.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/subclass-receiver-methods.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/subclass-symbol-species.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/subclass-symbol-species.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/subclass.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/subclass.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/symmetricDifference.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/symmetricDifference/symmetricDifference.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/add-not-called.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/add-not-called.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/allows-set-like-class.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/allows-set-like-class.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/allows-set-like-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/allows-set-like-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/appends-new-values.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/appends-new-values.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/array-throws.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/array-throws.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/builtins.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/builtins.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/called-with-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/called-with-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/combines-Map.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/combines-Map.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/combines-empty-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/combines-empty-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/combines-itself.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/combines-itself.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/combines-same-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/combines-same-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/combines-sets.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/combines-sets.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/converts-negative-zero.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/converts-negative-zero.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/has-is-callable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/has-is-callable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/keys-is-callable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/keys-is-callable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/not-a-constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/not-a-constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/receiver-not-set.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/receiver-not-set.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/require-internal-slot.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/require-internal-slot.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/result-order.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/result-order.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/set-like-array.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/set-like-array.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/set-like-class-mutation.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/set-like-class-mutation.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/set-like-class-order.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/set-like-class-order.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/size-is-a-number.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/size-is-a-number.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/subclass-receiver-methods.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/subclass-receiver-methods.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/subclass-symbol-species.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/subclass-symbol-species.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/subclass.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/subclass.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/union.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/union/union.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/does-not-have-setdata-internal-slot-array.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/does-not-have-setdata-internal-slot-array.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/does-not-have-setdata-internal-slot-map.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/does-not-have-setdata-internal-slot-map.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/does-not-have-setdata-internal-slot-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/does-not-have-setdata-internal-slot-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/does-not-have-setdata-internal-slot-set-prototype.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/does-not-have-setdata-internal-slot-set-prototype.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/does-not-have-setdata-internal-slot-weakset.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/does-not-have-setdata-internal-slot-weakset.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/not-a-constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/not-a-constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/returns-iterator-empty.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/returns-iterator-empty.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/returns-iterator.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/returns-iterator.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/this-not-object-throw-boolean.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/this-not-object-throw-boolean.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/this-not-object-throw-null.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/this-not-object-throw-null.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/this-not-object-throw-number.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/this-not-object-throw-number.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/this-not-object-throw-string.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/this-not-object-throw-string.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/this-not-object-throw-symbol.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/this-not-object-throw-symbol.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/this-not-object-throw-undefined.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/this-not-object-throw-undefined.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/values-iteration-mutable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/values-iteration-mutable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/values.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype/values/values.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype-of-set.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/prototype-of-set.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-does-not-throw-when-add-is-not-callable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-does-not-throw-when-add-is-not-callable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-get-add-method-failure.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-get-add-method-failure.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-iterable-calls-add.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-iterable-calls-add.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-iterable-empty-does-not-call-add.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-iterable-empty-does-not-call-add.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-iterable-throws-when-add-is-not-callable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-iterable-throws-when-add-is-not-callable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-iterable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-iterable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-iterator-close-after-add-failure.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-iterator-close-after-add-failure.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-iterator-next-failure.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-iterator-next-failure.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-iterator-value-failure.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-iterator-value-failure.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-newtarget.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-newtarget.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-no-iterable.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-no-iterable.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-undefined-newtarget.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set-undefined-newtarget.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/set.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/valid-values.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Set/valid-values.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "language/statements/class/subclass/builtin-objects/Set/regular-subclassing.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "language/statements/class/subclass/builtin-objects/Set/regular-subclassing.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "language/statements/class/subclass/builtin-objects/Set/super-must-be-called.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "language/statements/class/subclass/builtin-objects/Set/super-must-be-called.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    }
+  ]
+}

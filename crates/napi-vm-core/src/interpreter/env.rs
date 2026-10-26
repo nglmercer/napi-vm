@@ -62,6 +62,7 @@ pub enum BindKind {
 #[derive(Clone)]
 struct Binding {
     silent_immutable: bool,
+    deletable: bool,
     value: Value,
     kind: BindKind,
     /// `false` while a `let`/`const` is hoisted but not yet initialized --
@@ -74,6 +75,7 @@ impl Binding {
     fn initialized(value: Value, kind: BindKind) -> Self {
         Self {
             silent_immutable: false,
+            deletable: false,
             value,
             kind,
             initialized: true,
@@ -387,6 +389,27 @@ impl Environment {
             id,
             element,
         )
+    }
+
+    pub(crate) fn class_internal_binding(&self, name: &str) -> Option<Value> {
+        if self.private_instance_elements.is_some() {
+            self.own_binding(name)
+        } else {
+            self.parent
+                .as_ref()
+                .and_then(|parent| parent.borrow().class_internal_binding(name))
+        }
+    }
+
+    pub(crate) fn replace_private_instance_method(&mut self, id: u64, value: Value) {
+        let (_, element) = self
+            .private_instance_elements
+            .as_mut()
+            .expect("class private environment")
+            .iter_mut()
+            .find(|(candidate, _)| *candidate == id)
+            .expect("defined private method");
+        *element = PrivateElement::Method(value);
     }
 
     pub(crate) fn private_instance_elements(&self) -> Vec<(u64, PrivateElement)> {
@@ -968,8 +991,11 @@ impl Environment {
             let _ = self.create_global_var_binding(n, value, false);
             return;
         }
+        let deletable =
+            kind == BindKind::Var && self.vars.get(n).is_some_and(|binding| binding.deletable);
         let binding = Binding {
             silent_immutable: false,
+            deletable,
             value,
             kind,
             initialized,
@@ -1280,6 +1306,20 @@ impl Environment {
         match self.parent {
             Some(ref p) => p.borrow_mut().modify(n, f),
             None => ModifyOutcome::Missing,
+        }
+    }
+
+    pub(crate) fn mark_binding_deletable(&mut self, name: &str) {
+        if let Some(binding) = self.vars.get_mut(name) {
+            binding.deletable = true;
+        }
+    }
+
+    pub(crate) fn delete_declarative_binding(&mut self, name: &str) -> bool {
+        if self.vars.get(name).is_some_and(|binding| binding.deletable) {
+            self.remove(name)
+        } else {
+            false
         }
     }
 

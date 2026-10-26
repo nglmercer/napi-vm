@@ -373,8 +373,9 @@ impl Parser {
             }
             Token::KwAsync => self.async_expr(),
             // `class` in expression position.
-            Token::KwClass => {
+            Token::KwClass | Token::Unknown('@') => {
                 let Statement::ClassDecl {
+                    decorators,
                     source_text,
                     name,
                     superclass,
@@ -384,6 +385,7 @@ impl Parser {
                     return None;
                 };
                 Some(Expr::ClassExpr {
+                    decorators,
                     source_text,
                     name: (name != ANONYMOUS_CLASS).then_some(name),
                     superclass,

@@ -1,0 +1,10 @@
+{
+  "source_commit": "42ae715ba57ee8b51bbf95e717851f63be0b4641",
+  "source_status": "uncommitted source snapshot",
+  "engine_sha256": "2bd39a9a090fbeb4d3df25b2c773bf25be9a1baf9324ef1090b6081ce1d53256",
+  "checks": {
+    "core_library_tests": 386,
+    "clippy": "all targets, warnings denied; passed",
+    "format": "passed"
+  }
+}

@@ -35,11 +35,10 @@ use crate::span::Span;
 /// Maximum statement/expression nesting the parser accepts. The parser is
 /// recursive descent, so each nesting level costs native stack frames;
 /// 100k-deep parentheses would overflow the stack and SIGSEGV the host.
-/// Each recursive expression level passes through several parser functions,
-/// so even 256 levels can exhaust the smaller native stacks used by embedded
-/// runtimes before this guard unwinds. Legitimate code rarely nests beyond a
-/// few dozen levels.
-const MAX_PARSE_DEPTH: u32 = 64;
+/// Guarded recursive entry points grow the native stack before descending.
+/// Keep a finite resource limit while accepting ordinary nested functions,
+/// which consume several statement/expression levels per function.
+const MAX_PARSE_DEPTH: u32 = 128;
 
 #[cfg(any(test, feature = "test-hooks"))]
 thread_local! {
@@ -175,7 +174,7 @@ impl Parser {
     pub fn parse(&mut self) -> Vec<Statement> {
         let mut s = Vec::new();
         while !self.eof() && !self.depth_exceeded {
-            if let Some(st) = self.stmt() {
+            if let Some(st) = self.statement_list_item() {
                 s.push(st);
             } else {
                 // Record the position of the token that could not start a
@@ -245,12 +244,13 @@ impl Parser {
         match self.error.take() {
             Some(error) => Err(error),
             None => {
-                validate::validate(&stmts, new_target, strict, goal, eval.as_ref()).map_err(
-                    |message| ParseError {
-                        message,
-                        span: Span::unknown(),
-                    },
-                )?;
+                stacker::maybe_grow(1024 * 1024, 8 * 1024 * 1024, || {
+                    validate::validate(&stmts, new_target, strict, goal, eval.as_ref())
+                })
+                .map_err(|message| ParseError {
+                    message,
+                    span: Span::unknown(),
+                })?;
                 Ok(stmts)
             }
         }
@@ -617,6 +617,26 @@ mod tests {
         let toks = lex.tokenize_with_spans();
         let mut parser = Parser::new_with_spans(toks);
         parser.parse()
+    }
+
+    fn parse_program(src: &str) -> Result<Vec<Statement>, ParseError> {
+        let mut lex = Lexer::new(src);
+        let toks = lex.tokenize_with_spans();
+        Parser::new_with_spans(toks).parse_program()
+    }
+
+    #[test]
+    fn consecutive_empty_blocks_collapse_in_statement_lists() {
+        let statements = parse_program("{}{}{}{};").unwrap();
+        assert_eq!(statements.len(), 2);
+        assert!(matches!(&statements[0], Statement::Block(body) if body.is_empty()));
+        assert!(matches!(&statements[1], Statement::Empty));
+    }
+
+    #[test]
+    fn empty_block_collapse_preserves_single_statement_grammar() {
+        assert!(parse_program("if (true) {} else {}").is_ok());
+        assert!(parse_program("if (true) {}{} else {}").is_err());
     }
 
     #[test]

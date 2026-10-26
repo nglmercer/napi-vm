@@ -6,6 +6,10 @@ use crate::{
     interpreter::{Environment, Interpreter},
     value::{Value, to_integer_or_infinity},
 };
+use icu_properties::{
+    CodePointSetData,
+    props::{ChangesWhenLowercased, ChangesWhenUppercased},
+};
 fn bounded_string(value: impl Into<JsString>) -> Result<Value, VmErr> {
     Value::checked_string(value)
 }
@@ -448,6 +452,75 @@ fn map_scalar_runs(text: &JsString, mut map: impl FnMut(&str) -> String) -> JsSt
     output.extend(map(&run).encode_utf16());
     JsString::from_units(output)
 }
+/// Avoid building UTF-8 runs and output buffers for the common one-scalar
+/// case. ICU returns a borrowed string when casing leaves the scalar alone;
+/// in that case the original UTF-16 storage is already the correct result.
+fn map_single_scalar(
+    text: &JsString,
+    mapper: icu_casemap::CaseMapperBorrowed<'static>,
+    language: &icu_locale::LanguageIdentifier,
+    upper: bool,
+) -> Option<JsString> {
+    if text.is_empty() {
+        return Some(text.clone());
+    }
+    let scalar = match text.units() {
+        [unit] => match char::from_u32(u32::from(*unit)) {
+            Some(scalar) => scalar,
+            None => return Some(text.clone()),
+        },
+        [high, low] if (0xd800..=0xdbff).contains(high) && (0xdc00..=0xdfff).contains(low) => {
+            let code_point =
+                0x10000 + ((u32::from(*high) - 0xd800) << 10) + (u32::from(*low) - 0xdc00);
+            char::from_u32(code_point)?
+        }
+        _ => return None,
+    };
+    let changes_when_cased = if upper {
+        CodePointSetData::new::<ChangesWhenUppercased>()
+    } else {
+        CodePointSetData::new::<ChangesWhenLowercased>()
+    };
+    if !changes_when_cased.contains(scalar) {
+        return Some(text.clone());
+    }
+    if *language == icu_locale::LanguageIdentifier::UNKNOWN {
+        let one_to_one_mapping = if upper {
+            let mut mapping = scalar.to_uppercase();
+            match (mapping.next(), mapping.next()) {
+                (Some(mapped), None) => Some(mapped),
+                _ => None,
+            }
+        } else {
+            let mut mapping = scalar.to_lowercase();
+            match (mapping.next(), mapping.next()) {
+                (Some(mapped), None) => Some(mapped),
+                _ => None,
+            }
+        };
+        if let Some(mapped) = one_to_one_mapping
+            && mapped != scalar
+        {
+            let mut units = [0; 2];
+            return Some(JsString::from_units(
+                mapped.encode_utf16(&mut units).to_vec(),
+            ));
+        }
+    }
+    let mut source_buffer = [0; 4];
+    let source = scalar.encode_utf8(&mut source_buffer);
+    let mapped = if upper {
+        mapper.uppercase_to_string(source, language)
+    } else {
+        mapper.lowercase_to_string(source, language)
+    };
+    Some(match mapped {
+        std::borrow::Cow::Borrowed(_) => text.clone(),
+        std::borrow::Cow::Owned(mapped) => {
+            JsString::from_units(mapped.encode_utf16().collect::<Vec<_>>())
+        }
+    })
+}
 fn case_map(
     i: &mut Interpreter,
     t: Value,
@@ -468,14 +541,18 @@ fn case_map(
         }
     }
     let mapper = icu_casemap::CaseMapper::new();
-    bounded_string(map_scalar_runs(&text, |s| {
-        if upper {
-            mapper.uppercase_to_string(s, &language).into_owned()
-        } else {
-            mapper.lowercase_to_string(s, &language).into_owned()
-        }
-    }))
+    let mapped = map_single_scalar(&text, mapper, &language, upper).unwrap_or_else(|| {
+        map_scalar_runs(&text, |s| {
+            if upper {
+                mapper.uppercase_to_string(s, &language).into_owned()
+            } else {
+                mapper.lowercase_to_string(s, &language).into_owned()
+            }
+        })
+    });
+    bounded_string(mapped)
 }
+
 fn string_to_upper(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     case_map(i, t, a, true, false)
 }
@@ -1230,4 +1307,40 @@ pub(super) fn decode_uri_component(
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
     decode_uri_impl(interp, &args, "")
+}
+
+#[cfg(test)]
+mod case_map_tests {
+    use super::*;
+
+    #[test]
+    fn single_scalar_fast_path_matches_full_mapping() {
+        let mapper = icu_casemap::CaseMapper::new();
+        let root = icu_locale::LanguageIdentifier::UNKNOWN;
+        let turkish = "tr".parse::<icu_locale::LanguageIdentifier>().unwrap();
+        for source in ["", "a", "Z", "ß", "Σ", "İ", "ᾈ", "😀"] {
+            let text = JsString::from(source);
+            for language in [&root, &turkish] {
+                for upper in [false, true] {
+                    let fast = map_single_scalar(&text, mapper, language, upper).unwrap();
+                    let expected = map_scalar_runs(&text, |run| {
+                        if upper {
+                            mapper.uppercase_to_string(run, language).into_owned()
+                        } else {
+                            mapper.lowercase_to_string(run, language).into_owned()
+                        }
+                    });
+                    assert_eq!(fast, expected, "source={source:?}, upper={upper}");
+                }
+            }
+        }
+        let lone_surrogate = JsString::from_units(vec![0xD800]);
+        assert_eq!(
+            map_single_scalar(&lone_surrogate, mapper, &root, true).unwrap(),
+            map_scalar_runs(&lone_surrogate, |run| {
+                mapper.uppercase_to_string(run, &root).into_owned()
+            })
+        );
+        assert!(map_single_scalar(&JsString::from("ab"), mapper, &root, true).is_none());
+    }
 }

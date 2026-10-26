@@ -1298,6 +1298,27 @@ fn catch_identifier_bindings_remain_lexical_and_mutable_in_both_tiers() {
 }
 
 #[test]
+fn direct_eval_closures_preserve_dynamic_class_bindings() {
+    check(
+        "{ let C = class { static field = () => eval('C'); }; C.field() === C ? 1 : 0; }",
+        true,
+    );
+    check(
+        "{ class C { static field = () => eval('C'); } const D = C; C = null; D.field() === D ? 1 : 0; }",
+        true,
+    );
+}
+
+#[test]
+fn set_difference_uses_the_initial_receiver_snapshot() {
+    let source = "let set; let seen = []; let other = { size: 100, has(value) { seen.push(value); if (seen.length === 1) { set.clear(); set.add(11); set.add(22); } return true; }, keys() { throw new Error('unexpected keys'); } }; set = new Set([1, 2, 3, 4]); let result = set.difference(other); if (seen.join(',') !== '1,2,3,4' || [...result].length !== 0 || [...set].join(',') !== '11,22') throw new Error('Set difference did not use the initial receiver snapshot'); 'pass';";
+    check(source, true);
+    let program = Interpreter::compile(source).expect("compile");
+    let mut vm = Interpreter::with_builtins();
+    assert!(matches!(vm.execute(&program), Ok(Value::String(ref value)) if value == "pass"));
+}
+
+#[test]
 fn iteration_assignment_forms_retain_fallback_and_declaration_tier_parity() {
     for source in [
         "var x;for(x of [1,2]){}x;",
@@ -1560,6 +1581,209 @@ fn super_reads_follow_home_object_prototypes_in_both_tiers() {
 }
 
 #[test]
+fn plain_binding_reads_retain_environment_record_observability() {
+    for (source, bytecode) in [
+        (
+            "var calls=0;Object.defineProperty(globalThis,'guarded',{get(){calls++;return 42;},configurable:true});guarded===42&&calls===1;",
+            true,
+        ),
+        (
+            "var proto=Object.create(Object.getPrototypeOf(globalThis));Object.defineProperty(proto,'inheritedGuarded',{get(){return 42;}});Object.setPrototypeOf(globalThis,proto);inheritedGuarded===42;",
+            true,
+        ),
+        (
+            "var guarded=42;var object={guarded:1};object[Symbol.unscopables]={guarded:true};var result;with(object){result=guarded;}result===42;",
+            false,
+        ),
+        (
+            "var guarded=42;var object={guarded:1};Object.defineProperty(object,Symbol.unscopables,{get(){delete object.guarded;return {};}});var result;with(object){result=guarded;}result===undefined&&guarded===42;",
+            false,
+        ),
+        (
+            "var guarded=42;var threw=false;try{{guarded;let guarded=1;}}catch(e){threw=e instanceof ReferenceError;}threw&&guarded===42;",
+            true,
+        ),
+        (
+            "var receiver={method:function(){'use strict';return this===receiver;}};var result;with(receiver){result=method();}result===true;",
+            false,
+        ),
+    ] {
+        check(source, bytecode);
+        assert!(matches!(
+            run_ast_with_modules(source, &[]),
+            Ok(Value::Bool(true))
+        ));
+    }
+}
+
+#[test]
+fn ordinary_array_numeric_reads_preserve_full_property_semantics() {
+    for source in [
+        "var a=[42];a[-0]===42&&a[0]===42;",
+        "var a=[1];var calls=0;Object.defineProperty(a,'0',{get(){calls++;return this.tag;}});a.tag=42;a[0]===42&&calls===1;",
+        "var proto=Object.create(Array.prototype);Object.defineProperty(proto,'0',{get(){return this.tag;}});var a=[];a.length=1;a.tag=42;Object.setPrototypeOf(a,proto);a[0]===42;",
+        "var calls=0;var a=new Proxy([42],{get(t,k,r){calls++;return Reflect.get(t,k,r);}});a[0]===42&&calls===1;",
+        "var a=[1];var key={toString(){a[0]=42;return '0';}};a[key]===42;",
+        "var a=[];a.NaN=42;a[NaN]===42&&a[0]===undefined;",
+    ] {
+        check(source, true);
+        assert!(matches!(
+            run_ast_with_modules(source, &[]),
+            Ok(Value::Bool(true))
+        ));
+    }
+}
+
+#[test]
+fn completed_function_activations_release_argument_cycles() {
+    let mut vm = Interpreter::with_builtins();
+    let payload = vm
+        .eval_source("var payload={child:42};payload.self=payload;payload;")
+        .unwrap();
+    let Value::Object { ref props } = payload else {
+        panic!("object")
+    };
+    let weak = std::rc::Rc::downgrade(props);
+    drop(payload);
+    let result = vm.eval_source("function f(v){v=null;throw f.arguments[0].child===42;}var answer;try{f(payload);}catch(e){answer=e;}payload=null;answer;").unwrap();
+    assert!(matches!(result, Value::Bool(true)));
+    let stats = vm.collect_cycles();
+    assert!(stats.skipped.is_none(), "{stats:?}");
+    assert!(weak.upgrade().is_none());
+}
+
+#[test]
+fn legacy_function_activation_properties_follow_calls_and_unwind() {
+    for source in [
+        "function child(){return child.caller;}function parent(){return eval('child()');}parent()===parent&&child.caller===null;",
+        "function child(){return child.caller;}function parent(){'use strict';return child();}parent()===null;",
+        "function child(){return child.caller;}var parent=()=>child();parent()===parent;",
+        "function child(){return child.caller;}function parent(){return [0].map(child)[0];}parent()===null;",
+        "function child(){return child.caller;}function parent(){return child.call(null)===parent&&child.apply(null,[])===parent&&Reflect.apply(child,null,[])===parent&&child.bind(null)()===parent;}parent();",
+        "var seen;function child(){return child.caller;}function* parent(value=(seen=child())){}parent();seen===parent;",
+        "function child(){return child.caller;}function* parent(){yield child();}parent().next().value===null;",
+        "function child(){return child.caller;}function parent(){return Reflect.construct(child,[])===parent;}parent();",
+        "function f(a){var first=f.arguments;a=9;return first!==f.arguments&&f.arguments[0]===1&&f.arguments[1]===2&&f.arguments.length===2&&f.arguments.callee===f;}f(1,2)&&f.arguments===null;",
+        "function child(){return Object.getOwnPropertyDescriptor(child,'caller').get.call(child);}function parent(){return child();}var before=Object.getOwnPropertyDescriptor(child,'caller');parent()===parent&&before.get===Object.getOwnPropertyDescriptor(child,'caller').get;",
+        "function f(n){if(n)return f(n-1);return f.caller===f;}f(2)&&f.caller===null;",
+        "function f(){throw 1;}try{f();}catch(e){}f.arguments===null&&f.caller===null;",
+        "var getter=Object.getOwnPropertyDescriptor({get x(){return 42;}},'x').get;function f(){}Object.defineProperty(f,'caller',{configurable:false});f.x=getter;var same=f.x===getter&&Object.getOwnPropertyDescriptor(f,'x').value===getter;f.x=7;same&&f.x===7;",
+    ] {
+        check(source, true);
+        assert!(matches!(
+            run_ast_with_modules(source, &[]),
+            Ok(Value::Bool(true))
+        ));
+    }
+}
+
+#[test]
+fn direct_eval_new_local_bindings_are_deletable_without_redeclaring_bare_vars() {
+    for source in [
+        "var read;function outer(){eval('var temporary=1;delete temporary;var temporary;read=function(){return temporary;};');}outer();var threw=false;try{read();}catch(e){threw=e instanceof ReferenceError;}threw;",
+        "var read;function outer(){eval('delete temporary;read=function(){return temporary;};function temporary(){}');}outer();var threw=false;try{read();}catch(e){threw=e instanceof ReferenceError;}threw;",
+        "function outer(){var existing=1;return eval('var existing;delete existing')===false&&existing===1;}outer();",
+    ] {
+        check(source, true);
+        assert!(matches!(
+            run_ast_with_modules(source, &[]),
+            Ok(Value::Bool(true))
+        ));
+    }
+}
+
+#[test]
+fn float16_arrays_share_binary_storage_and_round_without_double_rounding() {
+    let source = "var a=new Float16Array([1.00048828125,1.0004882812500002,65520,-0,Math.pow(2,-24)]);var bits=new Uint16Array(a.buffer);var rounded=a[0]===1&&a[1]===1.0009765625&&a[2]===Infinity&&Object.is(a[3],-0)&&a[4]===Math.pow(2,-24);bits[0]=0xc000;var rejected=false;try{Atomics.add(a,0,1);}catch(e){rejected=e instanceof TypeError;}rounded&&a[0]===-2&&bits[3]===0x8000&&a.BYTES_PER_ELEMENT===2&&Float16Array.from([2]).map(x=>x/2)[0]===1&&rejected;";
+    check(source, true);
+    assert!(matches!(
+        run_ast_with_modules(source, &[]),
+        Ok(Value::Bool(true))
+    ));
+}
+
+#[test]
+fn regexp_allocation_precedes_string_coercion_and_source_round_trips() {
+    for source in [
+        "var log='';var pattern={get source(){log+='S';return {toString(){log+='s';return 'a';}};},get flags(){log+='F';return {toString(){log+='f';return 'g';}};}};Object.defineProperty(pattern,Symbol.match,{get:function(){log+='m';return true;}});var target=Object.defineProperty(function(){}.bind(null),'prototype',{get(){log+='p';return RegExp.prototype;}});var r=Reflect.construct(RegExp,[pattern],target);log==='mSFpsf'&&r.source==='a'&&r.global;",
+        "var pattern=/a/;var calls=0;var target=Object.defineProperty(function(){}.bind(null),'prototype',{get(){calls++;pattern.compile('b');return RegExp.prototype;}});var r=Reflect.construct(RegExp,[pattern],target);r.source==='a'&&pattern.source==='b'&&calls===1;",
+        r#"var r=new RegExp(String.fromCharCode(92,10));r.source==='\\n'&&new RegExp(r.source).test('\n')&&new RegExp('[/]').source==='[/]'&&new RegExp('[[]/').source==='[[]\\/';"#,
+    ] {
+        check(source, true);
+        assert!(matches!(
+            run_ast_with_modules(source, &[]),
+            Ok(Value::Bool(true))
+        ));
+    }
+}
+
+#[test]
+fn typed_array_prevent_extensions_reports_rejection_to_the_caller() {
+    let source = "var buffer=new ArrayBuffer(4,{maxByteLength:8});var view=new Uint8Array(buffer);var reflected=Reflect.preventExtensions(view);var threw=false;try{Object.preventExtensions(view);}catch(e){threw=e instanceof TypeError;}reflected===false&&threw&&Object.isExtensible(view);";
+    check(source, true);
+    assert!(matches!(
+        run_ast_with_modules(source, &[]),
+        Ok(Value::Bool(true))
+    ));
+}
+
+#[test]
+fn class_heritage_and_computed_names_use_strict_property_writes() {
+    for source in [
+        "var caught=false;try{class C{[Object.preventExtensions({}).x=1](){}}}catch(e){caught=e instanceof TypeError;}caught;",
+        "var caught=false;try{var C=class extends (Object.preventExtensions({}).x=1,Object){};}catch(e){caught=e instanceof TypeError;}caught;",
+        "var caught=false;try{class C{[Object.freeze({x:1}).x++](){}}}catch(e){caught=e instanceof TypeError;}caught;",
+        "var target=Object.preventExtensions({});var key={toString(){return 'x';}};var caught=false;try{class C{[target[key]=1](){}}}catch(e){caught=e instanceof TypeError;}caught;",
+    ] {
+        check(source, true);
+        assert!(matches!(
+            run_ast_with_modules(source, &[]),
+            Ok(Value::Bool(true))
+        ));
+    }
+}
+
+#[test]
+fn static_super_proxy_reads_preserve_the_original_receiver() {
+    let source = "var seen=[];var key=Symbol();var base=new Proxy(function(){},{get(target,p,receiver){if(p==='x'||p===key){seen.push(receiver);return 42;}return Reflect.get(target,p,receiver);}});class A extends base{}class B extends A{static read(){return super.x+super[key];}}B.read()===84&&seen.length===2&&seen[0]===B&&seen[1]===B;";
+    check(source, true);
+    assert!(matches!(
+        run_ast_with_modules(source, &[]),
+        Ok(Value::Bool(true))
+    ));
+}
+
+#[test]
+fn super_references_capture_the_base_before_key_conversion() {
+    for operation in [
+        "super[key]",
+        "super[key]()",
+        "super[key]+=1",
+        "++super[key]",
+    ] {
+        let callable = operation == "super[key]()";
+        let old = if callable {
+            "function(){return 1;}"
+        } else {
+            "1"
+        };
+        let expected = if operation.contains("+=") || operation.contains("++") {
+            2
+        } else {
+            1
+        };
+        let source = format!(
+            "var key={{toString(){{Object.setPrototypeOf(object,{{p:-1}});return 'p';}}}};var object={{__proto__:{{p:{old}}},method(){{return {operation};}}}};object.method()==={expected};"
+        );
+        check(&source, true);
+        assert!(matches!(
+            run_ast_with_modules(&source, &[]),
+            Ok(Value::Bool(true))
+        ));
+    }
+}
+
+#[test]
 fn super_references_writes_calls_and_object_home_objects_share_semantics() {
     for source in [
         "var object={method(){return ()=>super.value;}};Object.setPrototypeOf(object,{value:42});var f=object.method();Object.setPrototypeOf(object,{value:7});f()===7;",
@@ -1736,6 +1960,169 @@ fn typed_array_static_inheritance_uses_the_same_native_helpers_in_both_tiers() {
         "var T=Object.getPrototypeOf(Int8Array);T.from===Uint8Array.from&&!Object.hasOwn(Int8Array,'from');",
         "class Derived extends Int8Array{}var value=Derived.from([1,2]);value instanceof Derived&&value[1]===2;",
         "var T=Object.getPrototypeOf(Int8Array);var value=T.of.call(Uint8Array,3,4);value instanceof Uint8Array&&value[0]===3;",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn auto_accessors_share_storage_and_brand_semantics_in_both_tiers() {
+    for source in [
+        "class C{accessor x=1;}var a=new C(),b=new C();a.x=2;var d=Object.getOwnPropertyDescriptor(C.prototype,'x');a.x===2&&b.x===1&&!Object.hasOwn(a,'x')&&!d.enumerable&&d.configurable&&d.get.length===0&&d.set.length===1;",
+        "var count=0;var key={toString(){count++;return 'x';}};class C{accessor [key]=3;}var a=new C();var b=new C();count===1&&a.x===3&&b.x===3;",
+        "class C{accessor x=1;accessor x=2;}class D extends C{accessor x=3;}var c=new C(),d=new D();c.x===2&&d.x===3&&Object.getOwnPropertyDescriptor(C.prototype,'x').get.call(d)===2;",
+        "class C{static accessor x=1;}class D extends C{}var errors=0;try{D.x;}catch(e){if(e instanceof TypeError)errors++;}try{D.x=2;}catch(e){if(e instanceof TypeError)errors++;}errors===2&&C.x===1;",
+        "class C{accessor #x=3;get(){return this.#x;}set(v){this.#x=v;}}var c=new C();c.set(4);var errors=0;try{C.prototype.get.call({});}catch(e){if(e instanceof TypeError)errors++;}c.get()===4&&errors===1;",
+        "class C{static accessor #x=3;static get(){return this.#x;}static set(v){this.#x=v;}}C.set(4);C.get()===4;",
+        "class C{accessor x=function(){};static accessor y=class{};}new C().x.name==='x'&&C.y.name==='y';",
+        "var symbol=Symbol('s');class C{accessor [symbol]=()=>0;}new C()[symbol].name==='[s]';",
+        "class C{accessor x=1;get x(){return 2;}}new C().x===2;",
+        r##"class C{accessor x;["#\0auto-accessor:0"]=function(){};}new C()["#\0auto-accessor:0"].name==="#\0auto-accessor:0";"##,
+        r##"class C{static accessor x;static ["#\0auto-accessor:0"]=function(){};}C["#\0auto-accessor:0"].name==="#\0auto-accessor:0";"##,
+        "var order='';class C{accessor x=(order+='a',1);y=(order+='b',this.x);accessor z=(order+='c',this.y);constructor(){order+='d';}}var c=new C();order==='abcd'&&c.z===1;",
+        "class C{accessor x=this.y;accessor y=1;}var ok=false;try{new C();}catch(e){ok=e instanceof TypeError;}ok;",
+        "class C{static accessor x=this.f();static f(){return 3;}}C.x===3;",
+        "class C{accessor #x=function(){};get(){return this.#x.name;}}new C().get()==='#x';",
+        "var s=Symbol('s');class C{static accessor [s]=function(){};}C[s].name==='[s]';",
+        "class C{accessor x=1;}var get=Object.getOwnPropertyDescriptor(C.prototype,'x').get;var errors=0;try{get.call(new Proxy(new C(),{}));}catch(e){if(e instanceof TypeError)errors++;}try{new get();}catch(e){if(e instanceof TypeError)errors++;}errors===2;",
+        "class C{accessor() {return 1;}accessor=2;}new C().accessor===2;",
+        "class C{accessor\nx=3;}var c=new C();Object.hasOwn(c,'accessor')&&c.x===3;",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn auto_accessor_modifiers_retain_class_early_errors() {
+    for source in [
+        "class C{accessor #x;accessor #x;}",
+        "class C{accessor #x;get #x(){}}",
+        "class C{accessor #x;static #x;}",
+        "class C{accessor constructor;}",
+        "class C{static accessor prototype;}",
+        "class C{accessor x(){}}",
+        "class C{accessor *x(){}}",
+        "class C{accessor get x(){}}",
+    ] {
+        assert!(parse_cached(source).is_err(), "{source}");
+    }
+}
+
+#[test]
+fn class_decorators_preserve_evaluation_replacement_and_initializer_order() {
+    for source in [
+        "var log='';function dec(n){log+='e'+n;return function(C,c){log+='d'+n;c.addInitializer(function(){log+='i'+n;this.ready=true;});};}@dec('a') @dec('b') class C extends (log+='h',Object){static x=(log+='s',1);[log+='k'](){}}log==='eaebhkdbdasibia'&&C.ready&&C.x===1;",
+        "var original;function dec(C,c){original=C;return class Replacement extends C{};}@dec class C{static x=3;static self(){return C;}}C!==original&&C.x===3&&!Object.hasOwn(original,'x')&&original.self()===C;",
+        "var seen;var receiver={dec(C,c){seen=this;}};@receiver.dec class C{}seen===receiver;",
+        "function d(){}var get=d,let=d,async=d;@get @let @async class C{}true;",
+        "var C=function(value){return class extends value{m(){return 4;}};};var D=@C class C{};new D().m()===4;",
+        "var seen;class Base{static dec(){seen=this;}}class Outer extends Base{static make(){return @(super.dec) class{};}}Outer.make();seen===Outer;",
+        "var seen;var receiver={dec(C,c){seen=this;}};@(receiver.dec) class C{}seen===receiver;",
+        "function dec(C,c){if(c.kind!=='class'||c.name!=='C'||'static' in c||'private' in c||'access' in c)throw 42;if(c.addInitializer.name!=='addInitializer'||c.addInitializer.length!==1)throw 43;}@dec class C{}true;",
+        "var saved;function dec(C,c){saved=c.addInitializer;c.addInitializer.call({},function(){this.x=2;});}@dec class C{}var ok=false;try{saved(function(){});}catch(e){ok=e instanceof TypeError;}ok&&C.x===2;",
+        "var saved;function dec(C,c){saved=c.addInitializer;throw 42;}var caught;try{var C=@dec class{};}catch(e){caught=e;}var ok=false;try{saved(function(){});}catch(e){ok=e instanceof TypeError;}ok&&caught===42;",
+        "function dec(C,c){c.addInitializer(1);}var ok=false;try{var C=@dec class{};}catch(e){ok=e instanceof TypeError;}ok;",
+        "function dec(){return null;}var ok=false;try{var C=@dec class{};}catch(e){ok=e instanceof TypeError;}ok;",
+        "var replacement=()=>42;function dec(){return replacement;}var C=@dec class{};C===replacement&&C()===42;",
+        "var seen;function dec(C,c){seen=c.name;}var C=@dec class{};seen==='C';",
+        "class Base{static get x(){return this.tag;}}class Other{}function dec(){return class extends Other{static tag=9;};}@dec class C extends Base{static x=super.x;}C.x===9;",
+        "function outer(){var dec=function(C){return class extends C{m(){return 3;}};};return @dec class{};}new (outer())().m()===3;",
+        "class Outer{static #dec(C){return class extends C{m(){return 3;}};}static make(){return @Outer.#dec class{};}}new (Outer.make())().m()===3;",
+        "var ok=false;function dec(C){try{C.self();}catch(e){ok=e instanceof ReferenceError;}}@dec class C{static self(){return C;}}ok;",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn class_decorator_grammar_rejects_uncovered_expressions_and_exports() {
+    for source in [
+        "@obj['dec'] class C{}",
+        "@d()() class C{}",
+        "@d().x class C{}",
+        "@1 class C{}",
+        "@d function f(){}",
+        "@d;class C{}",
+        "@d export @d class C{}",
+        "if(true) @d class C{}",
+    ] {
+        assert!(parse_cached(source).is_err(), "{source}");
+    }
+    check_with_modules(
+        "function dec(C){return class extends C{m(){return 2;}};}@dec export default class C{}",
+        true,
+        &[],
+    );
+    check_with_modules(
+        "function dec(C){return class extends C{m(){return 2;}};}export default @dec class C{}",
+        true,
+        &[],
+    );
+}
+
+#[test]
+fn method_decorators_preserve_replacement_access_and_initializer_order() {
+    for source in [
+        "function dec(f,c){return function wrapped(){return f.call(this)+1;};}class C{@dec m(){return 2;}}var c=new C();c.m()===3&&c.m.name==='wrapped';",
+        "var access,original;var s=Symbol('m');function dec(f,c){if(c.kind!=='method'||c.name!==s||c.static||c.private)throw 42;access=c.access;original=f;return function(){return 3;};}class C{@dec [s](){return 2;}}var c=new C();access.has(c)&&access.get(c)===c[s]&&access.get(c)!==original&&c[s]()===3&&!('set' in access);",
+        "var access;function dec(f,c){if(c.name!=='#m'||!c.private||c.static)throw 42;access=c.access;return function(){return 4;};}class C{@dec #m(){return 2;}get(){return this.#m();}}var c=new C(),bad=0;try{access.get({});}catch(e){if(e instanceof TypeError)bad++;}try{access.has(1);}catch(e){if(e instanceof TypeError)bad++;}c.get()===4&&access.has(c)&&!access.has({})&&!access.has(new Proxy(c,{}))&&access.get(c).call(c)===4&&bad===2;",
+        "var access;function dec(f,c){access=c.access;c.addInitializer(function(){this.x=access.get(this)();});return function(){return 5;};}class C{@dec static #m(){return 1;}static y=this.x;}C.x===5&&C.y===5&&access.has(C);",
+        "var log='';function dec(f,c){c.addInitializer(function(){log+='i';this.ready=true;});}class C{@dec m(){}x=(log+='f',this.ready);}var a=new C(),b=new C();log==='ifif'&&a.x&&b.x;",
+        "var log='';function dec(f,c){c.addInitializer(function(){log+='i';});}class C{@dec m(){}x=(log+='b',1);}class D extends C{@dec n(){}y=(log+='d',1);}new D();log==='ibid';",
+        "var log='';function cls(C){log+='c';return C;}function dec(f,c){c.addInitializer(function(){log+='i';});}@cls class C{@dec static m(){}static x=(log+='f',1);}log==='cif';",
+        "var log='';function dec(n){log+='e'+n;return function(f,c){log+='d'+n;c.addInitializer(function(){log+='i'+n;});};}class C{@dec('a') [(log+='k','m')](){}@dec('b') static n(){}}new C();log==='eakebdbdaibia';",
+        "var calls=0;function dec(f){calls++;return function(){return 9;};}class C{@dec m(){return 1;}m(){return 2;}}calls===1&&new C().m()===2;",
+        "function dec(f){return function(){return 9;};}class C{@dec m(){return 1;}get m(){return 2;}}new C().m===2;",
+        "function dec(f){return function(){return 9;};}class C{@dec m(){return 1;}accessor m=3;}new C().m===3;",
+        "function dec(f){return function(){return 9;};}class C{accessor m=3;@dec m(){return 1;}}new C().m()===9;",
+        "function dec(f){return new Proxy(f,{apply(t,r,a){return 6;}});}class C{@dec m(){return 1;}}new C().m()===6;",
+        "var getter=Object.getOwnPropertyDescriptor({get m(){return 7;}},'m').get;function dec(){return getter;}class C{@dec m(){}get other(){return 1;}}var c=new C();c.m===getter&&c.m()===7&&Object.getOwnPropertyDescriptor(C.prototype,'m').value===getter;",
+        "var late;function dec(f,c){late=c.addInitializer;}class C{@dec m(){}}var ok=false;try{late(function(){});}catch(e){ok=e instanceof TypeError;}ok;",
+        "var late;function dec(f,c){late=c.addInitializer;throw 42;}var caught;try{var C=class{@dec m(){}};}catch(e){caught=e;}var ok=false;try{late(function(){});}catch(e){ok=e instanceof TypeError;}caught===42&&ok;",
+        "function dec(){return 1;}var ok=false;try{var C=class{@dec m(){}};}catch(e){ok=e instanceof TypeError;}ok;",
+        "function dec(f,c){c.addInitializer(1);}var ok=false;try{var C=class{@dec m(){}};}catch(e){ok=e instanceof TypeError;}ok;",
+        "var C={dec(){}};var ok=false;try{var X=class C{@C.dec m(){}};}catch(e){ok=e instanceof ReferenceError;}ok;",
+        "var count=0;function dec(f,c){c.addInitializer(function(){count++;});}class C{@dec m(){}make(){return class D{x=1;};}}var c=new C();var D=c.make();new D();count===1;",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn method_decorator_early_errors_preserve_class_context() {
+    for source in [
+        "function d(){}class C{@d constructor(){}}",
+        "function d(){}class C{@d static{}}",
+        "var yield=function(){};class C{@yield m(){}}",
+    ] {
+        assert!(parse_cached(source).is_err(), "{source}");
+    }
+}
+
+#[test]
+fn explicit_data_descriptors_keep_getter_named_functions_as_data() {
+    for source in [
+        "var f=Object.getOwnPropertyDescriptor({get x(){throw 42;}},'x').get;var o={get other(){return 1;}};Object.defineProperty(o,'x',{value:f,writable:true,configurable:true});o.x===f&&Object.getOwnPropertyDescriptor(o,'x').value===f;",
+        "var calls=0;var f=Object.getOwnPropertyDescriptor({set x(v){calls++;}},'x').set;var p={get other(){return 1;}};Object.defineProperty(p,'x',{value:f,writable:true,configurable:true});var o=Object.create(p);o.x=3;calls===0&&Object.hasOwn(o,'x')&&o.x===3;",
+        "var s=Symbol('x');class Source{get [s](){return 9;}}var f=Object.getOwnPropertyDescriptor(Source.prototype,s).get;function dec(){return f;}class C{@dec [s](){}get other(){return 1;}}var c=new C();c[s]===f&&c[s]()===9&&Object.getOwnPropertyDescriptor(C.prototype,s).value===f;",
+        "var f=Object.getOwnPropertyDescriptor({get x(){return 1;}},'x').get;var o={get other(){return 2;}};Object.defineProperty(o,'x',{value:f,configurable:true});delete o.x;Object.defineProperty(o,'x',{get(){return 3;},configurable:true});o.x===3;",
+        "var f=Object.getOwnPropertyDescriptor({get x(){return 1;}},'x').get;var o={get other(){return 2;}};Object.defineProperty(o,'x',{value:f,writable:true,configurable:true});Object.freeze(o);o.x===f&&Object.getOwnPropertyDescriptor(o,'x').value===f&&!Object.getOwnPropertyDescriptor(o,'x').writable;",
     ] {
         check(source, true);
         assert!(

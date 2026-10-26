@@ -788,9 +788,13 @@ fn boxed_block_names(stmts: &[Statement]) -> HashSet<String> {
     let mut heads = Vec::new();
     block_loop_heads(stmts, &mut heads);
     candidates.extend(heads);
+    // Direct eval can read names that are absent from every parsed closure
+    // body. Keep lexical bindings in this block's runtime environment so
+    // those dynamic lookups can follow the same scope chain as the AST tier.
+    let has_eval = crate::parser::stmts_need_arguments(stmts);
     candidates
         .into_iter()
-        .filter(|name| statements_capture_identifier(stmts, name))
+        .filter(|name| has_eval || statements_capture_identifier(stmts, name))
         .collect()
 }
 
@@ -1549,6 +1553,7 @@ impl<'a> Compiler<'a> {
             } => self.compile_try(body, catch, finally),
             Statement::Switch { disc, cases } => self.compile_switch(disc, cases),
             Statement::ClassDecl {
+                decorators,
                 source_text: _,
                 name,
                 superclass,
@@ -1559,6 +1564,7 @@ impl<'a> Compiler<'a> {
                     None,
                     superclass.as_deref(),
                     body,
+                    decorators,
                     stmt.source_text(),
                 )?;
                 match self.resolve(name)? {
@@ -1989,8 +1995,19 @@ impl<'a> Compiler<'a> {
         expr_name: Option<String>,
         superclass: Option<&'a Expr>,
         body: &'a [ClassMember],
+        decorators: &'a [Expr],
         source_text: Option<&crate::parser::SourceTextRef>,
     ) -> Result<Reg, Decline> {
+        let mut decorator_registers = Vec::new();
+        for decorator in decorators {
+            let mut ends = Vec::new();
+            let (value, receiver) = self.compile_call_reference(decorator, &mut ends)?;
+            for end in ends {
+                self.patch_jump(end, self.here())?;
+            }
+            decorator_registers.push((value, receiver));
+        }
+        let has_method_decorators = body.iter().any(|member| !member.decorators().is_empty());
         // Heritage, computed names and method closures share one class scope.
         let mut boxed = HashSet::new();
         if !name.is_empty() {
@@ -2033,9 +2050,19 @@ impl<'a> Compiler<'a> {
         let mut private_fields = Vec::new();
         let mut ctor: Option<OwnedCtor<'a>> = None;
 
-        for member in body {
+        for (member_index, member) in body.iter().enumerate() {
+            let mut member_decorators = Vec::new();
+            for decorator in member.decorators() {
+                let mut ends = Vec::new();
+                let (value, receiver) = self.compile_call_reference(decorator, &mut ends)?;
+                for end in ends {
+                    self.patch_jump(end, self.here())?;
+                }
+                member_decorators.push((value, receiver));
+            }
             match member {
                 ClassMember::Method {
+                    decorators: _,
                     source_text: _,
                     name: member_name,
                     is_static: st,
@@ -2084,6 +2111,8 @@ impl<'a> Compiler<'a> {
                         },
                     ));
                     members.push(ClassMemberTemplate {
+                        decorators: member_decorators,
+                        auto_accessor_storage: None,
                         kind: ClassMemberKind::Method,
                         is_static: *st,
                         name: template,
@@ -2093,9 +2122,69 @@ impl<'a> Compiler<'a> {
                 ClassMember::Field {
                     name: field_name,
                     is_static: st,
+                    auto_accessor,
                     init,
                 } => {
                     let template = self.compile_member_name(field_name)?;
+                    if *auto_accessor {
+                        self.check_static_method_key(&template, *st)?;
+                        let storage = crate::parser::auto_accessor_storage(member_index);
+                        for setter in [false, true] {
+                            let display = match &template {
+                                ClassNameTemplate::Static(key)
+                                | ClassNameTemplate::Private(key) => {
+                                    Some(format!("{} {key}", if setter { "set" } else { "get" }))
+                                }
+                                ClassNameTemplate::Computed(_) => None,
+                            };
+                            deferred.push((
+                                PatchTarget::ClassMember {
+                                    tmpl: u16::MAX,
+                                    index: members.len(),
+                                },
+                                FuncDef {
+                                    source_text: None,
+                                    named_expression: false,
+                                    name: display,
+                                    params: SharedSlice::Owned(Rc::from(if setter {
+                                        vec!["value".into()]
+                                    } else {
+                                        vec![]
+                                    })),
+                                    body: FuncBody::Stmts(SharedSlice::Owned(Rc::from(
+                                        crate::parser::auto_accessor_body(&storage, setter),
+                                    ))),
+                                    is_arrow: false,
+                                    is_async: false,
+                                    is_generator: false,
+                                    is_constructor: false,
+                                },
+                            ));
+                            members.push(ClassMemberTemplate {
+                                decorators: Vec::new(),
+                                auto_accessor_storage: (!setter).then(|| storage.clone()),
+                                kind: if setter {
+                                    ClassMemberKind::Setter
+                                } else {
+                                    ClassMemberKind::Getter
+                                },
+                                is_static: *st,
+                                name: template.clone(),
+                                func: Some(u16::MAX),
+                            });
+                        }
+                        if *st {
+                            blocks.push(super::constants::ClassStaticTemplate::Field {
+                                name: ClassNameTemplate::Private(storage),
+                                init: init.clone().unwrap_or(Expr::Undefined),
+                            });
+                        } else {
+                            private_fields.push(storage.clone());
+                            instance_fields.push((FieldKey::Private(storage), init.as_ref()));
+                        }
+                        continue;
+                    }
+
                     if *st {
                         blocks.push(super::constants::ClassStaticTemplate::Field {
                             name: template,
@@ -2149,6 +2238,8 @@ impl<'a> Compiler<'a> {
                         },
                     ));
                     members.push(ClassMemberTemplate {
+                        decorators: Vec::new(),
+                        auto_accessor_storage: None,
                         kind: ClassMemberKind::Getter,
                         is_static: *st,
                         name: template,
@@ -2188,6 +2279,8 @@ impl<'a> Compiler<'a> {
                         },
                     ));
                     members.push(ClassMemberTemplate {
+                        decorators: Vec::new(),
+                        auto_accessor_storage: None,
                         kind: ClassMemberKind::Setter,
                         is_static: *st,
                         name: template,
@@ -2224,24 +2317,25 @@ impl<'a> Compiler<'a> {
             superclass.is_some(),
             ctor,
             &instance_fields,
-            body.iter().any(|m| {
-                matches!(
-                    m,
-                    ClassMember::Method {
-                        name: MemberName::Private(_),
-                        is_static: false,
-                        ..
-                    } | ClassMember::Getter {
-                        name: MemberName::Private(_),
-                        is_static: false,
-                        ..
-                    } | ClassMember::Setter {
-                        name: MemberName::Private(_),
-                        is_static: false,
-                        ..
-                    }
-                )
-            }),
+            has_method_decorators
+                || body.iter().any(|m| {
+                    matches!(
+                        m,
+                        ClassMember::Method {
+                            name: MemberName::Private(_),
+                            is_static: false,
+                            ..
+                        } | ClassMember::Getter {
+                            name: MemberName::Private(_),
+                            is_static: false,
+                            ..
+                        } | ClassMember::Setter {
+                            name: MemberName::Private(_),
+                            is_static: false,
+                            ..
+                        }
+                    )
+                }),
         );
         let ctor_length = crate::parser::formal_parameter_length(&ctor_params, &ctor_body);
         deferred.push((
@@ -2261,6 +2355,8 @@ impl<'a> Compiler<'a> {
         ));
 
         let tmpl = self.push_const(Constant::ClassTemplate(ClassTemplate {
+            has_method_decorators,
+            decorators: decorator_registers,
             source_text: source_text.cloned(),
             private_fields,
             private_declarations,
@@ -3688,6 +3784,7 @@ impl<'a> Compiler<'a> {
             Expr::This => self.compile_this(),
             Expr::Object { props, .. } => self.compile_object(props),
             Expr::ClassExpr {
+                decorators,
                 source_text: _,
                 name,
                 superclass,
@@ -3697,6 +3794,7 @@ impl<'a> Compiler<'a> {
                 name.clone(),
                 superclass.as_deref(),
                 body,
+                decorators,
                 expr.source_text(),
             ),
             Expr::TaggedTemplate {
@@ -5063,13 +5161,20 @@ impl<'a> Compiler<'a> {
                 is_constructor: false,
             }),
             Expr::ClassExpr {
+                decorators,
                 source_text: _,
                 name: None,
                 superclass,
                 body,
             } => {
-                let dst =
-                    self.compile_class("", None, superclass.as_deref(), body, value.source_text())?;
+                let dst = self.compile_class(
+                    "",
+                    None,
+                    superclass.as_deref(),
+                    body,
+                    decorators,
+                    value.source_text(),
+                )?;
                 let template = self
                     .code
                     .iter()
@@ -5310,9 +5415,13 @@ fn find_captured(params: &[String], body: &FuncBody) -> HashSet<String> {
             let mut heads = Vec::new();
             block_loop_heads(stmts, &mut heads);
             names.extend(heads.iter().map(String::as_str));
+            // A nested direct eval can resolve names that do not appear in
+            // its parsed AST. Keep this function's bindings in the frame
+            // environment so the eval's closure chain can see them.
+            let has_eval = crate::parser::stmts_need_arguments(stmts);
             names
                 .into_iter()
-                .filter(|name| statements_capture_identifier(stmts, name))
+                .filter(|name| has_eval || statements_capture_identifier(stmts, name))
                 .map(str::to_string)
                 .collect()
         }

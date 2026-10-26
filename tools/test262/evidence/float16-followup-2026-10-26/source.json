@@ -1,0 +1,13 @@
+{
+  "source_commit": "42ae715ba57ee8b51bbf95e717851f63be0b4641",
+  "source_status": "uncommitted source snapshot",
+  "engine_sha256": "525c207552fa8ac93618d818330e006bc28d7d00629cd6cafbe1bccae3b757ab",
+  "checks": {
+    "core_library_tests": 390,
+    "worker_tests": 5,
+    "clippy": "all targets, warnings denied; passed",
+    "root_all_target_check": "passed",
+    "format": "passed"
+  },
+  "node_api_float16_abi_reference": "https://nodejs.org/api/n-api.html#napi_typedarray_type"
+}

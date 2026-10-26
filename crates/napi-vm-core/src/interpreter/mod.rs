@@ -5,7 +5,9 @@ pub(crate) mod call;
 pub use call::is_callable_value;
 pub(crate) mod annex;
 pub mod commonjs;
+mod decorators;
 mod env;
+pub(crate) use decorators::{ClassMethodDefinition, ClassMethodKind};
 mod eval;
 pub(crate) mod for_in;
 pub mod jobs;
@@ -218,6 +220,12 @@ impl Default for ExecutionBudget {
     }
 }
 
+struct FunctionActivation {
+    callee: Value,
+    arguments: Option<Vec<Value>>,
+    native_depth: usize,
+}
+
 pub struct Interpreter {
     pub(crate) tail_call_context: bool,
     tail_call_barriers: usize,
@@ -287,6 +295,9 @@ pub struct Interpreter {
     pub jobs: Jobs,
     /// Call stack for error reporting. Pushed on function entry, popped on exit.
     call_stack: Vec<StackFrame>,
+    function_activations: Vec<FunctionActivation>,
+    activation_argument_pool: Vec<Vec<Value>>,
+    native_call_depth: usize,
     /// Lazily interned names reused by ordinary function calls in this VM.
     this_binding_key: Option<Rc<str>>,
     anonymous_frame_name: Option<Rc<str>>,
@@ -334,7 +345,8 @@ pub struct Interpreter {
     /// with [`Self::set_jit_policy`].
     jit_policy: crate::jit::JitPolicy,
     tier_tracking: crate::jit::TierTracking,
-    pub(crate) activation_pool: Vec<(Vec<Value>, Vec<crate::bytecode::vm::RunSlot>)>,
+    pub(crate) activation_pool: Vec<crate::bytecode::vm::ActivationBuffers>,
+    pub(crate) function_environment_pool: Vec<Env>,
     /// Registered native-code backend, if any. `None` (the default) means
     /// hot functions stay on bytecode; see [`Self::set_jit_backend`].
     jit_backend: Option<crate::jit::BackendRef>,
@@ -486,6 +498,9 @@ impl Interpreter {
             yield_sink: None,
             jobs: Jobs::default(),
             call_stack: Vec::new(),
+            function_activations: Vec::new(),
+            activation_argument_pool: Vec::new(),
+            native_call_depth: 0,
             this_binding_key: None,
             anonymous_frame_name: None,
             new_target_stack: Vec::new(),
@@ -508,6 +523,7 @@ impl Interpreter {
             jit_policy: crate::jit::JitPolicy::default(),
             tier_tracking: crate::jit::TierTracking::Disabled,
             activation_pool: Vec::new(),
+            function_environment_pool: Vec::new(),
             jit_backend: None,
         };
         interp.publish_module_realm();
@@ -525,6 +541,19 @@ impl Interpreter {
         let mut interp = Self::new();
         let builtins = Rc::new(RefCell::new(Environment::new()));
         crate::builtins::setup_builtins(&builtins);
+        let primitive_prototypes = ["Boolean", "Number", "String", "BigInt", "Symbol"]
+            .into_iter()
+            .filter_map(|name| {
+                builtins
+                    .borrow()
+                    .get(name)
+                    .and_then(|constructor| constructor.get_prop("prototype"))
+                    .map(|prototype| (format!("%{name}Prototype%"), prototype))
+            })
+            .collect::<Vec<_>>();
+        for (name, prototype) in primitive_prototypes {
+            builtins.borrow_mut().install_intrinsic(&name, prototype);
+        }
         let global = Rc::new(RefCell::new(Environment::global(Some(builtins))));
         interp.global = global.clone();
         interp.persistent_global = global;
@@ -566,15 +595,25 @@ impl Interpreter {
     /// Create a host-defined module-source object with an internal class name.
     /// Guest properties, prototypes, and proxies cannot manufacture this brand.
     pub fn create_module_source_object(&self, class_name: impl Into<crate::JsString>) -> Value {
-        let constructor = self.abstract_module_source_constructor();
-        let prototype = constructor
-            .get_prop("prototype")
-            .expect("module-source prototype");
+        let class_name = class_name.into();
+        let intrinsic_name = format!("ModuleSourcePrototype:{}", class_name.to_key());
+        let cached = self.persistent_global.borrow().intrinsic(&intrinsic_name);
+        let prototype = cached.unwrap_or_else(|| {
+            let constructor = self.abstract_module_source_constructor();
+            let abstract_prototype = constructor
+                .get_prop("prototype")
+                .expect("module-source prototype");
+            let prototype = Value::object_with_proto(Vec::new(), Some(Rc::new(abstract_prototype)));
+            self.persistent_global
+                .borrow_mut()
+                .install_intrinsic(&intrinsic_name, prototype.clone());
+            prototype
+        });
         let value = Value::object_with_proto(Vec::new(), Some(Rc::new(prototype)));
         let properties = value.property_cell().expect("source object");
         let mut metadata = properties.meta.borrow_mut();
         metadata.realm_global = Some(self.persistent_global.clone());
-        metadata.module_source_class_name = Some(class_name.into());
+        metadata.module_source_class_name = Some(class_name);
         value
     }
 
@@ -1142,6 +1181,12 @@ export default { createRequire, isBuiltin, builtinModules };
         roots
             .envs
             .extend(self.constructor_error_realms.iter().cloned());
+        for activation in &self.function_activations {
+            roots.values.push(activation.callee.clone());
+            if let Some(arguments) = &activation.arguments {
+                roots.values.extend(arguments.iter().cloned());
+            }
+        }
         if let Some(host) = &self.host {
             host.trace_roots(&mut roots.values, &mut roots.envs);
         }
@@ -2142,7 +2187,15 @@ impl Interpreter {
             )
         };
         let definitions = defining.borrow().private_instance_elements();
-        if fields.is_empty() && definitions.is_empty() {
+        let method_initializers = defining
+            .borrow()
+            .class_internal_binding(decorators::INSTANCE_METHOD_INITIALIZERS);
+        if fields.is_empty()
+            && definitions.is_empty()
+            && method_initializers
+                .as_ref()
+                .is_none_or(|list| list.as_array().is_none_or(|list| list.array_length() == 0))
+        {
             return Ok(());
         }
         let receiver = self.resolve_this(constructor_scope)?;
@@ -2157,6 +2210,9 @@ impl Interpreter {
         field_scope.borrow_mut().set_new_target(Value::Undefined);
         let saved = std::mem::replace(&mut self.global, field_scope);
         let result = (|| {
+            if let Some(initializers) = method_initializers {
+                self.run_method_initializers(&initializers, &receiver)?;
+            }
             for field in fields.iter() {
                 self.execution.check()?;
                 let Statement::Expr(Expr::Assignment { target, value, .. }) = field else {
@@ -2170,7 +2226,11 @@ impl Interpreter {
                 };
                 let name = self.eval_expr(property)?;
                 let key = self.property_key(&name)?;
-                let value = self.evaluate_class_field(value, &name)?;
+                let value = if *computed {
+                    self.evaluate_class_field(value, &name)?
+                } else {
+                    self.evaluate_private_class_field(value, &name)?
+                };
                 if !computed && let Some(id) = self.global.borrow().private_name(&key) {
                     receiver.initialize_private_field(id, value)?;
                     continue;
@@ -2603,6 +2663,9 @@ impl Interpreter {
         }
         if variable_scope.borrow().own_binding(name).is_none() {
             self.declare_binding_in(&variable_scope, name, Value::Undefined, BindKind::Var, true)?;
+            if scope.borrow().is_eval_scope() {
+                variable_scope.borrow_mut().mark_binding_deletable(name);
+            }
         }
         Ok(())
     }
@@ -3012,6 +3075,29 @@ impl Interpreter {
             mode
         };
     }
+
+    pub(crate) fn acquire_function_environment(&mut self, parent: Env) -> Env {
+        if let Some(environment) = self.function_environment_pool.pop() {
+            *environment.borrow_mut() = Environment::function_child(parent);
+            environment
+        } else {
+            Rc::new(RefCell::new(Environment::function_child(parent)))
+        }
+    }
+
+    pub(crate) fn recycle_function_environment(&mut self, environment: Env) {
+        if self.function_environment_pool.len() >= 16
+            || Rc::strong_count(&environment) != 1
+            || !environment.borrow().resources.is_empty()
+        {
+            return;
+        }
+        // Drop the parent chain and bindings before retaining the allocation;
+        // closures that captured this frame fail the strong-count check above.
+        *environment.borrow_mut() = Environment::new();
+        self.function_environment_pool.push(environment);
+    }
+
     pub(crate) fn note_loop_iter(&self, counters: &crate::jit::TierCounters) {
         if self.tier_tracking != crate::jit::TierTracking::Disabled {
             crate::jit::note_loop_iter(counters);
@@ -3311,6 +3397,37 @@ mod tests {
     use super::*;
     use crate::lexer::Lexer;
     use crate::parser::Parser;
+
+    #[test]
+    fn module_source_types_share_a_realm_owned_intermediate_prototype() {
+        let mut vm = Interpreter::with_builtins();
+        let first = vm.create_module_source_object("HostModule");
+        let second = vm.create_module_source_object("HostModule");
+        let other_type = vm.create_module_source_object("OtherModule");
+        let prototype = vm.get_prototype_of(&first).unwrap();
+        assert!(strict_equals(
+            &prototype,
+            &vm.get_prototype_of(&second).unwrap()
+        ));
+        assert!(!strict_equals(
+            &prototype,
+            &vm.get_prototype_of(&other_type).unwrap()
+        ));
+        let abstract_prototype = vm
+            .abstract_module_source_constructor()
+            .get_prop("prototype")
+            .unwrap();
+        assert!(strict_equals(
+            &vm.get_prototype_of(&prototype).unwrap(),
+            &abstract_prototype
+        ));
+        let mut other_realm = Interpreter::with_builtins();
+        let foreign = other_realm.create_module_source_object("HostModule");
+        assert!(!strict_equals(
+            &prototype,
+            &other_realm.get_prototype_of(&foreign).unwrap()
+        ));
+    }
 
     fn eval(src: &str) -> Result<Value, VmErr> {
         let mut interp = Interpreter::with_builtins();

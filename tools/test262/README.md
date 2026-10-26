@@ -44,29 +44,47 @@ report still contains all selected outcomes and records the restored file count.
 
 ## Current full result
 
-The latest complete pinned run archived **2026-10-25** on clean source
-`259402f` passes **102,760 / 102,956 variants (99.8096%)**, with 133 failures,
-63 timeouts, and zero skips, crashes, or harness errors. It gains 18 passes
-and loses three against the `d942b04` zero-loss reference; against the rejected
-`3816dcf` candidate it gains 99 passes with zero losses.
+The latest complete pinned run finished **2026-10-26** on an uncommitted
+source snapshot based on `42ae715`. It passes **102,839 / 102,956 (99.8864%)**,
+with 65 failures, 52 timeouts, and zero skips, crashes, or harness errors.
+It gains **20 passes with zero losses** against preceding full worker
+`ef2a45bd…` (102,819 passes). The **117 remaining variants** comprise 42 parse
+failures, 23 runtime failures, and 52 timeouts.
 
-All three losses versus `d942b04` are five-second timeouts: script and strict
-variants of `staging/sm/String/string-upper-lower-mapping.js`, and the script
-variant of `staging/sm/regress/regress-610026.js`. A focused five-second rerun
-reproduced those three timeouts; all four selected variants pass with a
-15-second diagnostic deadline. The latest run uses corpus
-`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, two workers, five-second deadlines,
-no exclusions, and no resumed outcomes. Worker SHA-256 is
-`269671273c067f74e93e0cb3df85f33f98477c6e2f3e92005d665253f80b2b7d`.
+The run uses corpus `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, two workers,
+five-second deadlines, no exclusions, and no resumed outcomes. Worker SHA-256:
+`aacb94ea7e8fccf9e3ddd92adf9af09a8932e0b0ec6a678fffe2fb1daf8c39b5`.
+[Full evidence](evidence/full-activation-followup-2026-10-26/) contains every
+outcome, comparison, triage, residual inventory, source identity, and exact
+source diff. Source and binary hashes were revalidated after completion.
+The final gate also requires clean committed source.
 
-[Current full evidence](evidence/full-native-prototype-repair-2026-10-25/)
-contains the report, comparisons, triage, source identity, and all 196 residual
-variants. The previous rejected `3816dcf` full result is preserved in
-[regression evidence](evidence/full-regression-function-binding-2026-10-25/).
-The zero-loss reference `d942b04` passed 102,745 with 151 failures and 60
-timeouts; its [evidence](evidence/full-refresh-2026-10-25/) contains 211
-residual variants. See the [full-pass plan](../../docs/test262-full-pass-plan.md)
-for the next steps.
+The gains cover thirteen legacy caller/arguments variants, two ArrayBuffer
+coercion variants, four URI-decode variants, and strict toSpliced-dense.
+Every previous pass is retained. The six-variant timing slice passed twice,
+and 16,279 broader focused variants passed without losses. Rejected candidate
+regressions remain in the [activation evidence](evidence/function-activation-followup-2026-10-26/).
+All 395 core tests, five worker tests, Clippy, root all-target checking,
+formatting, and whitespace checks pass.
+
+The [preceding full run](evidence/full-runtime-followup-2026-10-26/) is
+preserved. See the [full-pass plan](../../docs/test262-full-pass-plan.md)
+for the remaining causes and unchanged acceptance criteria.
+
+The [class-decorator working-tree follow-up](evidence/class-decorator-followup-2026-10-26/)
+passes 16,874 of 16,882 class variants: 26 gains and zero losses since the
+[auto-accessor follow-up](evidence/auto-accessor-followup-2026-10-26/), or 34
+gains and zero losses against the exact full-report projection. The eight
+remaining class failures require element decorators. All 399 core tests,
+five worker tests, the standard timing slice, and static checks pass.
+The full score above is unchanged.
+
+The [method-decorator foundation](evidence/method-decorator-followup-2026-10-26/)
+adds method replacement, private/public context access, and initializer tests.
+Its 26,479-variant broad selection has zero losses and the same eight
+field-dependent failures; it adds no further pinned gains yet. All 402 core
+tests, five worker tests, six separate worker probes, and timing/static checks
+pass. The latest full score remains unchanged.
 
 ## Historical measurements
 

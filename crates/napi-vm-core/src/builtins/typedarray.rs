@@ -24,6 +24,7 @@ const KINDS: &[(&str, TypedKind)] = &[
     ("Uint16Array", TypedKind::Uint16),
     ("Int32Array", TypedKind::Int32),
     ("Uint32Array", TypedKind::Uint32),
+    ("Float16Array", TypedKind::Float16),
     ("Float32Array", TypedKind::Float32),
     ("Float64Array", TypedKind::Float64),
     ("BigInt64Array", TypedKind::BigInt64),
@@ -1495,7 +1496,7 @@ fn atomics_value(kind: TypedKind, bits: u64) -> Value {
         TypedKind::BigUint64 => Value::BigInt(Rc::new(
             crate::bigint::BigInt::parse(&bits.to_string()).expect("u64 decimal is a BigInt"),
         )),
-        TypedKind::Uint8Clamped | TypedKind::Float32 | TypedKind::Float64 => {
+        TypedKind::Uint8Clamped | TypedKind::Float16 | TypedKind::Float32 | TypedKind::Float64 => {
             unreachable!("Atomics cannot access non-integer typed arrays")
         }
     }
@@ -1912,6 +1913,9 @@ pub fn read_element(view: &Rc<TypedArrayData>, index: usize) -> Option<Value> {
         TypedKind::Uint16 => Value::Number(u16::from_le_bytes([bytes[0], bytes[1]]) as f64),
         TypedKind::Int32 => Value::Number(i32::from_le_bytes(bytes.try_into().ok()?) as f64),
         TypedKind::Uint32 => Value::Number(u32::from_le_bytes(bytes.try_into().ok()?) as f64),
+        TypedKind::Float16 => {
+            Value::Number(float16_number(u16::from_le_bytes(bytes.try_into().ok()?)))
+        }
         TypedKind::Float32 => Value::Number(f32::from_le_bytes(bytes.try_into().ok()?) as f64),
         TypedKind::Float64 => Value::Number(f64::from_le_bytes(bytes.try_into().ok()?)),
         TypedKind::BigInt64 => Value::BigInt(Rc::new(crate::bigint::BigInt::from_i64(
@@ -1967,6 +1971,7 @@ pub fn write_element(view: &Rc<TypedArrayData>, index: usize, value: &Value) -> 
                 TypedKind::Uint16 => (to_int(number) as u16).to_le_bytes().to_vec(),
                 TypedKind::Int32 => to_int(number).to_le_bytes().to_vec(),
                 TypedKind::Uint32 => (to_int(number) as u32).to_le_bytes().to_vec(),
+                TypedKind::Float16 => float16_bits(number).to_le_bytes().to_vec(),
                 TypedKind::Float32 => (number as f32).to_le_bytes().to_vec(),
                 _ => number.to_le_bytes().to_vec(),
             }

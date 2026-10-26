@@ -55,6 +55,12 @@ pub type Captures = Vec<Option<(usize, usize)>>;
 /// Literals and constructors use the same validator; parsing a literal does
 /// not execute or compile the engine's partial matcher implementation.
 pub(crate) fn validate_syntax(source: &crate::JsString, flags: &str) -> Result<String, String> {
+    stacker::maybe_grow(1024 * 1024, 8 * 1024 * 1024, || {
+        validate_syntax_inner(source, flags)
+    })
+}
+
+fn validate_syntax_inner(source: &crate::JsString, flags: &str) -> Result<String, String> {
     let mut seen = String::new();
     for flag in flags.chars() {
         if !"dgimsuvy".contains(flag) {
@@ -104,7 +110,7 @@ pub(crate) fn validate_syntax(source: &crate::JsString, flags: &str) -> Result<S
             ')' if classes == 0 => groups = groups.saturating_sub(1),
             _ => {}
         }
-        if groups + classes > 128 {
+        if groups + classes > 256 {
             return Err("Maximum regular expression nesting exceeded".into());
         }
     }
@@ -128,7 +134,9 @@ impl Regex {
         let source = source.into();
         let pattern = validate_syntax(&source, flags)?;
         let unicode = flags.contains('u') || flags.contains('v');
-        let parsed = parse::Parser::new(&pattern, unicode, flags.contains('v')).parse()?;
+        let parsed = stacker::maybe_grow(1024 * 1024, 8 * 1024 * 1024, || {
+            parse::Parser::new(&pattern, unicode, flags.contains('v')).parse()
+        })?;
         Ok(Self {
             root: parsed.root,
             group_count: parsed.group_count,
@@ -227,7 +235,7 @@ type Cont<'k> = &'k mut dyn FnMut(usize, &mut Captures) -> bool;
 
 impl Matcher<'_> {
     fn enter(&self) -> Result<MatchDepth<'_>, String> {
-        if self.depth.get() >= 128 {
+        if self.depth.get() >= 512 {
             return Err("RangeError: Regular expression exceeded the nesting budget".into());
         }
         self.depth.set(self.depth.get() + 1);
@@ -1065,6 +1073,28 @@ impl Matcher<'_> {
 #[allow(clippy::items_after_test_module)]
 mod modifier_tests {
     use super::Regex;
+
+    #[test]
+    fn nested_groups_compile_and_match_on_a_small_native_stack() {
+        std::thread::Builder::new()
+            .name("nested-regexp-probe".into())
+            .stack_size(512 * 1024)
+            .spawn(|| {
+                let input: Vec<u16> = "hello".encode_utf16().collect();
+                for opening in ["(", "(?:"] {
+                    let pattern = opening.repeat(200) + "hello" + &")".repeat(200);
+                    let regex = Regex::new(pattern.as_str(), "").unwrap();
+                    let captures = regex.find_at(&input, 0).unwrap().unwrap();
+                    assert_eq!(captures.len(), if opening == "(" { 201 } else { 1 });
+                    assert!(captures.iter().all(|capture| *capture == Some((0, 5))));
+                }
+                let excessive = "(".repeat(257) + "hello" + &")".repeat(257);
+                assert!(Regex::new(excessive.as_str(), "").is_err());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
 
     fn matches(pattern: &str, flags: &str, input: &str) -> bool {
         Regex::new(pattern, flags)

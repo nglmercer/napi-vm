@@ -429,13 +429,18 @@ fn regexp_call(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value,
             return Ok(pattern);
         }
     }
-    initialize_regexp(i, args, regex)
+    initialize_regexp(i, args, regex, false)
 }
 fn regexp_construct(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
     let regex = is_regexp(i, args.first().unwrap_or(&Value::Undefined))?;
-    initialize_regexp(i, args, regex)
+    initialize_regexp(i, args, regex, true)
 }
-fn initialize_regexp(i: &mut Interpreter, args: Vec<Value>, regex: bool) -> Result<Value, VmErr> {
+fn initialize_regexp(
+    i: &mut Interpreter,
+    args: Vec<Value>,
+    regex: bool,
+    constructing: bool,
+) -> Result<Value, VmErr> {
     let pattern = args.first().cloned().unwrap_or(Value::Undefined);
     let mut flags = args.get(1).cloned().unwrap_or(Value::Undefined);
     let source = if let Value::RegExp(data) = &pattern {
@@ -452,6 +457,18 @@ fn initialize_regexp(i: &mut Interpreter, args: Vec<Value>, regex: bool) -> Resu
     } else {
         pattern
     };
+    // RegExpAlloc follows extraction of pattern/flags, but precedes their
+    // string conversion in RegExpInitialize.
+    let intrinsic = i.persistent_global.borrow().intrinsic("RegExp").unwrap();
+    let new_target = if constructing {
+        i.new_target_stack
+            .last()
+            .cloned()
+            .unwrap_or_else(|| intrinsic.clone())
+    } else {
+        intrinsic.clone()
+    };
+    let prototype = i.constructor_prototype(&new_target, "RegExp")?;
     let source = if matches!(source, Value::Undefined) {
         crate::JsString::default()
     } else {
@@ -462,14 +479,20 @@ fn initialize_regexp(i: &mut Interpreter, args: Vec<Value>, regex: bool) -> Resu
     } else {
         i.ecmascript_to_string(&flags)?.to_string()
     };
-    compile(source, &flags)
+    let result = compile(source, &flags)?;
+    if let Value::RegExp(data) = &result {
+        data.properties.set_proto(prototype);
+        data.legacy_enabled
+            .set(crate::interpreter::strict_equals(&new_target, &intrinsic));
+    }
+    Ok(result)
 }
 
 /// Properties and methods readable on a regular expression.
 pub fn regexp_member(data: &Rc<RegExpData>, key: &str) -> Option<Value> {
     let regex = data.regex.borrow();
     Some(match key {
-        "source" => Value::String(escaped_source(&regex.source)),
+        "source" => Value::String(escaped_source(&regex.source, regex.flags.contains('v'))),
         "flags" => Value::String((regex.flags.clone()).into()),
         "global" => Value::Bool(regex.global),
         "ignoreCase" => Value::Bool(regex.ignore_case),
@@ -773,7 +796,8 @@ fn regexp_compile(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Re
             "TypeError: Flags must be undefined for a RegExp pattern".into(),
         ));
     }
-    let Value::RegExp(ref replacement) = regexp_construct(interp, Value::Undefined, args)? else {
+    let regex = is_regexp(interp, args.first().unwrap_or(&Value::Undefined))?;
+    let Value::RegExp(ref replacement) = initialize_regexp(interp, args, regex, false)? else {
         unreachable!()
     };
     let replacement = replacement.regex.borrow();
@@ -787,24 +811,36 @@ fn regexp_species(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Val
     Ok(this)
 }
 
-fn escaped_source(source: &crate::JsString) -> crate::JsString {
+fn escaped_source(source: &crate::JsString, unicode_sets: bool) -> crate::JsString {
     if source.is_empty() {
         return "(?:)".into();
     }
-    let mut result = crate::JsString::default();
+    let mut result = Vec::new();
     let mut backslashes = 0;
+    let mut class_depth = 0usize;
     for &unit in source.units() {
+        let escaped = backslashes % 2 != 0;
+        if matches!(unit, 10 | 13 | 0x2028 | 0x2029) && escaped {
+            result.pop();
+        }
         match unit {
-            47 if backslashes % 2 == 0 => result.push_str("\\/"),
-            10 => result.push_str("\\n"),
-            13 => result.push_str("\\r"),
-            0x2028 => result.push_str("\\u2028"),
-            0x2029 => result.push_str("\\u2029"),
-            _ => result.push_str(crate::JsString::from_units(vec![unit])),
+            47 if !escaped && class_depth == 0 => result.extend([92, 47]),
+            10 => result.extend([92, 110]),
+            13 => result.extend([92, 114]),
+            0x2028 => result.extend([92, 117, 50, 48, 50, 56]),
+            0x2029 => result.extend([92, 117, 50, 48, 50, 57]),
+            _ => result.push(unit),
+        }
+        if !escaped {
+            if unit == 91 && (class_depth == 0 || unicode_sets) {
+                class_depth += 1;
+            } else if unit == 93 {
+                class_depth = class_depth.saturating_sub(1);
+            }
         }
         backslashes = if unit == 92 { backslashes + 1 } else { 0 };
     }
-    result
+    crate::JsString::from_units(result)
 }
 
 fn regexp_escape(_: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {

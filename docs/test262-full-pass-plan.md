@@ -1,103 +1,118 @@
-# Test262 full-pass plan — 2026-10-25
+# Test262 full-pass plan — 2026-10-26
 
 ## Verified status
 
-The latest complete run used clean source `259402f` and passed **102,760 /
-102,956 (99.8096%)**. It recorded 133 failures and 63 timeouts, with zero
-skips, crashes, or harness errors. It gains 18 passes and loses three versus
-the `d942b04` zero-loss reference, for a net gain of 15. All three losses are
-timeouts: script and strict variants of
-`staging/sm/String/string-upper-lower-mapping.js`, and the script variant of
-`staging/sm/regress/regress-610026.js`. Against the rejected `3816dcf` full
-candidate it restores 99 passes with zero losses.
+The latest complete pinned run passes **102,839 / 102,956 (99.8864%)**:
+65 failures, 52 timeouts, and zero skips, crashes, or harness errors.
+It gains **20 passes with zero losses** against the preceding full worker
+`ef2a45bd…` (102,819 passes).
 
-Evidence: [complete repaired run](../tools/test262/evidence/full-native-prototype-repair-2026-10-25/summary.json)
-contains the report, both comparisons, triage, source identity, build log, and
-the exact remaining variants.
+There are **117 remaining variants: 42 parse failures, 23 runtime failures,
+and 52 timeouts**. Every outcome, comparison, triage, source identity, exact
+source diff, and [residual inventory](../tools/test262/evidence/full-activation-followup-2026-10-26/remaining.json)
+is retained in [full evidence](../tools/test262/evidence/full-activation-followup-2026-10-26/).
 
-The prior clean `d942b04` run remains the zero-loss reference at **102,745 /
-102,956 (99.7951%)**, with 151 failures and 60 timeouts; it gained 76 passes
-with zero losses against its predecessor. Its
-[full evidence](../tools/test262/evidence/full-refresh-2026-10-25/) includes all
-211 residual variants.
+The measured source is an uncommitted snapshot based on `42ae715`. The worker
+SHA-256 is `aacb94ea7e8fccf9e3ddd92adf9af09a8932e0b0ec6a678fffe2fb1daf8c39b5`.
+The complete run used corpus `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, two
+workers, five-second deadlines, no exclusions, and no resumed outcomes.
+Source and worker hashes were revalidated after completion. The final
+acceptance gate requires clean committed source.
 
-The intervening `3816dcf` complete candidate passed 102,661 variants, with 232
-failures and 63 timeouts. It gained 18 and lost 102 versus `d942b04` because
-native methods failed to inherit the realm's `Function.prototype`, and
-function property lookup used the wrong receiver/prototype chain. Its
-[regression evidence](../tools/test262/evidence/full-regression-function-binding-2026-10-25/)
-is retained in full.
+The full run confirms thirteen caller/arguments gains, two ArrayBuffer
+sliceToImmutable coercion gains, four URI-decode gains, and strict toSpliced.
+The implementation tracks rooted guest activations and original argument
+snapshots, uses stable accessor descriptors and native callback boundaries,
+and avoids repeated property-key work for guarded ordinary array and binding
+reads. All previous passes remain, including script toSpliced, BMP casing,
+and regress-610026. The six-variant timing slice passed twice before the full
+run. The broader 16,279-variant focused selection also passed without losses.
 
-The current 196 residual variants comprise 44 parse failures, 89 runtime
-failures, and 63 timeouts. Parse failures are 25 class statements, 15 class
-expressions, and four staging decorator cases. Runtime failures include 71
-`staging/sm`, six super, four RegExp, and smaller arguments/eval/built-in/module
-clusters. Timeouts include 27 `staging/sm`, eight RegExp literal cases, six
-TypedArray, eight URI decoding, and smaller Annex B, ArrayBuffer, RegExp, URI
-encoding, and comment clusters.
+Validation passed **395 core library tests**, **five worker tests**,
+all-target Clippy with warnings denied, root all-target checking, formatting,
+and whitespace checks. Rejected descriptor and getter-alias candidates and
+all measured timing losses remain in the
+[activation evidence](../tools/test262/evidence/function-activation-followup-2026-10-26/).
 
-The earlier follow-up patch for inferred names, property lookup/prototype
-behavior, and parser boundaries was compared on 212 variants drawn from the
-residual files. It gained 18 passes with zero losses against that matching
-full-report projection. The subsequent complete evaluation exposed function
-binding regressions; the repair recheck described above restores them. Neither
-focused result changes the complete-corpus score.
+## Decorator working-tree follow-up
 
-Subsequent committed fixes gained 35 passes in a 4,492-variant runtime/RegExp
-selection and 18 passes in a 3,418-variant generator selection, with zero losses
-in each comparison. These are focused results, not a replacement full score.
-The source-text continuation on clean `d942b04` passes 1,006/1,020 selected
-variants, gaining 16 passes with zero losses. Source preservation and native
-syntax are implemented; compilation, native checks, and focused verification
-pass. [Evidence](../tools/test262/evidence/function-source-2026-10-25/) retains
-intermediate regressions and their resolution.
+Auto-accessors clear eight variants. Class decorators clear another 26.
+The same 16,882-variant class selection now passes **16,874**, with **34 gains
+and zero losses** against the latest full-report projection (26 gains and
+zero losses against the preceding auto-accessor worker). The eight remaining
+class variants require element decorators. The six-variant timing slice
+passes. All 399 core tests, five worker tests, Clippy, root checking,
+formatting, and whitespace checks pass.
+
+[Class decorator evidence](../tools/test262/evidence/class-decorator-followup-2026-10-26/)
+retains reports, both comparisons, exact source, and the residual class list.
+The [auto-accessor evidence](../tools/test262/evidence/auto-accessor-followup-2026-10-26/)
+also preserves the rejected naming-collision candidate. These focused gains
+do not replace the complete score above.
+
+## Method-decorator foundation
+
+Method replacement, private/public context access, and initializer ordering
+now pass direct AST/bytecode tests and six worker smoke probes. A broad
+26,479-variant selection has **zero lost passes**, retaining the prior 34
+focused gains and the same eight field-dependent failures. It adds no new
+pinned passes yet. All 402 core tests, five worker tests, static checks, and
+the timing slice pass. [Method evidence](../tools/test262/evidence/method-decorator-followup-2026-10-26/)
+retains the rejected getter-name alias candidate and its data-descriptor fix.
 
 ## Ordered execution
 
-1. **Stabilize the three lost passes.** The complete run lost two variants of
-   `staging/sm/String/string-upper-lower-mapping.js` and one of
-   `staging/sm/regress/regress-610026.js` to five-second timeouts. Repeat these
-   exact variants on the current worker and the `d942b04` reference, then profile
-   the slow paths and optimize only with reproducible timing evidence. Preserve
-   all measured transitions.
+1. **Implement element decorators and confirm the syntax gains in a full run.**
+   Eight auto-accessor and 26 class-decorator variants are now clear in focused
+   validation. The eight remaining class variants need element grammar,
+   interleaved expression/key evaluation, method/getter/setter/field/accessor
+   replacement validation, public/private context access operations, and
+   per-element and extra initializer ordering. Method decoration is now in
+   place. Finish field transforms/extras, getter/setter and auto-accessor
+   decoration, context creation order, and arbitrary callable accessor identity.
+   Preserve the class-decorator
+   replacement, binding, and static-initialization behavior already tested.
+   Run valid and negative syntax plus complete class selections after changes.
+   Do not merely accept and discard decorators.
 
-2. **Close class syntax and decorators.** The current parse inventory has 25
-   class-statement variants, 15 class-expression variants, and four staging
-   decorator variants. Implement the required decorator grammar first, then
-   decorator evaluation/application order, accessor storage, private brands,
-   and initializer order required by runtime cases. Run valid and negative
-   syntax groups and class behavior groups after each step.
+2. **Close the other runtime causes.** Four Annex B declaration variants need
+   argument-shadowing, labeled declarations, and redeclaration ordering. Four
+   legacy Date variants need two-digit-year heuristics, written months, compact
+   timezone offsets, and strict ISO rejection. Ten resource-limit variants
+   need legitimate large strings, a 20 MiB DataView buffer, and a flat JSON
+   array with 2^21 + 1 entries. Decouple buffer limits from dense-array limits
+   and preserve bounded allocation behavior. The five remaining runtime
+   variants cover Array ToLength (two), legacy NUL quoting (two), and object
+   primitive conversion (one). Each cause needs its neighboring comparison.
 
-3. **Close the remaining runtime semantics.** Start with the 71 failing
-   `staging/sm` variants, then the six super, four RegExp, and smaller arguments,
-   eval, built-in, and module clusters. Split cases by shared cause, add
-   regressions, run neighboring groups, and compare against the full report
-   without losing passes.
+3. **Remove all 52 timeouts.** The inventory includes 22 staging/sm, eight
+   RegExp-literal, six TypedArray, four URI-decode, four Annex B, two RegExp, four URI-encode,
+   and two comment variants.
+   Separate nontermination from slow execution. Several TypedArray cases copy
+   buffers byte by byte through numeric indexed reads/writes; inspect redundant
+   property-key conversion and descriptor work while preserving coercion,
+   detachment, immutable-buffer, and Proxy semantics. Profile the URI, string,
+   and regexp loops as separate causes. Keep headroom with two workers and
+   five-second deadlines; longer diagnostics do not count as passes.
 
-4. **Remove the remaining timeouts.** The current inventory has 63: 27
-   `staging/sm`, eight RegExp literal, six TypedArray, eight URI decode, four
-   Annex B, two ArrayBuffer, two RegExp, four URI encode, and two comment
-   variants. Distinguish engine slowness from nontermination, optimize shared
-   hot paths, and keep headroom under the five-second deadline. Longer
-   diagnostic deadlines do not count as passes.
-
-5. **Run the final full gate and archive reproducible evidence.** Require
-   102,956 passes and zero failures, timeouts, skips, crashes, or harness errors
-   on a clean committed source tree. Archive the full report, source identity,
-   worker hash, configuration, build/check logs, and comparison. Recheck formerly
-   timing-sensitive cases for stability. Any residual failure reopens its root
-   cause; do not change the denominator, exclude staging tests, or relax timeouts.
+4. **Run the final full gate.** Require **102,956 passes and zero failures,
+   timeouts, skips, crashes, or harness errors** on clean committed source.
+   Archive the complete report, every transition, source identity, worker hash,
+   configuration, and build/check logs. Repeat formerly marginal timing cases.
+   Any remaining nonpass reopens its cause. Keep the pinned corpus,
+   denominator, worker count, and timeout fixed.
 
 ## Validation policy
 
-Run formatting, core all-target Clippy with warnings denied, core tests, and
-affected integration/worker tests for implementation changes. Preserve every
-measured lost pass in comparisons. Keep focused results separate from the most
-recent completed full result. Full AST/bytecode differential and wasm execution
-are separate coverage gates and must be reported separately from this worker's
-Test262 result.
+After implementation changes, run formatting, core all-target Clippy with
+warnings denied, core tests, and affected worker/integration selections.
+Check root bindings when their shared types change. Broaden testing where the
+change can affect neighboring semantics. Preserve every measured regression;
+focused results never replace the latest full score. Full AST/bytecode
+differential and wasm execution remain separate gates.
 
-The next concrete milestone is to eliminate the three timing-sensitive losses
-with reproducible five-second passes, then use zero-loss comparisons while
-closing the 44 parse failures, 89 runtime failures, and 63 timeouts. The current
-evidence does not support a reliable completion date.
+Historical complete evidence remains available for
+[102,783 passes](../tools/test262/evidence/full-worktree-2026-10-26/),
+[102,760 passes](../tools/test262/evidence/full-native-prototype-repair-2026-10-25/),
+and the [d942b04 reference](../tools/test262/evidence/full-refresh-2026-10-25/).
+The current evidence does not support a reliable completion date.

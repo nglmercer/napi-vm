@@ -228,6 +228,9 @@ pub struct ObjectMeta {
     /// is the difference between allocating a slot name on every write and
     /// never allocating one.
     pub has_accessors: bool,
+    /// Explicit data descriptors override the legacy callable-name encoding.
+    pub(crate) data_property_keys: std::collections::HashSet<String>,
+    pub(crate) legacy_call_accessors: bool,
     /// Accessor slots with neither a callable getter nor a callable setter.
     pub(crate) empty_accessors: Vec<String>,
     /// The primitive carried by a boxed Boolean, Number, String, Symbol, or
@@ -358,6 +361,20 @@ impl std::fmt::Debug for ObjectMeta {
 }
 
 impl ObjectMeta {
+    pub(crate) fn may_have_accessor(&self, key: &str) -> bool {
+        (self.has_accessors || self.legacy_call_accessors && matches!(key, "caller" | "arguments"))
+            && !self.is_explicit_data(key)
+    }
+    pub(crate) fn is_explicit_data(&self, key: &str) -> bool {
+        self.data_property_keys.contains(key)
+    }
+    pub(crate) fn set_explicit_data(&mut self, key: &str, data: bool) {
+        if data {
+            self.data_property_keys.insert(key.to_owned());
+        } else {
+            self.data_property_keys.remove(key);
+        }
+    }
     pub fn attrs_of(&self, key: &str) -> PropAttrs {
         // Most objects never have a non-default attribute, and this runs on
         // every property read and write.
@@ -408,6 +425,7 @@ impl ObjectMeta {
     }
 
     pub fn forget(&mut self, key: &str) {
+        self.set_explicit_data(key, false);
         self.set_empty_accessor(key, false);
         self.attrs.retain(|(k, _)| k != key);
         self.symbol_keys.retain(|(k, _)| k != key);
@@ -1447,25 +1465,43 @@ impl FunctionData {
         self.uses_arguments || non_simple
     }
 
-    pub fn ensure_name_length_properties(&self) {
-        if self.standard_properties_initialized.replace(true) {
-            return;
-        }
-        let mut properties = self.properties.borrow_mut();
-        // Legacy ordinary non-strict functions may expose null caller and
-        // arguments properties. Other function kinds inherit the restricted
-        // accessors from Function.prototype.
-        if !self.strict
+    pub(crate) fn exposes_legacy_call_properties(&self) -> bool {
+        !self.strict
             && self.is_constructor
             && !self.is_arrow
             && !self.is_async
             && !self.is_generator
             && self.native.is_none()
             && self.bound.is_none()
-        {
+    }
+
+    pub fn ensure_name_length_properties(&self) {
+        if self.standard_properties_initialized.replace(true) {
+            return;
+        }
+        let mut properties = self.properties.borrow_mut();
+        // Activation-sensitive properties use stable accessor descriptors.
+        // Other function kinds inherit the restricted Function.prototype
+        // accessors instead.
+        if self.exposes_legacy_call_properties() {
             for key in ["caller", "arguments"] {
                 if !properties.iter().any(|(name, _)| name == key) {
-                    properties.push((key.into(), Value::Null));
+                    let intrinsic = if key == "caller" {
+                        "%LegacyCallerGetter%"
+                    } else {
+                        "%LegacyArgumentsGetter%"
+                    };
+                    let getter = self
+                        .properties
+                        .meta
+                        .borrow()
+                        .realm_global
+                        .clone()
+                        .and_then(|realm| realm.borrow().intrinsic(intrinsic));
+                    if getter.is_some() {
+                        self.properties.meta.borrow_mut().legacy_call_accessors = true;
+                    }
+                    properties.push((key.into(), getter.unwrap_or(Value::Null)));
                     self.properties.meta.borrow_mut().set_attrs(
                         key,
                         PropAttrs {
@@ -2426,6 +2462,7 @@ pub enum TypedKind {
     Uint16,
     Int32,
     Uint32,
+    Float16,
     Float32,
     Float64,
     BigInt64,
@@ -2436,7 +2473,7 @@ impl TypedKind {
     pub fn size(self) -> usize {
         match self {
             TypedKind::Int8 | TypedKind::Uint8 | TypedKind::Uint8Clamped => 1,
-            TypedKind::Int16 | TypedKind::Uint16 => 2,
+            TypedKind::Int16 | TypedKind::Uint16 | TypedKind::Float16 => 2,
             TypedKind::Int32 | TypedKind::Uint32 | TypedKind::Float32 => 4,
             TypedKind::Float64 | TypedKind::BigInt64 | TypedKind::BigUint64 => 8,
         }
@@ -2451,6 +2488,7 @@ impl TypedKind {
             TypedKind::Uint16 => "Uint16Array",
             TypedKind::Int32 => "Int32Array",
             TypedKind::Uint32 => "Uint32Array",
+            TypedKind::Float16 => "Float16Array",
             TypedKind::Float32 => "Float32Array",
             TypedKind::Float64 => "Float64Array",
             TypedKind::BigInt64 => "BigInt64Array",

@@ -144,6 +144,113 @@ pub(crate) fn is_js_object(value: &Value) -> bool {
 }
 
 impl Interpreter {
+    fn with_native_boundary<T>(
+        &mut self,
+        transparent: bool,
+        operation: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let saved = self.native_call_depth;
+        if !transparent {
+            self.native_call_depth += 1;
+        }
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(self)));
+        self.native_call_depth = saved;
+        match outcome {
+            Ok(value) => value,
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
+    }
+
+    fn call_native_function(
+        &mut self,
+        callable: crate::builtins::NativeFn,
+        receiver: Value,
+        arguments: Vec<Value>,
+    ) -> Result<Value, VmErr> {
+        self.with_native_boundary(
+            crate::builtins::is_transparent_native_call(callable),
+            |vm| callable(vm, receiver, arguments),
+        )
+    }
+
+    fn begin_function_activation(&mut self, function: &Value, arguments: &[Value]) {
+        let snapshot = if matches!(function, Value::Function(data) if data.exposes_legacy_call_properties())
+        {
+            let mut snapshot = self.activation_argument_pool.pop().unwrap_or_default();
+            snapshot.extend_from_slice(arguments);
+            Some(snapshot)
+        } else {
+            None
+        };
+        self.function_activations.push(super::FunctionActivation {
+            callee: function.clone(),
+            arguments: snapshot,
+            native_depth: self.native_call_depth,
+        });
+    }
+
+    fn end_function_activation(&mut self) {
+        if let Some(activation) = self.function_activations.pop()
+            && let Some(mut arguments) = activation.arguments
+        {
+            arguments.clear();
+            if arguments.capacity() <= 256 && self.activation_argument_pool.len() < 64 {
+                self.activation_argument_pool.push(arguments);
+            }
+        }
+    }
+
+    pub(crate) fn legacy_function_property(
+        &self,
+        function: &Value,
+        key: &str,
+    ) -> Result<Option<Value>, VmErr> {
+        if !matches!(key, "caller" | "arguments")
+            || !matches!(function, Value::Function(data) if data.exposes_legacy_call_properties())
+        {
+            return Ok(None);
+        }
+        let Some(index) = self
+            .function_activations
+            .iter()
+            .rposition(|activation| super::strict_equals(&activation.callee, function))
+        else {
+            return Ok(Some(Value::Null));
+        };
+        if key == "caller" {
+            let caller = index
+                .checked_sub(1)
+                .and_then(|index| self.function_activations.get(index));
+            return Ok(Some(match caller {
+                Some(activation)
+                    if activation.native_depth == self.function_activations[index].native_depth
+                        && matches!(&activation.callee, Value::Function(data) if !data.strict) =>
+                {
+                    activation.callee.clone()
+                }
+                _ => Value::Null,
+            }));
+        }
+        let _realm = super::realm::AllocationRealm::enter(super::realm::value_realm(function));
+        let arguments = self.function_activations[index]
+            .arguments
+            .as_deref()
+            .unwrap_or(&[]);
+        let object = Value::arguments_object(arguments)?;
+        object.set_prop("callee".into(), function.clone())?;
+        if let Some(properties) = object.property_cell() {
+            properties.meta.borrow_mut().set_attrs(
+                "callee",
+                crate::value::PropAttrs {
+                    writable: true,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
+        Ok(Some(object))
+    }
+
     /// SpeciesConstructor observes constructor/species getters before deciding
     /// whether to use the intrinsic from the executing builtin's realm.
     pub(crate) fn species_constructor(
@@ -1033,6 +1140,13 @@ impl Interpreter {
                 }
                 Ok(Value::Bool(true))
             }
+            Value::String(string) => {
+                let property = self.property_key(key)?;
+                let has_non_configurable_own_property = property == "length"
+                    || crate::value::array_index(&property)
+                        .is_some_and(|index| index < string.len());
+                Ok(Value::Bool(!has_non_configurable_own_property))
+            }
             _ => {
                 if matches!(obj, Value::Null | Value::Undefined) {
                     return Err(VmErr::Msg(
@@ -1347,7 +1461,7 @@ impl Interpreter {
                     (
                         props.borrow().clone(),
                         meta.attrs_of(key),
-                        meta.has_accessors,
+                        meta.may_have_accessor(key),
                     )
                 }
                 Value::Class(class) => {
@@ -1355,7 +1469,7 @@ impl Interpreter {
                     (
                         class.statics.borrow().clone(),
                         meta.attrs_of(key),
-                        meta.has_accessors,
+                        meta.may_have_accessor(key),
                     )
                 }
                 Value::Array(array) => {
@@ -1363,7 +1477,7 @@ impl Interpreter {
                     (
                         array.named.borrow().clone(),
                         meta.attrs_of(key),
-                        meta.has_accessors,
+                        meta.may_have_accessor(key),
                     )
                 }
                 _ => return Ok(None),
@@ -1376,7 +1490,7 @@ impl Interpreter {
                         .find(|(name, candidate)| name == &companion && is_setter(candidate))
                         .map(|(_, setter)| setter.clone())
                 });
-                let setter = if is_setter(property) {
+                let setter = if has_accessors && is_setter(property) {
                     Some(property.clone())
                 } else {
                     paired_setter.flatten()
@@ -1385,7 +1499,7 @@ impl Interpreter {
                     self.call_this(&setter, receiver.clone(), vec![value.clone()])?;
                     return Ok(Some(true));
                 }
-                if is_getter(property)
+                if has_accessors && is_getter(property)
                     || has_accessors && slots.iter().any(|(name, _)| name == &companion)
                 {
                     return Ok(Some(false));
@@ -1954,6 +2068,7 @@ impl Interpreter {
         prop: &Value,
         inc: bool,
         prefix: bool,
+        strict: bool,
     ) -> Result<Value, VmErr> {
         // An own writable Number data slot cannot invoke guest conversion or
         // prototype setters. Update it directly through the same property cell,
@@ -1982,7 +2097,7 @@ impl Interpreter {
         }
         let cur = self.get_prop_value(obj, &key)?;
         let (cur, new_val) = self.numeric_update(&cur, inc)?;
-        self.assign_member(obj, &key, new_val.clone())?;
+        self.assign_property_with_receiver(obj, &key, new_val.clone(), obj, strict)?;
         if prefix { Ok(new_val) } else { Ok(cur) }
     }
 
@@ -2075,6 +2190,7 @@ impl Interpreter {
                     .clone()
             });
             self.push_frame(fname, Span::unknown());
+            self.begin_function_activation(f, args);
             let saved_tail_context =
                 std::mem::replace(&mut self.tail_call_context, fd.strict && !fd.is_async);
             let saved_tail_barriers = std::mem::replace(&mut self.tail_call_barriers, 0);
@@ -2097,6 +2213,7 @@ impl Interpreter {
             self.cur_mod = saved_module;
             saved_modules.install(self);
             if let Err(panic) = outcome {
+                self.end_function_activation();
                 self.pop_frame();
                 std::panic::resume_unwind(panic);
             }
@@ -2110,6 +2227,7 @@ impl Interpreter {
                 }))),
                 other => other,
             };
+            self.end_function_activation();
             self.pop_frame();
             return result;
         }
@@ -2229,7 +2347,7 @@ impl Interpreter {
         match f {
             Value::Function(fd) => {
                 if let Some(native) = fd.native {
-                    return native(self, this_val, args);
+                    return self.call_native_function(native, this_val, args);
                 }
                 if let Some(bound) = &fd.bound {
                     let bound = bound.clone();
@@ -2291,11 +2409,13 @@ impl Interpreter {
                                 fd.name.clone().unwrap_or_else(|| Rc::from("<anonymous>")),
                                 Span::unknown(),
                             );
+                            self.begin_function_activation(f, &args);
                             let result = stacker::maybe_grow(
                                 RECURSION_STACK_RED_ZONE,
                                 RECURSION_STACK_SEGMENT,
                                 || self.prepare_parameter_body(params, initializers, &fd.body[1..]),
                             );
+                            self.end_function_activation();
                             self.pop_frame();
                             self.global = saved;
                             (Rc::new(fd.body[1..].to_vec()), result?, true)
@@ -2478,6 +2598,7 @@ impl Interpreter {
                         .clone()
                 });
                 self.push_frame(fname, Span::unknown());
+                self.begin_function_activation(f, &args);
                 // A function body is a fresh variable scope: `var` and
                 // function declarations hoist to it, lexical ones dead-zone.
                 // The host stack can be much smaller than a typical Rust
@@ -2488,12 +2609,20 @@ impl Interpreter {
                 let saved_tail_context =
                     std::mem::replace(&mut self.tail_call_context, fd.strict && !fd.is_async);
                 let saved_tail_barriers = std::mem::replace(&mut self.tail_call_barriers, 0);
-                let r =
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     stacker::maybe_grow(RECURSION_STACK_RED_ZONE, RECURSION_STACK_SEGMENT, || {
                         self.run_function_body(&fd.body, fd.needs_hoisting)
-                    });
+                    })
+                }));
                 self.tail_call_context = saved_tail_context;
                 self.tail_call_barriers = saved_tail_barriers;
+                if let Err(panic) = outcome {
+                    self.end_function_activation();
+                    self.pop_frame();
+                    self.global = s;
+                    std::panic::resume_unwind(panic);
+                }
+                let r = outcome.expect("panic resumed above");
                 // Convert a bare message into a located runtime error *before*
                 // popping the frame, so the snapshot carries the full call
                 // chain. Only the error path pays for the snapshot — the
@@ -2542,6 +2671,7 @@ impl Interpreter {
                 } else {
                     result
                 };
+                self.end_function_activation();
                 self.pop_frame();
                 self.global = s;
                 if fd.is_async {
@@ -2561,7 +2691,9 @@ impl Interpreter {
                     result
                 }
             }
-            Value::NativeFunction { callable, .. } => callable(self, this_val, args),
+            Value::NativeFunction { callable, .. } => {
+                self.call_native_function(*callable, this_val, args)
+            }
             Value::HostFunction { properties, .. } => {
                 let id = properties
                     .meta
@@ -2882,6 +3014,7 @@ impl Interpreter {
             if matches!(
                 builtin.as_str(),
                 "Map"
+                    | "RegExp"
                     | "Set"
                     | "WeakMap"
                     | "WeakSet"
@@ -2905,8 +3038,7 @@ impl Interpreter {
                 && args.first().is_some_and(|value| !is_js_object(value)))
                 || matches!(
                     builtin.as_str(),
-                    "RegExp"
-                        | "Number"
+                    "Number"
                         | "Boolean"
                         | "String"
                         | "Date"

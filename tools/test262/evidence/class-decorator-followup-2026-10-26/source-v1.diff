@@ -1,0 +1,3558 @@
+diff --git a/crates/napi-vm-core/src/builtins/collections.rs b/crates/napi-vm-core/src/builtins/collections.rs
+index d5ea393..ac54f8c 100644
+--- a/crates/napi-vm-core/src/builtins/collections.rs
++++ b/crates/napi-vm-core/src/builtins/collections.rs
+@@ -1107,16 +1107,26 @@ fn set_count(v: &Rc<ArrayCell>) -> usize {
+ fn set_has_record(i: &mut Interpreter, r: &SetRecord, k: Value) -> Result<bool, VmErr> {
+     Ok(i.call_this(&r.has, r.object.clone(), vec![k])?.is_truthy())
+ }
+-fn set_keys_visit(
+-    i: &mut Interpreter,
+-    r: &SetRecord,
+-    mut visit: impl FnMut(&mut Interpreter, Value) -> Result<bool, VmErr>,
+-) -> Result<(), VmErr> {
++fn set_keys_iterator(i: &mut Interpreter, r: &SetRecord) -> Result<(Value, Value), VmErr> {
+     let iterator = i.call_this(&r.keys, r.object.clone(), vec![])?;
+     if !crate::interpreter::call::is_js_object(&iterator) {
+         return Err(VmErr::Msg("TypeError: keys must return iterator".into()));
+     }
+     let next = i.get_prop_value_str(&iterator, "next")?;
++    if !crate::interpreter::is_callable_value(&next) {
++        return Err(VmErr::Msg(
++            "TypeError: iterator next must be callable".into(),
++        ));
++    }
++    Ok((iterator, next))
++}
++
++fn set_keys_visit(
++    i: &mut Interpreter,
++    iterator: Value,
++    next: Value,
++    mut visit: impl FnMut(&mut Interpreter, Value) -> Result<bool, VmErr>,
++) -> Result<(), VmErr> {
+     loop {
+         i.consume_loop()?;
+         let step = i.call_this(&next, iterator.clone(), vec![])?;
+@@ -1178,6 +1188,18 @@ fn set_compose(i: &mut Interpreter, t: Value, a: Vec<Value>, name: &str) -> Resu
+     if name == "isSupersetOf" && (size as f64) < other.size {
+         return Ok(Value::Bool(false));
+     }
++    let by_source = name == "isSubsetOf"
++        || matches!(name, "intersection" | "difference" | "isDisjointFrom")
++            && size as f64 <= other.size;
++    let source_items = (by_source && name == "difference").then(|| source.borrow().clone());
++    // GetIteratorFromMethod includes calling `keys`, validating the iterator,
++    // and reading its `next` method. The Set methods copy their input only
++    // after those observable operations have completed.
++    let iterator = if by_source {
++        None
++    } else {
++        Some(set_keys_iterator(i, &other)?)
++    };
+     let predicate = matches!(name, "isSubsetOf" | "isSupersetOf" | "isDisjointFrom");
+     let result = if predicate {
+         Value::Undefined
+@@ -1186,13 +1208,13 @@ fn set_compose(i: &mut Interpreter, t: Value, a: Vec<Value>, name: &str) -> Resu
+     } else {
+         construct(i, Kind::Set, Value::Undefined, vec![])?
+     };
+-    let by_source = name == "isSubsetOf"
+-        || matches!(name, "intersection" | "difference" | "isDisjointFrom")
+-            && size as f64 <= other.size;
+     if by_source {
+         let mut cursor = 0;
+         loop {
+-            let item = source.borrow().get(cursor).cloned();
++            let item = match &source_items {
++                Some(items) => items.get(cursor).cloned(),
++                None => source.borrow().get(cursor).cloned(),
++            };
+             let Some(item) = item else { break };
+             cursor += 1;
+             i.consume_loop()?;
+@@ -1214,8 +1236,9 @@ fn set_compose(i: &mut Interpreter, t: Value, a: Vec<Value>, name: &str) -> Resu
+             }
+         }
+     } else {
++        let (iterator, next) = iterator.expect("other-set iteration prepares an iterator");
+         let mut answer = true;
+-        set_keys_visit(i, &other, |i, k| {
++        set_keys_visit(i, iterator, next, |i, k| {
+             let has = position(&source, &k).is_some();
+             match name {
+                 "isSupersetOf" if !has => {
+diff --git a/crates/napi-vm-core/src/builtins/function.rs b/crates/napi-vm-core/src/builtins/function.rs
+index cae2134..d1d38df 100644
+--- a/crates/napi-vm-core/src/builtins/function.rs
++++ b/crates/napi-vm-core/src/builtins/function.rs
+@@ -64,6 +64,23 @@ pub(super) fn install(e: &mut Environment) {
+         super::object::install_intrinsic_accessor(&prototype, key, &thrower, &thrower, true);
+     }
+     e.install_intrinsic("%ThrowTypeError%", thrower);
++    for (intrinsic, name, getter) in [
++        (
++            "%LegacyCallerGetter%",
++            "get caller",
++            legacy_caller as super::NativeFn,
++        ),
++        (
++            "%LegacyArgumentsGetter%",
++            "get arguments",
++            legacy_arguments as super::NativeFn,
++        ),
++    ] {
++        e.install_intrinsic(
++            intrinsic,
++            super::native_method(name, 0, getter, Some(prototype.clone())),
++        );
++    }
+ 
+     prototype
+         .set_prop("constructor".to_string(), namespace.clone())
+@@ -442,7 +459,23 @@ fn function_has_instance(
+     interp.ordinary_instance_of(&object, &target)
+ }
+ 
+-fn function_call(
++fn legacy_caller(interp: &mut Interpreter, receiver: Value, _: Vec<Value>) -> Result<Value, VmErr> {
++    interp
++        .legacy_function_property(&receiver, "caller")?
++        .ok_or_else(|| VmErr::Msg("TypeError: incompatible legacy caller receiver".into()))
++}
++
++fn legacy_arguments(
++    interp: &mut Interpreter,
++    receiver: Value,
++    _: Vec<Value>,
++) -> Result<Value, VmErr> {
++    interp
++        .legacy_function_property(&receiver, "arguments")?
++        .ok_or_else(|| VmErr::Msg("TypeError: incompatible legacy arguments receiver".into()))
++}
++
++pub(super) fn function_call(
+     interp: &mut Interpreter,
+     target: Value,
+     args: Vec<Value>,
+@@ -451,7 +484,7 @@ fn function_call(
+     interp.request_tail_call(target, receiver, args.into_iter().skip(1).collect())
+ }
+ 
+-fn function_apply(
++pub(super) fn function_apply(
+     interp: &mut Interpreter,
+     target: Value,
+     args: Vec<Value>,
+diff --git a/crates/napi-vm-core/src/builtins/mod.rs b/crates/napi-vm-core/src/builtins/mod.rs
+index 2b29422..e1af038 100644
+--- a/crates/napi-vm-core/src/builtins/mod.rs
++++ b/crates/napi-vm-core/src/builtins/mod.rs
+@@ -488,6 +488,18 @@ pub(crate) fn is_intrinsic_eval(value: &Value, global: &Env) -> bool {
+             .is_none_or(|owner| std::rc::Rc::ptr_eq(&owner, global))
+ }
+ 
++pub(crate) fn is_transparent_native_call(callable: NativeFn) -> bool {
++    [
++        function::function_call as NativeFn,
++        function::function_apply,
++        reflect::reflect_apply,
++        reflect::reflect_construct,
++        eval_indirect,
++    ]
++    .iter()
++    .any(|candidate| std::ptr::fn_addr_eq(callable, *candidate))
++}
++
+ pub(crate) fn eval_direct(interp: &mut Interpreter, args: Vec<Value>) -> Result<Value, VmErr> {
+     match args.first() {
+         Some(Value::String(source)) => {
+diff --git a/crates/napi-vm-core/src/builtins/object.rs b/crates/napi-vm-core/src/builtins/object.rs
+index 0826ee8..58d6c95 100644
+--- a/crates/napi-vm-core/src/builtins/object.rs
++++ b/crates/napi-vm-core/src/builtins/object.rs
+@@ -1604,7 +1604,7 @@ fn define_ordinary_property(target: &Value, key: &str, descriptor: &Value) -> Re
+     let mut meta = c.meta.borrow_mut();
+     meta.set_attrs(key, attrs);
+     meta.set_empty_accessor(key, empty_accessor);
+-    if new_is_accessor {
++    if new_is_accessor && !(meta.legacy_call_accessors && matches!(key, "caller" | "arguments")) {
+         meta.has_accessors = true;
+     }
+     Ok(())
+@@ -2179,7 +2179,7 @@ fn descriptor_for(target: &Value, key: &str) -> Value {
+     match c
+         .meta
+         .borrow()
+-        .has_accessors
++        .may_have_accessor(key)
+         .then(|| accessor_kind_for(target, key, &value))
+         .flatten()
+     {
+diff --git a/crates/napi-vm-core/src/builtins/proxy.rs b/crates/napi-vm-core/src/builtins/proxy.rs
+index c333163..bd089b8 100644
+--- a/crates/napi-vm-core/src/builtins/proxy.rs
++++ b/crates/napi-vm-core/src/builtins/proxy.rs
+@@ -339,9 +339,7 @@ impl Interpreter {
+                 }
+             };
+             if length_can_change {
+-                return Err(VmErr::Msg(
+-                    "TypeError: Cannot prevent extensions on a variable-length typed array".into(),
+-                ));
++                return Ok(false);
+             }
+         }
+         if let Value::Array(array) = value {
+diff --git a/crates/napi-vm-core/src/builtins/reflect.rs b/crates/napi-vm-core/src/builtins/reflect.rs
+index e3d6874..0b616c8 100644
+--- a/crates/napi-vm-core/src/builtins/reflect.rs
++++ b/crates/napi-vm-core/src/builtins/reflect.rs
+@@ -198,7 +198,11 @@ fn reflect_prevent_extensions(
+     interp.prevent_extensions(&target).map(Value::Bool)
+ }
+ 
+-fn reflect_apply(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
++pub(super) fn reflect_apply(
++    interp: &mut Interpreter,
++    _: Value,
++    a: Vec<Value>,
++) -> Result<Value, VmErr> {
+     let target = arg(&a, 0);
+     if !crate::interpreter::is_callable_value(&target) {
+         return Err(VmErr::Msg(
+@@ -209,7 +213,11 @@ fn reflect_apply(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Va
+     interp.request_tail_call(target, arg(&a, 1), args)
+ }
+ 
+-fn reflect_construct(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
++pub(super) fn reflect_construct(
++    interp: &mut Interpreter,
++    _: Value,
++    a: Vec<Value>,
++) -> Result<Value, VmErr> {
+     let target = arg(&a, 0);
+     let new_target = a.get(2).cloned().unwrap_or_else(|| target.clone());
+     if !super::is_constructor(&target) || !super::is_constructor(&new_target) {
+diff --git a/crates/napi-vm-core/src/builtins/regexp.rs b/crates/napi-vm-core/src/builtins/regexp.rs
+index 5233847..240779b 100644
+--- a/crates/napi-vm-core/src/builtins/regexp.rs
++++ b/crates/napi-vm-core/src/builtins/regexp.rs
+@@ -429,13 +429,18 @@ fn regexp_call(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value,
+             return Ok(pattern);
+         }
+     }
+-    initialize_regexp(i, args, regex)
++    initialize_regexp(i, args, regex, false)
+ }
+ fn regexp_construct(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+     let regex = is_regexp(i, args.first().unwrap_or(&Value::Undefined))?;
+-    initialize_regexp(i, args, regex)
++    initialize_regexp(i, args, regex, true)
+ }
+-fn initialize_regexp(i: &mut Interpreter, args: Vec<Value>, regex: bool) -> Result<Value, VmErr> {
++fn initialize_regexp(
++    i: &mut Interpreter,
++    args: Vec<Value>,
++    regex: bool,
++    constructing: bool,
++) -> Result<Value, VmErr> {
+     let pattern = args.first().cloned().unwrap_or(Value::Undefined);
+     let mut flags = args.get(1).cloned().unwrap_or(Value::Undefined);
+     let source = if let Value::RegExp(data) = &pattern {
+@@ -452,6 +457,18 @@ fn initialize_regexp(i: &mut Interpreter, args: Vec<Value>, regex: bool) -> Resu
+     } else {
+         pattern
+     };
++    // RegExpAlloc follows extraction of pattern/flags, but precedes their
++    // string conversion in RegExpInitialize.
++    let intrinsic = i.persistent_global.borrow().intrinsic("RegExp").unwrap();
++    let new_target = if constructing {
++        i.new_target_stack
++            .last()
++            .cloned()
++            .unwrap_or_else(|| intrinsic.clone())
++    } else {
++        intrinsic.clone()
++    };
++    let prototype = i.constructor_prototype(&new_target, "RegExp")?;
+     let source = if matches!(source, Value::Undefined) {
+         crate::JsString::default()
+     } else {
+@@ -462,14 +479,20 @@ fn initialize_regexp(i: &mut Interpreter, args: Vec<Value>, regex: bool) -> Resu
+     } else {
+         i.ecmascript_to_string(&flags)?.to_string()
+     };
+-    compile(source, &flags)
++    let result = compile(source, &flags)?;
++    if let Value::RegExp(data) = &result {
++        data.properties.set_proto(prototype);
++        data.legacy_enabled
++            .set(crate::interpreter::strict_equals(&new_target, &intrinsic));
++    }
++    Ok(result)
+ }
+ 
+ /// Properties and methods readable on a regular expression.
+ pub fn regexp_member(data: &Rc<RegExpData>, key: &str) -> Option<Value> {
+     let regex = data.regex.borrow();
+     Some(match key {
+-        "source" => Value::String(escaped_source(&regex.source)),
++        "source" => Value::String(escaped_source(&regex.source, regex.flags.contains('v'))),
+         "flags" => Value::String((regex.flags.clone()).into()),
+         "global" => Value::Bool(regex.global),
+         "ignoreCase" => Value::Bool(regex.ignore_case),
+@@ -773,7 +796,8 @@ fn regexp_compile(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Re
+             "TypeError: Flags must be undefined for a RegExp pattern".into(),
+         ));
+     }
+-    let Value::RegExp(ref replacement) = regexp_construct(interp, Value::Undefined, args)? else {
++    let regex = is_regexp(interp, args.first().unwrap_or(&Value::Undefined))?;
++    let Value::RegExp(ref replacement) = initialize_regexp(interp, args, regex, false)? else {
+         unreachable!()
+     };
+     let replacement = replacement.regex.borrow();
+@@ -787,24 +811,36 @@ fn regexp_species(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Val
+     Ok(this)
+ }
+ 
+-fn escaped_source(source: &crate::JsString) -> crate::JsString {
++fn escaped_source(source: &crate::JsString, unicode_sets: bool) -> crate::JsString {
+     if source.is_empty() {
+         return "(?:)".into();
+     }
+-    let mut result = crate::JsString::default();
++    let mut result = Vec::new();
+     let mut backslashes = 0;
++    let mut class_depth = 0usize;
+     for &unit in source.units() {
++        let escaped = backslashes % 2 != 0;
++        if matches!(unit, 10 | 13 | 0x2028 | 0x2029) && escaped {
++            result.pop();
++        }
+         match unit {
+-            47 if backslashes % 2 == 0 => result.push_str("\\/"),
+-            10 => result.push_str("\\n"),
+-            13 => result.push_str("\\r"),
+-            0x2028 => result.push_str("\\u2028"),
+-            0x2029 => result.push_str("\\u2029"),
+-            _ => result.push_str(crate::JsString::from_units(vec![unit])),
++            47 if !escaped && class_depth == 0 => result.extend([92, 47]),
++            10 => result.extend([92, 110]),
++            13 => result.extend([92, 114]),
++            0x2028 => result.extend([92, 117, 50, 48, 50, 56]),
++            0x2029 => result.extend([92, 117, 50, 48, 50, 57]),
++            _ => result.push(unit),
++        }
++        if !escaped {
++            if unit == 91 && (class_depth == 0 || unicode_sets) {
++                class_depth += 1;
++            } else if unit == 93 {
++                class_depth = class_depth.saturating_sub(1);
++            }
+         }
+         backslashes = if unit == 92 { backslashes + 1 } else { 0 };
+     }
+-    result
++    crate::JsString::from_units(result)
+ }
+ 
+ fn regexp_escape(_: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+diff --git a/crates/napi-vm-core/src/builtins/string.rs b/crates/napi-vm-core/src/builtins/string.rs
+index e4fc0a6..4110283 100644
+--- a/crates/napi-vm-core/src/builtins/string.rs
++++ b/crates/napi-vm-core/src/builtins/string.rs
+@@ -6,6 +6,10 @@ use crate::{
+     interpreter::{Environment, Interpreter},
+     value::{Value, to_integer_or_infinity},
+ };
++use icu_properties::{
++    CodePointSetData,
++    props::{ChangesWhenLowercased, ChangesWhenUppercased},
++};
+ fn bounded_string(value: impl Into<JsString>) -> Result<Value, VmErr> {
+     Value::checked_string(value)
+ }
+@@ -448,6 +452,75 @@ fn map_scalar_runs(text: &JsString, mut map: impl FnMut(&str) -> String) -> JsSt
+     output.extend(map(&run).encode_utf16());
+     JsString::from_units(output)
+ }
++/// Avoid building UTF-8 runs and output buffers for the common one-scalar
++/// case. ICU returns a borrowed string when casing leaves the scalar alone;
++/// in that case the original UTF-16 storage is already the correct result.
++fn map_single_scalar(
++    text: &JsString,
++    mapper: icu_casemap::CaseMapperBorrowed<'static>,
++    language: &icu_locale::LanguageIdentifier,
++    upper: bool,
++) -> Option<JsString> {
++    if text.is_empty() {
++        return Some(text.clone());
++    }
++    let scalar = match text.units() {
++        [unit] => match char::from_u32(u32::from(*unit)) {
++            Some(scalar) => scalar,
++            None => return Some(text.clone()),
++        },
++        [high, low] if (0xd800..=0xdbff).contains(high) && (0xdc00..=0xdfff).contains(low) => {
++            let code_point =
++                0x10000 + ((u32::from(*high) - 0xd800) << 10) + (u32::from(*low) - 0xdc00);
++            char::from_u32(code_point)?
++        }
++        _ => return None,
++    };
++    let changes_when_cased = if upper {
++        CodePointSetData::new::<ChangesWhenUppercased>()
++    } else {
++        CodePointSetData::new::<ChangesWhenLowercased>()
++    };
++    if !changes_when_cased.contains(scalar) {
++        return Some(text.clone());
++    }
++    if *language == icu_locale::LanguageIdentifier::UNKNOWN {
++        let one_to_one_mapping = if upper {
++            let mut mapping = scalar.to_uppercase();
++            match (mapping.next(), mapping.next()) {
++                (Some(mapped), None) => Some(mapped),
++                _ => None,
++            }
++        } else {
++            let mut mapping = scalar.to_lowercase();
++            match (mapping.next(), mapping.next()) {
++                (Some(mapped), None) => Some(mapped),
++                _ => None,
++            }
++        };
++        if let Some(mapped) = one_to_one_mapping
++            && mapped != scalar
++        {
++            let mut units = [0; 2];
++            return Some(JsString::from_units(
++                mapped.encode_utf16(&mut units).to_vec(),
++            ));
++        }
++    }
++    let mut source_buffer = [0; 4];
++    let source = scalar.encode_utf8(&mut source_buffer);
++    let mapped = if upper {
++        mapper.uppercase_to_string(source, language)
++    } else {
++        mapper.lowercase_to_string(source, language)
++    };
++    Some(match mapped {
++        std::borrow::Cow::Borrowed(_) => text.clone(),
++        std::borrow::Cow::Owned(mapped) => {
++            JsString::from_units(mapped.encode_utf16().collect::<Vec<_>>())
++        }
++    })
++}
+ fn case_map(
+     i: &mut Interpreter,
+     t: Value,
+@@ -468,14 +541,18 @@ fn case_map(
+         }
+     }
+     let mapper = icu_casemap::CaseMapper::new();
+-    bounded_string(map_scalar_runs(&text, |s| {
+-        if upper {
+-            mapper.uppercase_to_string(s, &language).into_owned()
+-        } else {
+-            mapper.lowercase_to_string(s, &language).into_owned()
+-        }
+-    }))
++    let mapped = map_single_scalar(&text, mapper, &language, upper).unwrap_or_else(|| {
++        map_scalar_runs(&text, |s| {
++            if upper {
++                mapper.uppercase_to_string(s, &language).into_owned()
++            } else {
++                mapper.lowercase_to_string(s, &language).into_owned()
++            }
++        })
++    });
++    bounded_string(mapped)
+ }
++
+ fn string_to_upper(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+     case_map(i, t, a, true, false)
+ }
+@@ -1231,3 +1308,39 @@ pub(super) fn decode_uri_component(
+ ) -> Result<Value, VmErr> {
+     decode_uri_impl(interp, &args, "")
+ }
++
++#[cfg(test)]
++mod case_map_tests {
++    use super::*;
++
++    #[test]
++    fn single_scalar_fast_path_matches_full_mapping() {
++        let mapper = icu_casemap::CaseMapper::new();
++        let root = icu_locale::LanguageIdentifier::UNKNOWN;
++        let turkish = "tr".parse::<icu_locale::LanguageIdentifier>().unwrap();
++        for source in ["", "a", "Z", "ß", "Σ", "İ", "ᾈ", "😀"] {
++            let text = JsString::from(source);
++            for language in [&root, &turkish] {
++                for upper in [false, true] {
++                    let fast = map_single_scalar(&text, mapper, language, upper).unwrap();
++                    let expected = map_scalar_runs(&text, |run| {
++                        if upper {
++                            mapper.uppercase_to_string(run, language).into_owned()
++                        } else {
++                            mapper.lowercase_to_string(run, language).into_owned()
++                        }
++                    });
++                    assert_eq!(fast, expected, "source={source:?}, upper={upper}");
++                }
++            }
++        }
++        let lone_surrogate = JsString::from_units(vec![0xD800]);
++        assert_eq!(
++            map_single_scalar(&lone_surrogate, mapper, &root, true).unwrap(),
++            map_scalar_runs(&lone_surrogate, |run| {
++                mapper.uppercase_to_string(run, &root).into_owned()
++            })
++        );
++        assert!(map_single_scalar(&JsString::from("ab"), mapper, &root, true).is_none());
++    }
++}
+diff --git a/crates/napi-vm-core/src/builtins/typedarray.rs b/crates/napi-vm-core/src/builtins/typedarray.rs
+index 6c04cb1..77419f8 100644
+--- a/crates/napi-vm-core/src/builtins/typedarray.rs
++++ b/crates/napi-vm-core/src/builtins/typedarray.rs
+@@ -24,6 +24,7 @@ const KINDS: &[(&str, TypedKind)] = &[
+     ("Uint16Array", TypedKind::Uint16),
+     ("Int32Array", TypedKind::Int32),
+     ("Uint32Array", TypedKind::Uint32),
++    ("Float16Array", TypedKind::Float16),
+     ("Float32Array", TypedKind::Float32),
+     ("Float64Array", TypedKind::Float64),
+     ("BigInt64Array", TypedKind::BigInt64),
+@@ -1495,7 +1496,7 @@ fn atomics_value(kind: TypedKind, bits: u64) -> Value {
+         TypedKind::BigUint64 => Value::BigInt(Rc::new(
+             crate::bigint::BigInt::parse(&bits.to_string()).expect("u64 decimal is a BigInt"),
+         )),
+-        TypedKind::Uint8Clamped | TypedKind::Float32 | TypedKind::Float64 => {
++        TypedKind::Uint8Clamped | TypedKind::Float16 | TypedKind::Float32 | TypedKind::Float64 => {
+             unreachable!("Atomics cannot access non-integer typed arrays")
+         }
+     }
+@@ -1912,6 +1913,9 @@ pub fn read_element(view: &Rc<TypedArrayData>, index: usize) -> Option<Value> {
+         TypedKind::Uint16 => Value::Number(u16::from_le_bytes([bytes[0], bytes[1]]) as f64),
+         TypedKind::Int32 => Value::Number(i32::from_le_bytes(bytes.try_into().ok()?) as f64),
+         TypedKind::Uint32 => Value::Number(u32::from_le_bytes(bytes.try_into().ok()?) as f64),
++        TypedKind::Float16 => {
++            Value::Number(float16_number(u16::from_le_bytes(bytes.try_into().ok()?)))
++        }
+         TypedKind::Float32 => Value::Number(f32::from_le_bytes(bytes.try_into().ok()?) as f64),
+         TypedKind::Float64 => Value::Number(f64::from_le_bytes(bytes.try_into().ok()?)),
+         TypedKind::BigInt64 => Value::BigInt(Rc::new(crate::bigint::BigInt::from_i64(
+@@ -1967,6 +1971,7 @@ pub fn write_element(view: &Rc<TypedArrayData>, index: usize, value: &Value) ->
+                 TypedKind::Uint16 => (to_int(number) as u16).to_le_bytes().to_vec(),
+                 TypedKind::Int32 => to_int(number).to_le_bytes().to_vec(),
+                 TypedKind::Uint32 => (to_int(number) as u32).to_le_bytes().to_vec(),
++                TypedKind::Float16 => float16_bits(number).to_le_bytes().to_vec(),
+                 TypedKind::Float32 => (number as f32).to_le_bytes().to_vec(),
+                 _ => number.to_le_bytes().to_vec(),
+             }
+diff --git a/crates/napi-vm-core/src/bytecode/compiler.rs b/crates/napi-vm-core/src/bytecode/compiler.rs
+index c73c86f..216144d 100644
+--- a/crates/napi-vm-core/src/bytecode/compiler.rs
++++ b/crates/napi-vm-core/src/bytecode/compiler.rs
+@@ -788,9 +788,13 @@ fn boxed_block_names(stmts: &[Statement]) -> HashSet<String> {
+     let mut heads = Vec::new();
+     block_loop_heads(stmts, &mut heads);
+     candidates.extend(heads);
++    // Direct eval can read names that are absent from every parsed closure
++    // body. Keep lexical bindings in this block's runtime environment so
++    // those dynamic lookups can follow the same scope chain as the AST tier.
++    let has_eval = crate::parser::stmts_need_arguments(stmts);
+     candidates
+         .into_iter()
+-        .filter(|name| statements_capture_identifier(stmts, name))
++        .filter(|name| has_eval || statements_capture_identifier(stmts, name))
+         .collect()
+ }
+ 
+@@ -1549,6 +1553,7 @@ impl<'a> Compiler<'a> {
+             } => self.compile_try(body, catch, finally),
+             Statement::Switch { disc, cases } => self.compile_switch(disc, cases),
+             Statement::ClassDecl {
++                decorators,
+                 source_text: _,
+                 name,
+                 superclass,
+@@ -1559,6 +1564,7 @@ impl<'a> Compiler<'a> {
+                     None,
+                     superclass.as_deref(),
+                     body,
++                    decorators,
+                     stmt.source_text(),
+                 )?;
+                 match self.resolve(name)? {
+@@ -1989,8 +1995,18 @@ impl<'a> Compiler<'a> {
+         expr_name: Option<String>,
+         superclass: Option<&'a Expr>,
+         body: &'a [ClassMember],
++        decorators: &'a [Expr],
+         source_text: Option<&crate::parser::SourceTextRef>,
+     ) -> Result<Reg, Decline> {
++        let mut decorator_registers = Vec::new();
++        for decorator in decorators {
++            let mut ends = Vec::new();
++            let (value, receiver) = self.compile_call_reference(decorator, &mut ends)?;
++            for end in ends {
++                self.patch_jump(end, self.here())?;
++            }
++            decorator_registers.push((value, receiver));
++        }
+         // Heritage, computed names and method closures share one class scope.
+         let mut boxed = HashSet::new();
+         if !name.is_empty() {
+@@ -2033,7 +2049,7 @@ impl<'a> Compiler<'a> {
+         let mut private_fields = Vec::new();
+         let mut ctor: Option<OwnedCtor<'a>> = None;
+ 
+-        for member in body {
++        for (member_index, member) in body.iter().enumerate() {
+             match member {
+                 ClassMember::Method {
+                     source_text: _,
+@@ -2084,6 +2100,7 @@ impl<'a> Compiler<'a> {
+                         },
+                     ));
+                     members.push(ClassMemberTemplate {
++                        auto_accessor_storage: None,
+                         kind: ClassMemberKind::Method,
+                         is_static: *st,
+                         name: template,
+@@ -2093,9 +2110,68 @@ impl<'a> Compiler<'a> {
+                 ClassMember::Field {
+                     name: field_name,
+                     is_static: st,
++                    auto_accessor,
+                     init,
+                 } => {
+                     let template = self.compile_member_name(field_name)?;
++                    if *auto_accessor {
++                        self.check_static_method_key(&template, *st)?;
++                        let storage = crate::parser::auto_accessor_storage(member_index);
++                        for setter in [false, true] {
++                            let display = match &template {
++                                ClassNameTemplate::Static(key)
++                                | ClassNameTemplate::Private(key) => {
++                                    Some(format!("{} {key}", if setter { "set" } else { "get" }))
++                                }
++                                ClassNameTemplate::Computed(_) => None,
++                            };
++                            deferred.push((
++                                PatchTarget::ClassMember {
++                                    tmpl: u16::MAX,
++                                    index: members.len(),
++                                },
++                                FuncDef {
++                                    source_text: None,
++                                    named_expression: false,
++                                    name: display,
++                                    params: SharedSlice::Owned(Rc::from(if setter {
++                                        vec!["value".into()]
++                                    } else {
++                                        vec![]
++                                    })),
++                                    body: FuncBody::Stmts(SharedSlice::Owned(Rc::from(
++                                        crate::parser::auto_accessor_body(&storage, setter),
++                                    ))),
++                                    is_arrow: false,
++                                    is_async: false,
++                                    is_generator: false,
++                                    is_constructor: false,
++                                },
++                            ));
++                            members.push(ClassMemberTemplate {
++                                auto_accessor_storage: (!setter).then(|| storage.clone()),
++                                kind: if setter {
++                                    ClassMemberKind::Setter
++                                } else {
++                                    ClassMemberKind::Getter
++                                },
++                                is_static: *st,
++                                name: template.clone(),
++                                func: Some(u16::MAX),
++                            });
++                        }
++                        if *st {
++                            blocks.push(super::constants::ClassStaticTemplate::Field {
++                                name: ClassNameTemplate::Private(storage),
++                                init: init.clone().unwrap_or(Expr::Undefined),
++                            });
++                        } else {
++                            private_fields.push(storage.clone());
++                            instance_fields.push((FieldKey::Private(storage), init.as_ref()));
++                        }
++                        continue;
++                    }
++
+                     if *st {
+                         blocks.push(super::constants::ClassStaticTemplate::Field {
+                             name: template,
+@@ -2149,6 +2225,7 @@ impl<'a> Compiler<'a> {
+                         },
+                     ));
+                     members.push(ClassMemberTemplate {
++                        auto_accessor_storage: None,
+                         kind: ClassMemberKind::Getter,
+                         is_static: *st,
+                         name: template,
+@@ -2188,6 +2265,7 @@ impl<'a> Compiler<'a> {
+                         },
+                     ));
+                     members.push(ClassMemberTemplate {
++                        auto_accessor_storage: None,
+                         kind: ClassMemberKind::Setter,
+                         is_static: *st,
+                         name: template,
+@@ -2261,6 +2339,7 @@ impl<'a> Compiler<'a> {
+         ));
+ 
+         let tmpl = self.push_const(Constant::ClassTemplate(ClassTemplate {
++            decorators: decorator_registers,
+             source_text: source_text.cloned(),
+             private_fields,
+             private_declarations,
+@@ -3688,6 +3767,7 @@ impl<'a> Compiler<'a> {
+             Expr::This => self.compile_this(),
+             Expr::Object { props, .. } => self.compile_object(props),
+             Expr::ClassExpr {
++                decorators,
+                 source_text: _,
+                 name,
+                 superclass,
+@@ -3697,6 +3777,7 @@ impl<'a> Compiler<'a> {
+                 name.clone(),
+                 superclass.as_deref(),
+                 body,
++                decorators,
+                 expr.source_text(),
+             ),
+             Expr::TaggedTemplate {
+@@ -5063,13 +5144,20 @@ impl<'a> Compiler<'a> {
+                 is_constructor: false,
+             }),
+             Expr::ClassExpr {
++                decorators,
+                 source_text: _,
+                 name: None,
+                 superclass,
+                 body,
+             } => {
+-                let dst =
+-                    self.compile_class("", None, superclass.as_deref(), body, value.source_text())?;
++                let dst = self.compile_class(
++                    "",
++                    None,
++                    superclass.as_deref(),
++                    body,
++                    decorators,
++                    value.source_text(),
++                )?;
+                 let template = self
+                     .code
+                     .iter()
+@@ -5310,9 +5398,13 @@ fn find_captured(params: &[String], body: &FuncBody) -> HashSet<String> {
+             let mut heads = Vec::new();
+             block_loop_heads(stmts, &mut heads);
+             names.extend(heads.iter().map(String::as_str));
++            // A nested direct eval can resolve names that do not appear in
++            // its parsed AST. Keep this function's bindings in the frame
++            // environment so the eval's closure chain can see them.
++            let has_eval = crate::parser::stmts_need_arguments(stmts);
+             names
+                 .into_iter()
+-                .filter(|name| statements_capture_identifier(stmts, name))
++                .filter(|name| has_eval || statements_capture_identifier(stmts, name))
+                 .map(str::to_string)
+                 .collect()
+         }
+diff --git a/crates/napi-vm-core/src/bytecode/constants.rs b/crates/napi-vm-core/src/bytecode/constants.rs
+index c9e9b47..8824263 100644
+--- a/crates/napi-vm-core/src/bytecode/constants.rs
++++ b/crates/napi-vm-core/src/bytecode/constants.rs
+@@ -83,6 +83,8 @@ pub enum ClassNameTemplate {
+ /// under `__class key {i}__`, in order) appear here.
+ #[derive(Debug, Clone)]
+ pub struct ClassMemberTemplate {
++    /// Backing storage whose initializer uses this member's public/private name.
++    pub auto_accessor_storage: Option<String>,
+     pub kind: ClassMemberKind,
+     pub is_static: bool,
+     pub name: ClassNameTemplate,
+@@ -110,6 +112,7 @@ pub enum ClassStaticTemplate {
+ /// placeholders the deferred pass overwrites once each method compiles.
+ #[derive(Debug, Clone)]
+ pub struct ClassTemplate {
++    pub decorators: Vec<(Reg, Option<Reg>)>,
+     pub source_text: Option<crate::parser::SourceTextRef>,
+     pub private_fields: Vec<String>,
+     /// Lexically declared names for direct eval's static semantics.
+diff --git a/crates/napi-vm-core/src/bytecode/parity_tests.rs b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+index beb81a8..30580e3 100644
+--- a/crates/napi-vm-core/src/bytecode/parity_tests.rs
++++ b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+@@ -1297,6 +1297,27 @@ fn catch_identifier_bindings_remain_lexical_and_mutable_in_both_tiers() {
+     check("try{throw 1;}catch(e){eval('function e(){}');e;}", false);
+ }
+ 
++#[test]
++fn direct_eval_closures_preserve_dynamic_class_bindings() {
++    check(
++        "{ let C = class { static field = () => eval('C'); }; C.field() === C ? 1 : 0; }",
++        true,
++    );
++    check(
++        "{ class C { static field = () => eval('C'); } const D = C; C = null; D.field() === D ? 1 : 0; }",
++        true,
++    );
++}
++
++#[test]
++fn set_difference_uses_the_initial_receiver_snapshot() {
++    let source = "let set; let seen = []; let other = { size: 100, has(value) { seen.push(value); if (seen.length === 1) { set.clear(); set.add(11); set.add(22); } return true; }, keys() { throw new Error('unexpected keys'); } }; set = new Set([1, 2, 3, 4]); let result = set.difference(other); if (seen.join(',') !== '1,2,3,4' || [...result].length !== 0 || [...set].join(',') !== '11,22') throw new Error('Set difference did not use the initial receiver snapshot'); 'pass';";
++    check(source, true);
++    let program = Interpreter::compile(source).expect("compile");
++    let mut vm = Interpreter::with_builtins();
++    assert!(matches!(vm.execute(&program), Ok(Value::String(ref value)) if value == "pass"));
++}
++
+ #[test]
+ fn iteration_assignment_forms_retain_fallback_and_declaration_tier_parity() {
+     for source in [
+@@ -1559,6 +1580,209 @@ fn super_reads_follow_home_object_prototypes_in_both_tiers() {
+     }
+ }
+ 
++#[test]
++fn plain_binding_reads_retain_environment_record_observability() {
++    for (source, bytecode) in [
++        (
++            "var calls=0;Object.defineProperty(globalThis,'guarded',{get(){calls++;return 42;},configurable:true});guarded===42&&calls===1;",
++            true,
++        ),
++        (
++            "var proto=Object.create(Object.getPrototypeOf(globalThis));Object.defineProperty(proto,'inheritedGuarded',{get(){return 42;}});Object.setPrototypeOf(globalThis,proto);inheritedGuarded===42;",
++            true,
++        ),
++        (
++            "var guarded=42;var object={guarded:1};object[Symbol.unscopables]={guarded:true};var result;with(object){result=guarded;}result===42;",
++            false,
++        ),
++        (
++            "var guarded=42;var object={guarded:1};Object.defineProperty(object,Symbol.unscopables,{get(){delete object.guarded;return {};}});var result;with(object){result=guarded;}result===undefined&&guarded===42;",
++            false,
++        ),
++        (
++            "var guarded=42;var threw=false;try{{guarded;let guarded=1;}}catch(e){threw=e instanceof ReferenceError;}threw&&guarded===42;",
++            true,
++        ),
++        (
++            "var receiver={method:function(){'use strict';return this===receiver;}};var result;with(receiver){result=method();}result===true;",
++            false,
++        ),
++    ] {
++        check(source, bytecode);
++        assert!(matches!(
++            run_ast_with_modules(source, &[]),
++            Ok(Value::Bool(true))
++        ));
++    }
++}
++
++#[test]
++fn ordinary_array_numeric_reads_preserve_full_property_semantics() {
++    for source in [
++        "var a=[42];a[-0]===42&&a[0]===42;",
++        "var a=[1];var calls=0;Object.defineProperty(a,'0',{get(){calls++;return this.tag;}});a.tag=42;a[0]===42&&calls===1;",
++        "var proto=Object.create(Array.prototype);Object.defineProperty(proto,'0',{get(){return this.tag;}});var a=[];a.length=1;a.tag=42;Object.setPrototypeOf(a,proto);a[0]===42;",
++        "var calls=0;var a=new Proxy([42],{get(t,k,r){calls++;return Reflect.get(t,k,r);}});a[0]===42&&calls===1;",
++        "var a=[1];var key={toString(){a[0]=42;return '0';}};a[key]===42;",
++        "var a=[];a.NaN=42;a[NaN]===42&&a[0]===undefined;",
++    ] {
++        check(source, true);
++        assert!(matches!(
++            run_ast_with_modules(source, &[]),
++            Ok(Value::Bool(true))
++        ));
++    }
++}
++
++#[test]
++fn completed_function_activations_release_argument_cycles() {
++    let mut vm = Interpreter::with_builtins();
++    let payload = vm
++        .eval_source("var payload={child:42};payload.self=payload;payload;")
++        .unwrap();
++    let Value::Object { ref props } = payload else {
++        panic!("object")
++    };
++    let weak = std::rc::Rc::downgrade(props);
++    drop(payload);
++    let result = vm.eval_source("function f(v){v=null;throw f.arguments[0].child===42;}var answer;try{f(payload);}catch(e){answer=e;}payload=null;answer;").unwrap();
++    assert!(matches!(result, Value::Bool(true)));
++    let stats = vm.collect_cycles();
++    assert!(stats.skipped.is_none(), "{stats:?}");
++    assert!(weak.upgrade().is_none());
++}
++
++#[test]
++fn legacy_function_activation_properties_follow_calls_and_unwind() {
++    for source in [
++        "function child(){return child.caller;}function parent(){return eval('child()');}parent()===parent&&child.caller===null;",
++        "function child(){return child.caller;}function parent(){'use strict';return child();}parent()===null;",
++        "function child(){return child.caller;}var parent=()=>child();parent()===parent;",
++        "function child(){return child.caller;}function parent(){return [0].map(child)[0];}parent()===null;",
++        "function child(){return child.caller;}function parent(){return child.call(null)===parent&&child.apply(null,[])===parent&&Reflect.apply(child,null,[])===parent&&child.bind(null)()===parent;}parent();",
++        "var seen;function child(){return child.caller;}function* parent(value=(seen=child())){}parent();seen===parent;",
++        "function child(){return child.caller;}function* parent(){yield child();}parent().next().value===null;",
++        "function child(){return child.caller;}function parent(){return Reflect.construct(child,[])===parent;}parent();",
++        "function f(a){var first=f.arguments;a=9;return first!==f.arguments&&f.arguments[0]===1&&f.arguments[1]===2&&f.arguments.length===2&&f.arguments.callee===f;}f(1,2)&&f.arguments===null;",
++        "function child(){return Object.getOwnPropertyDescriptor(child,'caller').get.call(child);}function parent(){return child();}var before=Object.getOwnPropertyDescriptor(child,'caller');parent()===parent&&before.get===Object.getOwnPropertyDescriptor(child,'caller').get;",
++        "function f(n){if(n)return f(n-1);return f.caller===f;}f(2)&&f.caller===null;",
++        "function f(){throw 1;}try{f();}catch(e){}f.arguments===null&&f.caller===null;",
++        "var getter=Object.getOwnPropertyDescriptor({get x(){return 42;}},'x').get;function f(){}Object.defineProperty(f,'caller',{configurable:false});f.x=getter;var same=f.x===getter&&Object.getOwnPropertyDescriptor(f,'x').value===getter;f.x=7;same&&f.x===7;",
++    ] {
++        check(source, true);
++        assert!(matches!(
++            run_ast_with_modules(source, &[]),
++            Ok(Value::Bool(true))
++        ));
++    }
++}
++
++#[test]
++fn direct_eval_new_local_bindings_are_deletable_without_redeclaring_bare_vars() {
++    for source in [
++        "var read;function outer(){eval('var temporary=1;delete temporary;var temporary;read=function(){return temporary;};');}outer();var threw=false;try{read();}catch(e){threw=e instanceof ReferenceError;}threw;",
++        "var read;function outer(){eval('delete temporary;read=function(){return temporary;};function temporary(){}');}outer();var threw=false;try{read();}catch(e){threw=e instanceof ReferenceError;}threw;",
++        "function outer(){var existing=1;return eval('var existing;delete existing')===false&&existing===1;}outer();",
++    ] {
++        check(source, true);
++        assert!(matches!(
++            run_ast_with_modules(source, &[]),
++            Ok(Value::Bool(true))
++        ));
++    }
++}
++
++#[test]
++fn float16_arrays_share_binary_storage_and_round_without_double_rounding() {
++    let source = "var a=new Float16Array([1.00048828125,1.0004882812500002,65520,-0,Math.pow(2,-24)]);var bits=new Uint16Array(a.buffer);var rounded=a[0]===1&&a[1]===1.0009765625&&a[2]===Infinity&&Object.is(a[3],-0)&&a[4]===Math.pow(2,-24);bits[0]=0xc000;var rejected=false;try{Atomics.add(a,0,1);}catch(e){rejected=e instanceof TypeError;}rounded&&a[0]===-2&&bits[3]===0x8000&&a.BYTES_PER_ELEMENT===2&&Float16Array.from([2]).map(x=>x/2)[0]===1&&rejected;";
++    check(source, true);
++    assert!(matches!(
++        run_ast_with_modules(source, &[]),
++        Ok(Value::Bool(true))
++    ));
++}
++
++#[test]
++fn regexp_allocation_precedes_string_coercion_and_source_round_trips() {
++    for source in [
++        "var log='';var pattern={get source(){log+='S';return {toString(){log+='s';return 'a';}};},get flags(){log+='F';return {toString(){log+='f';return 'g';}};}};Object.defineProperty(pattern,Symbol.match,{get:function(){log+='m';return true;}});var target=Object.defineProperty(function(){}.bind(null),'prototype',{get(){log+='p';return RegExp.prototype;}});var r=Reflect.construct(RegExp,[pattern],target);log==='mSFpsf'&&r.source==='a'&&r.global;",
++        "var pattern=/a/;var calls=0;var target=Object.defineProperty(function(){}.bind(null),'prototype',{get(){calls++;pattern.compile('b');return RegExp.prototype;}});var r=Reflect.construct(RegExp,[pattern],target);r.source==='a'&&pattern.source==='b'&&calls===1;",
++        r#"var r=new RegExp(String.fromCharCode(92,10));r.source==='\\n'&&new RegExp(r.source).test('\n')&&new RegExp('[/]').source==='[/]'&&new RegExp('[[]/').source==='[[]\\/';"#,
++    ] {
++        check(source, true);
++        assert!(matches!(
++            run_ast_with_modules(source, &[]),
++            Ok(Value::Bool(true))
++        ));
++    }
++}
++
++#[test]
++fn typed_array_prevent_extensions_reports_rejection_to_the_caller() {
++    let source = "var buffer=new ArrayBuffer(4,{maxByteLength:8});var view=new Uint8Array(buffer);var reflected=Reflect.preventExtensions(view);var threw=false;try{Object.preventExtensions(view);}catch(e){threw=e instanceof TypeError;}reflected===false&&threw&&Object.isExtensible(view);";
++    check(source, true);
++    assert!(matches!(
++        run_ast_with_modules(source, &[]),
++        Ok(Value::Bool(true))
++    ));
++}
++
++#[test]
++fn class_heritage_and_computed_names_use_strict_property_writes() {
++    for source in [
++        "var caught=false;try{class C{[Object.preventExtensions({}).x=1](){}}}catch(e){caught=e instanceof TypeError;}caught;",
++        "var caught=false;try{var C=class extends (Object.preventExtensions({}).x=1,Object){};}catch(e){caught=e instanceof TypeError;}caught;",
++        "var caught=false;try{class C{[Object.freeze({x:1}).x++](){}}}catch(e){caught=e instanceof TypeError;}caught;",
++        "var target=Object.preventExtensions({});var key={toString(){return 'x';}};var caught=false;try{class C{[target[key]=1](){}}}catch(e){caught=e instanceof TypeError;}caught;",
++    ] {
++        check(source, true);
++        assert!(matches!(
++            run_ast_with_modules(source, &[]),
++            Ok(Value::Bool(true))
++        ));
++    }
++}
++
++#[test]
++fn static_super_proxy_reads_preserve_the_original_receiver() {
++    let source = "var seen=[];var key=Symbol();var base=new Proxy(function(){},{get(target,p,receiver){if(p==='x'||p===key){seen.push(receiver);return 42;}return Reflect.get(target,p,receiver);}});class A extends base{}class B extends A{static read(){return super.x+super[key];}}B.read()===84&&seen.length===2&&seen[0]===B&&seen[1]===B;";
++    check(source, true);
++    assert!(matches!(
++        run_ast_with_modules(source, &[]),
++        Ok(Value::Bool(true))
++    ));
++}
++
++#[test]
++fn super_references_capture_the_base_before_key_conversion() {
++    for operation in [
++        "super[key]",
++        "super[key]()",
++        "super[key]+=1",
++        "++super[key]",
++    ] {
++        let callable = operation == "super[key]()";
++        let old = if callable {
++            "function(){return 1;}"
++        } else {
++            "1"
++        };
++        let expected = if operation.contains("+=") || operation.contains("++") {
++            2
++        } else {
++            1
++        };
++        let source = format!(
++            "var key={{toString(){{Object.setPrototypeOf(object,{{p:-1}});return 'p';}}}};var object={{__proto__:{{p:{old}}},method(){{return {operation};}}}};object.method()==={expected};"
++        );
++        check(&source, true);
++        assert!(matches!(
++            run_ast_with_modules(&source, &[]),
++            Ok(Value::Bool(true))
++        ));
++    }
++}
++
+ #[test]
+ fn super_references_writes_calls_and_object_home_objects_share_semantics() {
+     for source in [
+@@ -1744,3 +1968,106 @@ fn typed_array_static_inheritance_uses_the_same_native_helpers_in_both_tiers() {
+         );
+     }
+ }
++
++#[test]
++fn auto_accessors_share_storage_and_brand_semantics_in_both_tiers() {
++    for source in [
++        "class C{accessor x=1;}var a=new C(),b=new C();a.x=2;var d=Object.getOwnPropertyDescriptor(C.prototype,'x');a.x===2&&b.x===1&&!Object.hasOwn(a,'x')&&!d.enumerable&&d.configurable&&d.get.length===0&&d.set.length===1;",
++        "var count=0;var key={toString(){count++;return 'x';}};class C{accessor [key]=3;}var a=new C();var b=new C();count===1&&a.x===3&&b.x===3;",
++        "class C{accessor x=1;accessor x=2;}class D extends C{accessor x=3;}var c=new C(),d=new D();c.x===2&&d.x===3&&Object.getOwnPropertyDescriptor(C.prototype,'x').get.call(d)===2;",
++        "class C{static accessor x=1;}class D extends C{}var errors=0;try{D.x;}catch(e){if(e instanceof TypeError)errors++;}try{D.x=2;}catch(e){if(e instanceof TypeError)errors++;}errors===2&&C.x===1;",
++        "class C{accessor #x=3;get(){return this.#x;}set(v){this.#x=v;}}var c=new C();c.set(4);var errors=0;try{C.prototype.get.call({});}catch(e){if(e instanceof TypeError)errors++;}c.get()===4&&errors===1;",
++        "class C{static accessor #x=3;static get(){return this.#x;}static set(v){this.#x=v;}}C.set(4);C.get()===4;",
++        "class C{accessor x=function(){};static accessor y=class{};}new C().x.name==='x'&&C.y.name==='y';",
++        "var symbol=Symbol('s');class C{accessor [symbol]=()=>0;}new C()[symbol].name==='[s]';",
++        "class C{accessor x=1;get x(){return 2;}}new C().x===2;",
++        r##"class C{accessor x;["#\0auto-accessor:0"]=function(){};}new C()["#\0auto-accessor:0"].name==="#\0auto-accessor:0";"##,
++        r##"class C{static accessor x;static ["#\0auto-accessor:0"]=function(){};}C["#\0auto-accessor:0"].name==="#\0auto-accessor:0";"##,
++        "var order='';class C{accessor x=(order+='a',1);y=(order+='b',this.x);accessor z=(order+='c',this.y);constructor(){order+='d';}}var c=new C();order==='abcd'&&c.z===1;",
++        "class C{accessor x=this.y;accessor y=1;}var ok=false;try{new C();}catch(e){ok=e instanceof TypeError;}ok;",
++        "class C{static accessor x=this.f();static f(){return 3;}}C.x===3;",
++        "class C{accessor #x=function(){};get(){return this.#x.name;}}new C().get()==='#x';",
++        "var s=Symbol('s');class C{static accessor [s]=function(){};}C[s].name==='[s]';",
++        "class C{accessor x=1;}var get=Object.getOwnPropertyDescriptor(C.prototype,'x').get;var errors=0;try{get.call(new Proxy(new C(),{}));}catch(e){if(e instanceof TypeError)errors++;}try{new get();}catch(e){if(e instanceof TypeError)errors++;}errors===2;",
++        "class C{accessor() {return 1;}accessor=2;}new C().accessor===2;",
++        "class C{accessor\nx=3;}var c=new C();Object.hasOwn(c,'accessor')&&c.x===3;",
++    ] {
++        check(source, true);
++        assert!(
++            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
++            "{source}"
++        );
++    }
++}
++
++#[test]
++fn auto_accessor_modifiers_retain_class_early_errors() {
++    for source in [
++        "class C{accessor #x;accessor #x;}",
++        "class C{accessor #x;get #x(){}}",
++        "class C{accessor #x;static #x;}",
++        "class C{accessor constructor;}",
++        "class C{static accessor prototype;}",
++        "class C{accessor x(){}}",
++        "class C{accessor *x(){}}",
++        "class C{accessor get x(){}}",
++    ] {
++        assert!(parse_cached(source).is_err(), "{source}");
++    }
++}
++
++#[test]
++fn class_decorators_preserve_evaluation_replacement_and_initializer_order() {
++    for source in [
++        "var log='';function dec(n){log+='e'+n;return function(C,c){log+='d'+n;c.addInitializer(function(){log+='i'+n;this.ready=true;});};}@dec('a') @dec('b') class C extends (log+='h',Object){static x=(log+='s',1);[log+='k'](){}}log==='eaebhkdbdasibia'&&C.ready&&C.x===1;",
++        "var original;function dec(C,c){original=C;return class Replacement extends C{};}@dec class C{static x=3;static self(){return C;}}C!==original&&C.x===3&&!Object.hasOwn(original,'x')&&original.self()===C;",
++        "var seen;var receiver={dec(C,c){seen=this;}};@receiver.dec class C{}seen===receiver;",
++        "function d(){}var get=d,let=d,async=d;@get @let @async class C{}true;",
++        "var C=function(value){return class extends value{m(){return 4;}};};var D=@C class C{};new D().m()===4;",
++        "var seen;class Base{static dec(){seen=this;}}class Outer extends Base{static make(){return @(super.dec) class{};}}Outer.make();seen===Outer;",
++        "var seen;var receiver={dec(C,c){seen=this;}};@(receiver.dec) class C{}seen===receiver;",
++        "function dec(C,c){if(c.kind!=='class'||c.name!=='C'||'static' in c||'private' in c||'access' in c)throw 42;if(c.addInitializer.name!=='addInitializer'||c.addInitializer.length!==1)throw 43;}@dec class C{}true;",
++        "var saved;function dec(C,c){saved=c.addInitializer;c.addInitializer.call({},function(){this.x=2;});}@dec class C{}var ok=false;try{saved(function(){});}catch(e){ok=e instanceof TypeError;}ok&&C.x===2;",
++        "var saved;function dec(C,c){saved=c.addInitializer;throw 42;}var caught;try{var C=@dec class{};}catch(e){caught=e;}var ok=false;try{saved(function(){});}catch(e){ok=e instanceof TypeError;}ok&&caught===42;",
++        "function dec(C,c){c.addInitializer(1);}var ok=false;try{var C=@dec class{};}catch(e){ok=e instanceof TypeError;}ok;",
++        "function dec(){return null;}var ok=false;try{var C=@dec class{};}catch(e){ok=e instanceof TypeError;}ok;",
++        "var replacement=()=>42;function dec(){return replacement;}var C=@dec class{};C===replacement&&C()===42;",
++        "var seen;function dec(C,c){seen=c.name;}var C=@dec class{};seen==='C';",
++        "class Base{static get x(){return this.tag;}}class Other{}function dec(){return class extends Other{static tag=9;};}@dec class C extends Base{static x=super.x;}C.x===9;",
++        "function outer(){var dec=function(C){return class extends C{m(){return 3;}};};return @dec class{};}new (outer())().m()===3;",
++        "class Outer{static #dec(C){return class extends C{m(){return 3;}};}static make(){return @Outer.#dec class{};}}new (Outer.make())().m()===3;",
++        "var ok=false;function dec(C){try{C.self();}catch(e){ok=e instanceof ReferenceError;}}@dec class C{static self(){return C;}}ok;",
++    ] {
++        check(source, true);
++        assert!(
++            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
++            "{source}"
++        );
++    }
++}
++
++#[test]
++fn class_decorator_grammar_rejects_uncovered_expressions_and_exports() {
++    for source in [
++        "@obj['dec'] class C{}",
++        "@d()() class C{}",
++        "@d().x class C{}",
++        "@1 class C{}",
++        "@d function f(){}",
++        "@d;class C{}",
++        "@d export @d class C{}",
++        "if(true) @d class C{}",
++    ] {
++        assert!(parse_cached(source).is_err(), "{source}");
++    }
++    check_with_modules(
++        "function dec(C){return class extends C{m(){return 2;}};}@dec export default class C{}",
++        true,
++        &[],
++    );
++    check_with_modules(
++        "function dec(C){return class extends C{m(){return 2;}};}export default @dec class C{}",
++        true,
++        &[],
++    );
++}
+diff --git a/crates/napi-vm-core/src/bytecode/verify.rs b/crates/napi-vm-core/src/bytecode/verify.rs
+index bc1386b..dca480d 100644
+--- a/crates/napi-vm-core/src/bytecode/verify.rs
++++ b/crates/napi-vm-core/src/bytecode/verify.rs
+@@ -915,6 +915,12 @@ impl Checker<'_> {
+         let Constant::ClassTemplate(template) = &self.function.constants[tmpl as usize] else {
+             return Ok(());
+         };
++        for (value, receiver) in &template.decorators {
++            self.check_reg(address, *value)?;
++            if let Some(receiver) = receiver {
++                self.check_reg(address, *receiver)?;
++            }
++        }
+         if let Some(reg) = template.superclass {
+             self.check_reg(address, reg)?;
+         }
+diff --git a/crates/napi-vm-core/src/bytecode/vm.rs b/crates/napi-vm-core/src/bytecode/vm.rs
+index aadd372..f2aa28e 100644
+--- a/crates/napi-vm-core/src/bytecode/vm.rs
++++ b/crates/napi-vm-core/src/bytecode/vm.rs
+@@ -57,6 +57,19 @@ pub struct CallFrame<'a> {
+     scopes: Vec<Env>,
+ }
+ 
++/// Reusable storage detached from a completed call frame. Exception-heavy
++/// functions commonly push one handler per invocation, so retaining these
++/// vectors avoids a fresh allocation on every call.
++#[derive(Default)]
++pub(crate) struct ActivationBuffers {
++    registers: Vec<Value>,
++    slots: Vec<RunSlot>,
++    handlers: Vec<HandlerEntry>,
++    pending: Vec<VmErr>,
++    enumerators: Vec<(Reg, crate::interpreter::for_in::ForInEnumerator)>,
++    scopes: Vec<Env>,
++}
++
+ /// One pushed exception handler: `target` resumes after an interception,
+ /// `dst` receives the catch value (catch handlers), `catch_returns`
+ /// selects finally handlers, which also intercept `return` unwinding.
+@@ -79,7 +92,14 @@ impl<'a> CallFrame<'a> {
+         this_value: Value,
+         args: &[Value],
+     ) -> Self {
+-        let (mut registers, mut slots) = interp.activation_pool.pop().unwrap_or_default();
++        let ActivationBuffers {
++            mut registers,
++            mut slots,
++            handlers,
++            pending,
++            enumerators,
++            scopes,
++        } = interp.activation_pool.pop().unwrap_or_default();
+         registers.resize(function.register_count as usize, Value::Undefined);
+         slots.reserve(function.local_count as usize);
+         for (index, info) in function.slots.iter().enumerate() {
+@@ -122,10 +142,10 @@ impl<'a> CallFrame<'a> {
+             registers,
+             slots,
+             this_value,
+-            handlers: Vec::new(),
+-            pending: Vec::new(),
+-            enumerators: Vec::new(),
+-            scopes: Vec::new(),
++            handlers,
++            pending,
++            enumerators,
++            scopes,
+         }
+     }
+ }
+@@ -133,11 +153,26 @@ impl<'a> CallFrame<'a> {
+ fn recycle_activation(interp: &mut Interpreter, mut frame: CallFrame<'_>) {
+     frame.registers.clear();
+     frame.slots.clear();
++    frame.handlers.clear();
++    frame.pending.clear();
++    frame.enumerators.clear();
++    frame.scopes.clear();
+     if interp.activation_pool.len() < 16
+         && frame.registers.capacity() <= 4096
+         && frame.slots.capacity() <= 4096
++        && frame.handlers.capacity() <= 4096
++        && frame.pending.capacity() <= 4096
++        && frame.enumerators.capacity() <= 4096
++        && frame.scopes.capacity() <= 4096
+     {
+-        interp.activation_pool.push((frame.registers, frame.slots));
++        interp.activation_pool.push(ActivationBuffers {
++            registers: frame.registers,
++            slots: frame.slots,
++            handlers: frame.handlers,
++            pending: frame.pending,
++            enumerators: frame.enumerators,
++            scopes: frame.scopes,
++        });
+     }
+ }
+ 
+@@ -216,7 +251,7 @@ pub(crate) fn run_function(
+ ) -> Result<Value, VmErr> {
+     interp.check_execution()?;
+     tier_check(interp, code, args);
+-    let fe = Rc::new(RefCell::new(Environment::function_child(parent_env)));
++    let fe = interp.acquire_function_environment(parent_env);
+     fe.borrow_mut().replace_strict(Some(strict));
+     if !code.is_arrow {
+         fe.borrow_mut().set("this", this_value.clone());
+@@ -236,9 +271,10 @@ pub(crate) fn run_function(
+     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+         run_loop(interp, &mut frame, false)
+     }));
+-    interp.global = saved;
++    let fe = std::mem::replace(&mut interp.global, saved);
+     interp.cur_mod = saved_module;
+     recycle_activation(interp, frame);
++    interp.recycle_function_environment(fe);
+     result.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+ }
+ 
+@@ -290,9 +326,10 @@ fn seed_captured(
+     Ok(())
+ }
+ 
+-/// Property storage of the cell-backed receivers an inline cache serves:
+-/// ordinary objects, classes, and functions. Arrays, strings, proxies,
+-/// and primitives always take the slow path.
++/// Property storage of receivers an inline cache can guard directly:
++/// ordinary objects, classes, and functions. Primitive string prototype
++/// reads are handled separately because their guard is the current realm's
++/// String.prototype cell.
+ fn cached_cell(obj: &Value) -> Option<&Rc<crate::value::ObjectCell>> {
+     match obj {
+         Value::Object { props } => Some(props),
+@@ -333,11 +370,30 @@ fn get_prop_cached(
+     obj: &Value,
+     key: &Value,
+ ) -> Result<Value, VmErr> {
+-    let (Some(props), Value::String(name)) = (cached_cell(obj), key) else {
++    let Value::String(name) = key else {
++        return interp.get_prop_value(obj, key);
++    };
++    let encoded_name = name.to_key_cow();
++    let name = encoded_name.as_ref();
++    if let Value::String(string) = obj {
++        // String length and in-range indices are virtual own properties, so
++        // they must keep using the full exotic-property path. Other named
++        // reads can guard an own data slot on the current String.prototype.
++        if name == "length"
++            || crate::value::array_index(name).is_some_and(|index| index < string.len())
++        {
++            return interp.get_prop_value(obj, key);
++        }
++    }
++    let primitive_prototype = if matches!(obj, Value::String(_)) {
++        interp.primitive_reference_prototype(obj)
++    } else {
++        None
++    };
++    let props = cached_cell(obj).or_else(|| primitive_prototype.as_ref().and_then(cached_cell));
++    let Some(props) = props else {
+         return interp.get_prop_value(obj, key);
+     };
+-    let encoded_name = name.to_key();
+-    let name = encoded_name.as_str();
+     let cache = &function.caches[site];
+     if let Some(index) = cache.probe(props.shape_id())
+         && let Some(value) = props.slot_verified(index, name)
+@@ -377,9 +433,10 @@ fn set_prop_cached(
+     obj: &Value,
+     key: &Value,
+     val: Value,
++    strict: bool,
+ ) -> Result<(), VmErr> {
+     let (Some(props), Value::String(name)) = (cached_cell(obj), key) else {
+-        return interp.assign_member(obj, key, val);
++        return interp.assign_property_with_receiver(obj, key, val, obj, strict);
+     };
+     let encoded_name = name.to_key();
+     let name = encoded_name.as_str();
+@@ -401,7 +458,7 @@ fn set_prop_cached(
+         }
+         return Ok(());
+     }
+-    interp.assign_member(obj, key, val)?;
++    interp.assign_property_with_receiver(obj, key, val, obj, strict)?;
+     if !props.meta.borrow().module_namespace
+         && props.meta.borrow().attrs_of(name).writable
+         && let Some(index) = props.own_index(name)
+@@ -588,10 +645,13 @@ fn run_loop(
+                             frame.registers[src as usize].clone(),
+                         )?;
+                     } else {
+-                        interp.assign_member(
++                        let strict = current_scope(interp, frame).borrow().strict();
++                        interp.assign_property_with_receiver(
+                             &frame.registers[obj as usize],
+                             &frame.registers[key as usize],
+                             frame.registers[src as usize].clone(),
++                            &frame.registers[obj as usize],
++                            strict,
+                         )?;
+                     }
+                 }
+@@ -792,11 +852,13 @@ fn run_loop(
+                     delta,
+                     prefix,
+                 } => {
++                    let strict = current_scope(interp, frame).borrow().strict();
+                     let value = interp.inc_prop_value(
+                         &frame.registers[obj as usize],
+                         &frame.registers[key as usize],
+                         delta > 0,
+                         prefix,
++                        strict,
+                     )?;
+                     frame.registers[dst as usize].assign_for_execution(value);
+                 }
+@@ -892,6 +954,7 @@ fn run_loop(
+                     cache,
+                 } => {
+                     let val = frame.registers[val as usize].clone_for_execution();
++                    let strict = current_scope(interp, frame).borrow().strict();
+                     set_prop_cached(
+                         interp,
+                         frame.function,
+@@ -899,6 +962,7 @@ fn run_loop(
+                         &frame.registers[obj as usize],
+                         &frame.registers[key as usize],
+                         val,
++                        strict,
+                     )?;
+                 }
+                 Instr::DirectEval {
+@@ -1622,6 +1686,11 @@ fn build_class_from_template(
+                 frame.registers[*reg as usize].clone_for_execution()
+             }
+         };
++        if let Some(storage) = &member.auto_accessor_storage {
++            member_scope
++                .borrow_mut()
++                .declare(storage, property.clone(), BindKind::Const, true);
++        }
+         if member.is_static
+             && !matches!(member.name, ClassNameTemplate::Private(_))
+             && matches!(
+@@ -1772,6 +1841,18 @@ fn build_class_from_template(
+         }
+     }
+     let class_val = interp.assemble_class(ClassAssembly {
++        decorators: template
++            .decorators
++            .iter()
++            .map(|(value, receiver)| {
++                (
++                    frame.registers[*value as usize].clone_for_execution(),
++                    receiver
++                        .map(|reg| frame.registers[reg as usize].clone_for_execution())
++                        .unwrap_or(Value::Undefined),
++                )
++            })
++            .collect(),
+         source_text: template.source_text.clone(),
+         name: template.name.clone(),
+         super_cls,
+@@ -2210,6 +2291,24 @@ mod tests {
+         assert_eq!(num(&result), 3.0);
+     }
+ 
++    #[test]
++    fn ic_caches_string_prototype_reads_and_observes_replacement() {
++        let (result, module) = run_module(
++            "let text = 'a'; let matched = 0; \
++             for (let i = 0; i < 6; i++) { \
++               if (i === 3) String.prototype.toUpperCase = function () { return 'later'; }; \
++               let actual = text.toUpperCase(); \
++               if (actual === (i < 3 ? 'A' : 'later')) matched++; \
++             } matched;",
++        );
++        assert_eq!(num(&result), 6.0);
++        let (hits, _, _, _) = cache_stats(&module);
++        assert!(
++            hits > 0,
++            "repeated primitive string reads should hit the cache"
++        );
++    }
++
+     #[test]
+     fn program_stats_aggregate() {
+         let (result, module) = run_module(
+diff --git a/crates/napi-vm-core/src/interpreter/call.rs b/crates/napi-vm-core/src/interpreter/call.rs
+index 77df66b..b5749cc 100644
+--- a/crates/napi-vm-core/src/interpreter/call.rs
++++ b/crates/napi-vm-core/src/interpreter/call.rs
+@@ -144,6 +144,113 @@ pub(crate) fn is_js_object(value: &Value) -> bool {
+ }
+ 
+ impl Interpreter {
++    fn with_native_boundary<T>(
++        &mut self,
++        transparent: bool,
++        operation: impl FnOnce(&mut Self) -> T,
++    ) -> T {
++        let saved = self.native_call_depth;
++        if !transparent {
++            self.native_call_depth += 1;
++        }
++        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(self)));
++        self.native_call_depth = saved;
++        match outcome {
++            Ok(value) => value,
++            Err(panic) => std::panic::resume_unwind(panic),
++        }
++    }
++
++    fn call_native_function(
++        &mut self,
++        callable: crate::builtins::NativeFn,
++        receiver: Value,
++        arguments: Vec<Value>,
++    ) -> Result<Value, VmErr> {
++        self.with_native_boundary(
++            crate::builtins::is_transparent_native_call(callable),
++            |vm| callable(vm, receiver, arguments),
++        )
++    }
++
++    fn begin_function_activation(&mut self, function: &Value, arguments: &[Value]) {
++        let snapshot = if matches!(function, Value::Function(data) if data.exposes_legacy_call_properties())
++        {
++            let mut snapshot = self.activation_argument_pool.pop().unwrap_or_default();
++            snapshot.extend_from_slice(arguments);
++            Some(snapshot)
++        } else {
++            None
++        };
++        self.function_activations.push(super::FunctionActivation {
++            callee: function.clone(),
++            arguments: snapshot,
++            native_depth: self.native_call_depth,
++        });
++    }
++
++    fn end_function_activation(&mut self) {
++        if let Some(activation) = self.function_activations.pop()
++            && let Some(mut arguments) = activation.arguments
++        {
++            arguments.clear();
++            if arguments.capacity() <= 256 && self.activation_argument_pool.len() < 64 {
++                self.activation_argument_pool.push(arguments);
++            }
++        }
++    }
++
++    pub(crate) fn legacy_function_property(
++        &self,
++        function: &Value,
++        key: &str,
++    ) -> Result<Option<Value>, VmErr> {
++        if !matches!(key, "caller" | "arguments")
++            || !matches!(function, Value::Function(data) if data.exposes_legacy_call_properties())
++        {
++            return Ok(None);
++        }
++        let Some(index) = self
++            .function_activations
++            .iter()
++            .rposition(|activation| super::strict_equals(&activation.callee, function))
++        else {
++            return Ok(Some(Value::Null));
++        };
++        if key == "caller" {
++            let caller = index
++                .checked_sub(1)
++                .and_then(|index| self.function_activations.get(index));
++            return Ok(Some(match caller {
++                Some(activation)
++                    if activation.native_depth == self.function_activations[index].native_depth
++                        && matches!(&activation.callee, Value::Function(data) if !data.strict) =>
++                {
++                    activation.callee.clone()
++                }
++                _ => Value::Null,
++            }));
++        }
++        let _realm = super::realm::AllocationRealm::enter(super::realm::value_realm(function));
++        let arguments = self.function_activations[index]
++            .arguments
++            .as_deref()
++            .unwrap_or(&[]);
++        let object = Value::arguments_object(arguments)?;
++        object.set_prop("callee".into(), function.clone())?;
++        if let Some(properties) = object.property_cell() {
++            properties.meta.borrow_mut().set_attrs(
++                "callee",
++                crate::value::PropAttrs {
++                    writable: true,
++                    enumerable: false,
++                    configurable: true,
++                },
++            );
++        }
++        Ok(Some(object))
++    }
++
+     /// SpeciesConstructor observes constructor/species getters before deciding
+     /// whether to use the intrinsic from the executing builtin's realm.
+     pub(crate) fn species_constructor(
+@@ -1033,6 +1140,13 @@ impl Interpreter {
+                 }
+                 Ok(Value::Bool(true))
+             }
++            Value::String(string) => {
++                let property = self.property_key(key)?;
++                let has_non_configurable_own_property = property == "length"
++                    || crate::value::array_index(&property)
++                        .is_some_and(|index| index < string.len());
++                Ok(Value::Bool(!has_non_configurable_own_property))
++            }
+             _ => {
+                 if matches!(obj, Value::Null | Value::Undefined) {
+                     return Err(VmErr::Msg(
+@@ -1954,6 +2068,7 @@ impl Interpreter {
+         prop: &Value,
+         inc: bool,
+         prefix: bool,
++        strict: bool,
+     ) -> Result<Value, VmErr> {
+         // An own writable Number data slot cannot invoke guest conversion or
+         // prototype setters. Update it directly through the same property cell,
+@@ -1982,7 +2097,7 @@ impl Interpreter {
+         }
+         let cur = self.get_prop_value(obj, &key)?;
+         let (cur, new_val) = self.numeric_update(&cur, inc)?;
+-        self.assign_member(obj, &key, new_val.clone())?;
++        self.assign_property_with_receiver(obj, &key, new_val.clone(), obj, strict)?;
+         if prefix { Ok(new_val) } else { Ok(cur) }
+     }
+ 
+@@ -2075,6 +2190,7 @@ impl Interpreter {
+                     .clone()
+             });
+             self.push_frame(fname, Span::unknown());
++            self.begin_function_activation(f, args);
+             let saved_tail_context =
+                 std::mem::replace(&mut self.tail_call_context, fd.strict && !fd.is_async);
+             let saved_tail_barriers = std::mem::replace(&mut self.tail_call_barriers, 0);
+@@ -2097,6 +2213,7 @@ impl Interpreter {
+             self.cur_mod = saved_module;
+             saved_modules.install(self);
+             if let Err(panic) = outcome {
++                self.end_function_activation();
+                 self.pop_frame();
+                 std::panic::resume_unwind(panic);
+             }
+@@ -2110,6 +2227,7 @@ impl Interpreter {
+                 }))),
+                 other => other,
+             };
++            self.end_function_activation();
+             self.pop_frame();
+             return result;
+         }
+@@ -2229,7 +2347,7 @@ impl Interpreter {
+         match f {
+             Value::Function(fd) => {
+                 if let Some(native) = fd.native {
+-                    return native(self, this_val, args);
++                    return self.call_native_function(native, this_val, args);
+                 }
+                 if let Some(bound) = &fd.bound {
+                     let bound = bound.clone();
+@@ -2291,11 +2409,13 @@ impl Interpreter {
+                                 fd.name.clone().unwrap_or_else(|| Rc::from("<anonymous>")),
+                                 Span::unknown(),
+                             );
++                            self.begin_function_activation(f, &args);
+                             let result = stacker::maybe_grow(
+                                 RECURSION_STACK_RED_ZONE,
+                                 RECURSION_STACK_SEGMENT,
+                                 || self.prepare_parameter_body(params, initializers, &fd.body[1..]),
+                             );
++                            self.end_function_activation();
+                             self.pop_frame();
+                             self.global = saved;
+                             (Rc::new(fd.body[1..].to_vec()), result?, true)
+@@ -2478,6 +2598,7 @@ impl Interpreter {
+                         .clone()
+                 });
+                 self.push_frame(fname, Span::unknown());
++                self.begin_function_activation(f, &args);
+                 // A function body is a fresh variable scope: `var` and
+                 // function declarations hoist to it, lexical ones dead-zone.
+                 // The host stack can be much smaller than a typical Rust
+@@ -2488,12 +2609,20 @@ impl Interpreter {
+                 let saved_tail_context =
+                     std::mem::replace(&mut self.tail_call_context, fd.strict && !fd.is_async);
+                 let saved_tail_barriers = std::mem::replace(&mut self.tail_call_barriers, 0);
+-                let r =
++                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                     stacker::maybe_grow(RECURSION_STACK_RED_ZONE, RECURSION_STACK_SEGMENT, || {
+                         self.run_function_body(&fd.body, fd.needs_hoisting)
+-                    });
++                    })
++                }));
+                 self.tail_call_context = saved_tail_context;
+                 self.tail_call_barriers = saved_tail_barriers;
++                if let Err(panic) = outcome {
++                    self.end_function_activation();
++                    self.pop_frame();
++                    self.global = s;
++                    std::panic::resume_unwind(panic);
++                }
++                let r = outcome.expect("panic resumed above");
+                 // Convert a bare message into a located runtime error *before*
+                 // popping the frame, so the snapshot carries the full call
+                 // chain. Only the error path pays for the snapshot — the
+@@ -2542,6 +2671,7 @@ impl Interpreter {
+                 } else {
+                     result
+                 };
++                self.end_function_activation();
+                 self.pop_frame();
+                 self.global = s;
+                 if fd.is_async {
+@@ -2561,7 +2691,9 @@ impl Interpreter {
+                     result
+                 }
+             }
+-            Value::NativeFunction { callable, .. } => callable(self, this_val, args),
++            Value::NativeFunction { callable, .. } => {
++                self.call_native_function(*callable, this_val, args)
++            }
+             Value::HostFunction { properties, .. } => {
+                 let id = properties
+                     .meta
+@@ -2882,6 +3014,7 @@ impl Interpreter {
+             if matches!(
+                 builtin.as_str(),
+                 "Map"
++                    | "RegExp"
+                     | "Set"
+                     | "WeakMap"
+                     | "WeakSet"
+@@ -2905,8 +3038,7 @@ impl Interpreter {
+                 && args.first().is_some_and(|value| !is_js_object(value)))
+                 || matches!(
+                     builtin.as_str(),
+-                    "RegExp"
+-                        | "Number"
++                    "Number"
+                         | "Boolean"
+                         | "String"
+                         | "Date"
+diff --git a/crates/napi-vm-core/src/interpreter/env.rs b/crates/napi-vm-core/src/interpreter/env.rs
+index 206136b..8977f94 100644
+--- a/crates/napi-vm-core/src/interpreter/env.rs
++++ b/crates/napi-vm-core/src/interpreter/env.rs
+@@ -62,6 +62,7 @@ pub enum BindKind {
+ #[derive(Clone)]
+ struct Binding {
+     silent_immutable: bool,
++    deletable: bool,
+     value: Value,
+     kind: BindKind,
+     /// `false` while a `let`/`const` is hoisted but not yet initialized --
+@@ -74,6 +75,7 @@ impl Binding {
+     fn initialized(value: Value, kind: BindKind) -> Self {
+         Self {
+             silent_immutable: false,
++            deletable: false,
+             value,
+             kind,
+             initialized: true,
+@@ -968,8 +970,11 @@ impl Environment {
+             let _ = self.create_global_var_binding(n, value, false);
+             return;
+         }
++        let deletable =
++            kind == BindKind::Var && self.vars.get(n).is_some_and(|binding| binding.deletable);
+         let binding = Binding {
+             silent_immutable: false,
++            deletable,
+             value,
+             kind,
+             initialized,
+@@ -1283,6 +1288,20 @@ impl Environment {
+         }
+     }
+ 
++    pub(crate) fn mark_binding_deletable(&mut self, name: &str) {
++        if let Some(binding) = self.vars.get_mut(name) {
++            binding.deletable = true;
++        }
++    }
++
++    pub(crate) fn delete_declarative_binding(&mut self, name: &str) -> bool {
++        if self.vars.get(name).is_some_and(|binding| binding.deletable) {
++            self.remove(name)
++        } else {
++            false
++        }
++    }
++
+     /// Remove a binding from this frame only (does not walk the parent chain).
+     /// Returns `true` if the binding existed and was removed.
+     pub fn remove(&mut self, n: &str) -> bool {
+diff --git a/crates/napi-vm-core/src/interpreter/eval.rs b/crates/napi-vm-core/src/interpreter/eval.rs
+index 0411a4c..adae66c 100644
+--- a/crates/napi-vm-core/src/interpreter/eval.rs
++++ b/crates/napi-vm-core/src/interpreter/eval.rs
+@@ -48,6 +48,28 @@ fn class_accessor_kind(value: &Value) -> Option<&'static str> {
+     }
+ }
+ 
++fn decorator_add_initializer(
++    _: &mut Interpreter,
++    state: Value,
++    args: Vec<Value>,
++) -> Result<Value, VmErr> {
++    if !matches!(state.get_prop("active"), Some(Value::Bool(true))) {
++        return Err(VmErr::Msg(
++            "TypeError: decorator application has finished".into(),
++        ));
++    }
++    let initializer = args.first().cloned().unwrap_or(Value::Undefined);
++    if !super::is_callable_value(&initializer) {
++        return Err(VmErr::Msg("TypeError: initializer must be callable".into()));
++    }
++    let list = state
++        .get_prop("initializers")
++        .and_then(|list| list.as_array())
++        .expect("internal initializer list");
++    list.store_index(list.array_length(), initializer);
++    Ok(Value::Undefined)
++}
++
+ #[derive(Debug, Clone)]
+ pub(crate) enum ClassStaticElement {
+     Field {
+@@ -62,6 +84,7 @@ pub(crate) enum ClassStaticElement {
+ /// the constructor plus gathered prototype/static members, with static
+ /// blocks to run once the class value exists.
+ pub(crate) struct ClassAssembly {
++    pub decorators: Vec<(Value, Value)>,
+     pub source_text: Option<crate::parser::SourceTextRef>,
+     pub name: String,
+     pub super_cls: Option<Value>,
+@@ -343,12 +366,15 @@ impl Interpreter {
+         key: &Value,
+     ) -> Result<(Value, Value, Value), VmErr> {
+         let receiver = self.resolve_this(scope)?;
+-        let key = self.ecmascript_to_property_key(key)?;
+         let home = scope
+             .borrow()
+             .get(HOME_OBJECT)
+             .ok_or_else(|| VmErr::Msg("ReferenceError: missing super home object".into()))?;
+         let base = self.get_prototype_of(&home)?;
++        // Capture the super base before user code in ToPropertyKey can change
++        // the home object's prototype. The reference keeps that base for both
++        // the read and write of a compound assignment or update.
++        let key = self.ecmascript_to_property_key(key)?;
+         Ok((base, receiver, key))
+     }
+ 
+@@ -372,12 +398,35 @@ impl Interpreter {
+     ///
+     /// Shared by the declaration and the class *expression*, which differ
+     /// only in whether the result is bound to a name.
++    pub(crate) fn evaluate_private_class_field(
++        &mut self,
++        initializer: &Expr,
++        key: &Value,
++    ) -> Result<Value, VmErr> {
++        let original_name = if let Value::String(storage) = key {
++            let storage = storage.to_key_cow();
++            if storage.starts_with("#\0auto-accessor:") {
++                match self.global.borrow().lookup(&storage) {
++                    super::Lookup::Value(value) => Some(value),
++                    _ => None,
++                }
++            } else {
++                None
++            }
++        } else {
++            None
++        };
++        let key = original_name.as_ref().unwrap_or(key);
++        self.evaluate_class_field(initializer, key)
++    }
++
+     pub(crate) fn evaluate_class_field(
+         &mut self,
+         initializer: &Expr,
+         key: &Value,
+     ) -> Result<Value, VmErr> {
+         if let Expr::ClassExpr {
++            decorators,
+             source_text: _,
+             name: None,
+             superclass,
+@@ -390,6 +439,7 @@ impl Interpreter {
+                 &name,
+                 superclass.as_deref(),
+                 body,
++                decorators,
+                 initializer.source_text(),
+             );
+         }
+@@ -518,6 +568,7 @@ impl Interpreter {
+     /// each tier; everything from the prototype object on is shared.
+     pub(crate) fn assemble_class(&mut self, asm: ClassAssembly) -> Result<Value, VmErr> {
+         let ClassAssembly {
++            decorators,
+             source_text,
+             name,
+             super_cls,
+@@ -643,7 +694,7 @@ impl Interpreter {
+             }
+         }
+ 
+-        let class_val = Value::Class(Box::new(ClassData {
++        let mut class_val = Value::Class(Box::new(ClassData {
+             name: name.to_string(),
+             constructor: Box::new(constructor),
+             prototype: Rc::new(prototype),
+@@ -685,6 +736,43 @@ impl Interpreter {
+             class_val.initialize_private_element(id, element)?;
+         }
+ 
++        let original_class = class_val.clone();
++        let extra_initializers = (!decorators.is_empty()).then(|| Value::array(Vec::new()));
++        for (decorator, receiver) in decorators.into_iter().rev() {
++            let state = Value::object(vec![
++                ("active".into(), Value::Bool(true)),
++                (
++                    "initializers".into(),
++                    extra_initializers
++                        .as_ref()
++                        .expect("decorated class")
++                        .clone(),
++                ),
++            ]);
++            let add_initializer = crate::builtins::bound_native_method(
++                "addInitializer",
++                1,
++                decorator_add_initializer,
++                None,
++                state.clone(),
++            );
++            let context = Value::object(vec![
++                ("kind".into(), Value::String("class".into())),
++                ("name".into(), Value::String(name.as_str().into())),
++                ("addInitializer".into(), add_initializer),
++            ]);
++            let result = self.call_this(&decorator, receiver, vec![class_val.clone(), context]);
++            state.set_prop("active".into(), Value::Bool(false))?;
++            let replacement = result?;
++            if super::is_callable_value(&replacement) {
++                class_val = replacement;
++            } else if !matches!(replacement, Value::Undefined) {
++                return Err(VmErr::Msg(
++                    "TypeError: class decorator must return a callable or undefined".into(),
++                ));
++            }
++        }
++
+         if !name.is_empty() && private_scope.borrow().own_binding(&name).is_some() {
+             private_scope
+                 .borrow_mut()
+@@ -700,7 +788,7 @@ impl Interpreter {
+             scope.borrow_mut().replace_strict(Some(true));
+             scope.borrow_mut().set("this", class_val.clone());
+             scope.borrow_mut().set_new_target(Value::Undefined);
+-            scope.borrow_mut().set(HOME_OBJECT, class_val.clone());
++            scope.borrow_mut().set(HOME_OBJECT, original_class.clone());
+             let saved = std::mem::replace(&mut self.global, scope);
+             let result = (|| {
+                 self.execution.check()?;
+@@ -711,7 +799,11 @@ impl Interpreter {
+                         private,
+                         init,
+                     } => {
+-                        let value = self.evaluate_class_field(&init, &name)?;
++                        let value = if private {
++                            self.evaluate_private_class_field(&init, &name)?
++                        } else {
++                            self.evaluate_class_field(&init, &name)?
++                        };
+                         if private {
+                             let id = self
+                                 .global
+@@ -743,6 +835,18 @@ impl Interpreter {
+             self.global = saved;
+             result?;
+         }
++        if let Some(extra_initializers) = extra_initializers {
++            let initializers = extra_initializers
++                .as_array()
++                .expect("internal initializer list");
++            for index in 0..initializers.array_length() {
++                self.check_execution_interrupt()?;
++                let initializer = initializers
++                    .index_value(index)
++                    .expect("dense initializer list");
++                self.call_this(&initializer, class_val.clone(), Vec::new())?;
++            }
++        }
+         Ok(class_val)
+     }
+ 
+@@ -751,6 +855,7 @@ impl Interpreter {
+         name: &str,
+         superclass: Option<&Expr>,
+         body: &[ClassMember],
++        decorators: &[Expr],
+         source_text: Option<&crate::parser::SourceTextRef>,
+     ) -> Result<Value, VmErr> {
+         self.build_class_with_name(
+@@ -758,6 +863,7 @@ impl Interpreter {
+             crate::parser::declaration_display_name(name),
+             superclass,
+             body,
++            decorators,
+             source_text,
+         )
+     }
+@@ -768,8 +874,16 @@ impl Interpreter {
+         name: &str,
+         superclass: Option<&Expr>,
+         body: &[ClassMember],
++        decorators: &[Expr],
+         source_text: Option<&crate::parser::SourceTextRef>,
+     ) -> Result<Value, VmErr> {
++        let mut evaluated_decorators = Vec::new();
++        for decorator in decorators {
++            evaluated_decorators.push(
++                self.evaluate_call_reference(decorator)?
++                    .unwrap_or((Value::Undefined, Value::Undefined)),
++            );
++        }
+         let member_scope = Self::class_environment(self.global.clone(), binding_name);
+         let saved = std::mem::replace(&mut self.global, member_scope.clone());
+         let heritage = (|| {
+@@ -818,7 +932,7 @@ impl Interpreter {
+         let mut private_statics = Vec::new();
+         let mut static_elements = Vec::new();
+ 
+-        for member in body {
++        for (member_index, member) in body.iter().enumerate() {
+             match member {
+                 ClassMember::Method {
+                     source_text: _,
+@@ -909,9 +1023,110 @@ impl Interpreter {
+                 ClassMember::Field {
+                     name,
+                     is_static: st,
++                    auto_accessor,
+                     init,
+                 } => {
+                     let fname = self.class_member_name(&member_scope, name)?;
++                    if *auto_accessor {
++                        let storage = crate::parser::auto_accessor_storage(member_index);
++                        member_scope.borrow_mut().declare(
++                            &storage,
++                            fname.clone(),
++                            BindKind::Const,
++                            true,
++                        );
++                        let key = self.property_key(&fname)?;
++                        let display_name = self.property_function_name(&fname)?;
++                        let mut accessors = Vec::new();
++                        for setter in [false, true] {
++                            let body = crate::parser::auto_accessor_body(&storage, setter);
++                            let function = Value::Function(Rc::new(FunctionData {
++                                strict: true,
++                                native: None,
++                                identity: Rc::new(0),
++                                name: Some(
++                                    format!(
++                                        "{} {display_name}",
++                                        if setter { "set" } else { "get" }
++                                    )
++                                    .into(),
++                                ),
++                                properties: FunctionData::properties_with_default_prototype(
++                                    &self.persistent_global,
++                                ),
++                                standard_properties_initialized: Rc::new(std::cell::Cell::new(
++                                    false,
++                                )),
++                                params: Rc::new(if setter {
++                                    vec![Rc::from("value")]
++                                } else {
++                                    vec![]
++                                }),
++                                body: Rc::new(body),
++                                closure: Some(crate::heap::capture_env(if *st {
++                                    &static_member_closure
++                                } else {
++                                    &member_closure
++                                })),
++                                is_arrow: false,
++                                is_constructor: false,
++                                is_async: false,
++                                is_generator: false,
++                                uses_arguments: false,
++                                bytecode: None,
++                                needs_hoisting: false,
++                                bound: None,
++                            }));
++                            accessors.push(function);
++                        }
++                        let setter = accessors.pop().unwrap();
++                        let getter = accessors.pop().unwrap();
++                        if matches!(name, MemberName::Private(_)) {
++                            define_class_private_element(
++                                &member_scope,
++                                &mut private_statics,
++                                &key,
++                                *st,
++                                PrivateElement::Accessor {
++                                    get: Some(getter),
++                                    set: Some(setter),
++                                },
++                            )?;
++                        } else if *st {
++                            Self::check_static_method_key(&fname)?;
++                            static_keys.push(fname);
++                            insert_class_accessor(&mut statics, &key, getter);
++                            insert_class_accessor(&mut statics, &key, setter);
++                            static_attrs.push((
++                                key,
++                                PropAttrs {
++                                    writable: false,
++                                    enumerable: false,
++                                    configurable: true,
++                                },
++                            ));
++                            static_has_accessors = true;
++                        } else {
++                            proto_keys.push(fname);
++                            insert_class_accessor(&mut proto_props, &key, getter);
++                            insert_class_accessor(&mut proto_props, &key, setter);
++                        }
++                        if *st {
++                            static_elements.push(ClassStaticElement::Field {
++                                name: Value::String(crate::JsString::from_key(&storage)),
++                                private: true,
++                                init: init.clone().unwrap_or(Expr::Undefined),
++                            });
++                        } else {
++                            instance_fields.push((
++                                Expr::String(crate::JsString::from_key(&storage)),
++                                init.clone(),
++                                false,
++                            ));
++                        }
++                        continue;
++                    }
++
+                     if *st {
+                         static_elements.push(ClassStaticElement::Field {
+                             name: fname,
+@@ -1161,6 +1376,7 @@ impl Interpreter {
+         }));
+ 
+         self.assemble_class(ClassAssembly {
++            decorators: evaluated_decorators,
+             source_text: source_text.cloned(),
+             name: name.to_string(),
+             super_cls,
+@@ -1571,9 +1787,6 @@ impl Interpreter {
+                     // A bare `var a;` re-declaration must not erase an
+                     // existing value: `var a = 1; var a; a` is 1.
+                     // Hoisting already created the binding.
+-                    if self.global.borrow().get(name).is_none() {
+-                        self.assign_or_set_binding(name, Value::Undefined)?;
+-                    }
+                     return Ok(Value::Undefined);
+                 }
+                 let v = match init {
+@@ -1591,8 +1804,6 @@ impl Interpreter {
+                             self.destructure_assignment(pat, &v)?;
+                         } else if init.is_some() {
+                             self.assign_or_set_binding(name, v.clone())?;
+-                        } else if self.global.borrow().get(name).is_none() {
+-                            self.assign_or_set_binding(name, Value::Undefined)?;
+                         }
+                     }
+                     // `let`/`const` bind in *this* block, leaving the dead
+@@ -1622,13 +1833,19 @@ impl Interpreter {
+             }
+             Statement::FnDecl { .. } => self.evaluate_function_declaration(s),
+             Statement::ClassDecl {
++                decorators,
+                 source_text: _,
+                 name,
+                 superclass,
+                 body,
+             } => {
+-                let class_val =
+-                    self.build_class(name, superclass.as_deref(), body, s.source_text())?;
++                let class_val = self.build_class(
++                    name,
++                    superclass.as_deref(),
++                    body,
++                    decorators,
++                    s.source_text(),
++                )?;
+                 self.set_binding(name, class_val)?;
+                 Ok(Value::Undefined)
+             }
+@@ -3154,7 +3371,8 @@ impl Interpreter {
+                                 return if *prefix { Ok(new_val) } else { Ok(cur) };
+                             }
+                             let prop = self.eval_expr(property)?;
+-                            self.inc_prop_value(&obj, &prop, *op == UnOp::Inc, *prefix)
++                            let strict = self.global.borrow().strict();
++                            self.inc_prop_value(&obj, &prop, *op == UnOp::Inc, *prefix, strict)
+                         }
+                         _ => {
+                             let v = self.eval_expr(operand)?;
+@@ -3522,11 +3740,11 @@ impl Interpreter {
+             }
+             // A class expression's own name is visible only inside its body,
+             // which a child scope provides.
+-            Expr::ClassExpr { source_text: _,
++            Expr::ClassExpr { decorators, source_text: _,
+                 name,
+                 superclass,
+                 body,
+-            } => self.build_class(name.as_deref().unwrap_or(""), superclass.as_deref(), body, e.source_text()),
++            } => self.build_class(name.as_deref().unwrap_or(""), superclass.as_deref(), body, decorators, e.source_text()),
+             Expr::ArrowFn { source_text: _,
+                 params,
+                 body,
+diff --git a/crates/napi-vm-core/src/interpreter/mod.rs b/crates/napi-vm-core/src/interpreter/mod.rs
+index 80c795e..b0a189f 100644
+--- a/crates/napi-vm-core/src/interpreter/mod.rs
++++ b/crates/napi-vm-core/src/interpreter/mod.rs
+@@ -218,6 +218,12 @@ impl Default for ExecutionBudget {
+     }
+ }
+ 
++struct FunctionActivation {
++    callee: Value,
++    arguments: Option<Vec<Value>>,
++    native_depth: usize,
++}
++
+ pub struct Interpreter {
+     pub(crate) tail_call_context: bool,
+     tail_call_barriers: usize,
+@@ -287,6 +293,9 @@ pub struct Interpreter {
+     pub jobs: Jobs,
+     /// Call stack for error reporting. Pushed on function entry, popped on exit.
+     call_stack: Vec<StackFrame>,
++    function_activations: Vec<FunctionActivation>,
++    activation_argument_pool: Vec<Vec<Value>>,
++    native_call_depth: usize,
+     /// Lazily interned names reused by ordinary function calls in this VM.
+     this_binding_key: Option<Rc<str>>,
+     anonymous_frame_name: Option<Rc<str>>,
+@@ -334,7 +343,8 @@ pub struct Interpreter {
+     /// with [`Self::set_jit_policy`].
+     jit_policy: crate::jit::JitPolicy,
+     tier_tracking: crate::jit::TierTracking,
+-    pub(crate) activation_pool: Vec<(Vec<Value>, Vec<crate::bytecode::vm::RunSlot>)>,
++    pub(crate) activation_pool: Vec<crate::bytecode::vm::ActivationBuffers>,
++    pub(crate) function_environment_pool: Vec<Env>,
+     /// Registered native-code backend, if any. `None` (the default) means
+     /// hot functions stay on bytecode; see [`Self::set_jit_backend`].
+     jit_backend: Option<crate::jit::BackendRef>,
+@@ -486,6 +496,9 @@ impl Interpreter {
+             yield_sink: None,
+             jobs: Jobs::default(),
+             call_stack: Vec::new(),
++            function_activations: Vec::new(),
++            activation_argument_pool: Vec::new(),
++            native_call_depth: 0,
+             this_binding_key: None,
+             anonymous_frame_name: None,
+             new_target_stack: Vec::new(),
+@@ -508,6 +521,7 @@ impl Interpreter {
+             jit_policy: crate::jit::JitPolicy::default(),
+             tier_tracking: crate::jit::TierTracking::Disabled,
+             activation_pool: Vec::new(),
++            function_environment_pool: Vec::new(),
+             jit_backend: None,
+         };
+         interp.publish_module_realm();
+@@ -525,6 +539,19 @@ impl Interpreter {
+         let mut interp = Self::new();
+         let builtins = Rc::new(RefCell::new(Environment::new()));
+         crate::builtins::setup_builtins(&builtins);
++        let primitive_prototypes = ["Boolean", "Number", "String", "BigInt", "Symbol"]
++            .into_iter()
++            .filter_map(|name| {
++                builtins
++                    .borrow()
++                    .get(name)
++                    .and_then(|constructor| constructor.get_prop("prototype"))
++                    .map(|prototype| (format!("%{name}Prototype%"), prototype))
++            })
++            .collect::<Vec<_>>();
++        for (name, prototype) in primitive_prototypes {
++            builtins.borrow_mut().install_intrinsic(&name, prototype);
++        }
+         let global = Rc::new(RefCell::new(Environment::global(Some(builtins))));
+         interp.global = global.clone();
+         interp.persistent_global = global;
+@@ -566,15 +593,25 @@ impl Interpreter {
+     /// Create a host-defined module-source object with an internal class name.
+     /// Guest properties, prototypes, and proxies cannot manufacture this brand.
+     pub fn create_module_source_object(&self, class_name: impl Into<crate::JsString>) -> Value {
+-        let constructor = self.abstract_module_source_constructor();
+-        let prototype = constructor
+-            .get_prop("prototype")
+-            .expect("module-source prototype");
++        let class_name = class_name.into();
++        let intrinsic_name = format!("ModuleSourcePrototype:{}", class_name.to_key());
++        let cached = self.persistent_global.borrow().intrinsic(&intrinsic_name);
++        let prototype = cached.unwrap_or_else(|| {
++            let constructor = self.abstract_module_source_constructor();
++            let abstract_prototype = constructor
++                .get_prop("prototype")
++                .expect("module-source prototype");
++            let prototype = Value::object_with_proto(Vec::new(), Some(Rc::new(abstract_prototype)));
++            self.persistent_global
++                .borrow_mut()
++                .install_intrinsic(&intrinsic_name, prototype.clone());
++            prototype
++        });
+         let value = Value::object_with_proto(Vec::new(), Some(Rc::new(prototype)));
+         let properties = value.property_cell().expect("source object");
+         let mut metadata = properties.meta.borrow_mut();
+         metadata.realm_global = Some(self.persistent_global.clone());
+-        metadata.module_source_class_name = Some(class_name.into());
++        metadata.module_source_class_name = Some(class_name);
+         value
+     }
+ 
+@@ -1142,6 +1179,12 @@ export default { createRequire, isBuiltin, builtinModules };
+         roots
+             .envs
+             .extend(self.constructor_error_realms.iter().cloned());
++        for activation in &self.function_activations {
++            roots.values.push(activation.callee.clone());
++            if let Some(arguments) = &activation.arguments {
++                roots.values.extend(arguments.iter().cloned());
++            }
++        }
+         if let Some(host) = &self.host {
+             host.trace_roots(&mut roots.values, &mut roots.envs);
+         }
+@@ -2170,7 +2213,11 @@ impl Interpreter {
+                 };
+                 let name = self.eval_expr(property)?;
+                 let key = self.property_key(&name)?;
+-                let value = self.evaluate_class_field(value, &name)?;
++                let value = if *computed {
++                    self.evaluate_class_field(value, &name)?
++                } else {
++                    self.evaluate_private_class_field(value, &name)?
++                };
+                 if !computed && let Some(id) = self.global.borrow().private_name(&key) {
+                     receiver.initialize_private_field(id, value)?;
+                     continue;
+@@ -2603,6 +2650,9 @@ impl Interpreter {
+         }
+         if variable_scope.borrow().own_binding(name).is_none() {
+             self.declare_binding_in(&variable_scope, name, Value::Undefined, BindKind::Var, true)?;
++            if scope.borrow().is_eval_scope() {
++                variable_scope.borrow_mut().mark_binding_deletable(name);
++            }
+         }
+         Ok(())
+     }
+@@ -3012,6 +3062,29 @@ impl Interpreter {
+             mode
+         };
+     }
++
++    pub(crate) fn acquire_function_environment(&mut self, parent: Env) -> Env {
++        if let Some(environment) = self.function_environment_pool.pop() {
++            *environment.borrow_mut() = Environment::function_child(parent);
++            environment
++        } else {
++            Rc::new(RefCell::new(Environment::function_child(parent)))
++        }
++    }
++
++    pub(crate) fn recycle_function_environment(&mut self, environment: Env) {
++        if self.function_environment_pool.len() >= 16
++            || Rc::strong_count(&environment) != 1
++            || !environment.borrow().resources.is_empty()
++        {
++            return;
++        }
++        // Drop the parent chain and bindings before retaining the allocation;
++        // closures that captured this frame fail the strong-count check above.
++        *environment.borrow_mut() = Environment::new();
++        self.function_environment_pool.push(environment);
++    }
++
+     pub(crate) fn note_loop_iter(&self, counters: &crate::jit::TierCounters) {
+         if self.tier_tracking != crate::jit::TierTracking::Disabled {
+             crate::jit::note_loop_iter(counters);
+@@ -3312,6 +3385,37 @@ mod tests {
+     use crate::lexer::Lexer;
+     use crate::parser::Parser;
+ 
++    #[test]
++    fn module_source_types_share_a_realm_owned_intermediate_prototype() {
++        let mut vm = Interpreter::with_builtins();
++        let first = vm.create_module_source_object("HostModule");
++        let second = vm.create_module_source_object("HostModule");
++        let other_type = vm.create_module_source_object("OtherModule");
++        let prototype = vm.get_prototype_of(&first).unwrap();
++        assert!(strict_equals(
++            &prototype,
++            &vm.get_prototype_of(&second).unwrap()
++        ));
++        assert!(!strict_equals(
++            &prototype,
++            &vm.get_prototype_of(&other_type).unwrap()
++        ));
++        let abstract_prototype = vm
++            .abstract_module_source_constructor()
++            .get_prop("prototype")
++            .unwrap();
++        assert!(strict_equals(
++            &vm.get_prototype_of(&prototype).unwrap(),
++            &abstract_prototype
++        ));
++        let mut other_realm = Interpreter::with_builtins();
++        let foreign = other_realm.create_module_source_object("HostModule");
++        assert!(!strict_equals(
++            &prototype,
++            &other_realm.get_prototype_of(&foreign).unwrap()
++        ));
++    }
++
+     fn eval(src: &str) -> Result<Value, VmErr> {
+         let mut interp = Interpreter::with_builtins();
+         let mut lex = Lexer::new(src);
+diff --git a/crates/napi-vm-core/src/interpreter/node_addon/wire.rs b/crates/napi-vm-core/src/interpreter/node_addon/wire.rs
+index d6f41b9..f8ea96b 100644
+--- a/crates/napi-vm-core/src/interpreter/node_addon/wire.rs
++++ b/crates/napi-vm-core/src/interpreter/node_addon/wire.rs
+@@ -22,6 +22,7 @@ pub(super) fn typed_kind(name: &str) -> Option<TypedKind> {
+         "Uint16Array" => TypedKind::Uint16,
+         "Int32Array" => TypedKind::Int32,
+         "Uint32Array" => TypedKind::Uint32,
++        "Float16Array" => TypedKind::Float16,
+         "Float32Array" => TypedKind::Float32,
+         "Float64Array" => TypedKind::Float64,
+         "BigInt64Array" => TypedKind::BigInt64,
+diff --git a/crates/napi-vm-core/src/interpreter/resolve.rs b/crates/napi-vm-core/src/interpreter/resolve.rs
+index 970de13..6e2d48b 100644
+--- a/crates/napi-vm-core/src/interpreter/resolve.rs
++++ b/crates/napi-vm-core/src/interpreter/resolve.rs
+@@ -47,29 +47,66 @@ impl Interpreter {
+     }
+     /// Primitive references are boxed with the current execution realm's
+     /// intrinsic prototype, regardless of where the primitive was obtained.
+-    fn primitive_reference_prototype(&self, value: &Value) -> Option<Value> {
+-        let name = match value {
+-            Value::Bool(_) => "Boolean",
+-            Value::Number(_) => "Number",
+-            Value::String(_) => "String",
+-            Value::BigInt(_) => "BigInt",
+-            Value::Symbol(_) => "Symbol",
++    pub(crate) fn primitive_reference_prototype(&self, value: &Value) -> Option<Value> {
++        let (constructor, prototype) = match value {
++            Value::Bool(_) => ("Boolean", "%BooleanPrototype%"),
++            Value::Number(_) => ("Number", "%NumberPrototype%"),
++            Value::String(_) => ("String", "%StringPrototype%"),
++            Value::BigInt(_) => ("BigInt", "%BigIntPrototype%"),
++            Value::Symbol(_) => ("Symbol", "%SymbolPrototype%"),
+             _ => return None,
+         };
+-        self.persistent_global
+-            .borrow()
+-            .intrinsic(name)
+-            .and_then(|constructor| constructor.get_prop("prototype"))
++        let global = self.persistent_global.borrow();
++        global.intrinsic(prototype).or_else(|| {
++            global
++                .intrinsic(constructor)
++                .and_then(|constructor| constructor.get_prop("prototype"))
++        })
+     }
+     pub(crate) fn lookup_binding_in(
+         &mut self,
+         scope: &super::Env,
+         name: &str,
+     ) -> Result<super::Lookup, VmErr> {
++        if let Some(value) = Self::plain_binding_value(scope, name) {
++            self.check_execution_interrupt()?;
++            return Ok(value);
++        }
+         let (base, property) = self.resolve_assignment_binding(scope, name)?;
+         self.read_resolved_binding(&base, property, name)
+     }
+ 
++    /// Plain environment records cannot run guest code between resolution and
++    /// reading. With records and global accessors/prototypes retain the full
++    /// reference algorithm, including its observable HasBinding operations.
++    fn plain_binding_value(scope: &super::Env, name: &str) -> Option<super::Lookup> {
++        let mut cursor = Some(scope.clone());
++        while let Some(environment) = cursor {
++            let frame = environment.borrow();
++            if frame.own_lexical_binding(name) {
++                return Some(frame.lookup(name));
++            }
++            if frame.is_global_scope() {
++                let properties = frame.global_object()?.property_cell()?;
++                if properties.meta.borrow().may_have_accessor(name) {
++                    return None;
++                }
++                return properties.own_value(name).map(|value| {
++                    super::Lookup::Value(if matches!(value, Value::Binding(_)) {
++                        value.deref_binding()
++                    } else {
++                        value
++                    })
++                });
++            }
++            if frame.with_object.is_some() {
++                return None;
++            }
++            cursor = frame.parent_env();
++        }
++        None
++    }
++
+     /// GetBindingValue on a captured environment reference. A disappearing
+     /// object property yields undefined in sloppy code, without trying an outer
+     /// binding; strict code reports ReferenceError.
+@@ -186,6 +223,18 @@ impl Interpreter {
+         scope: &super::Env,
+         name: &str,
+     ) -> Result<(Value, Value), VmErr> {
++        if let Some(value) = Self::plain_binding_value(scope, name) {
++            self.check_execution_interrupt()?;
++            return match value {
++                super::Lookup::Value(value) => Ok((value, Value::Undefined)),
++                super::Lookup::Uninitialized => Err(VmErr::Msg(format!(
++                    "ReferenceError: Cannot access '{name}' before initialization"
++                ))),
++                super::Lookup::Missing => {
++                    Err(VmErr::Msg(format!("ReferenceError: {name} is not defined")))
++                }
++            };
++        }
+         let (base, property, receiver) = self.resolve_binding_reference(scope, name)?;
+         let value = self.require_resolved_binding(&base, property, name)?;
+         Ok((value, receiver))
+@@ -263,7 +312,8 @@ impl Interpreter {
+ 
+     /// Resolve a deletion reference using the same environment ordering as
+     /// reads and writes. Global object bindings use property configurability;
+-    /// declarative bindings are not deletable. With exclusions apply before
++    /// ordinary declarative bindings are not deletable; new eval var/function
++    /// bindings retain their deletable attribute. With exclusions apply before
+     /// continuing to the outer environment.
+     pub(crate) fn delete_binding_in(
+         &mut self,
+@@ -282,7 +332,9 @@ impl Interpreter {
+                 )
+             };
+             if local {
+-                return Ok(Value::Bool(false));
++                return Ok(Value::Bool(
++                    environment.borrow_mut().delete_declarative_binding(name),
++                ));
+             }
+             if global {
+                 let object = Value::RealmGlobal(environment.clone());
+@@ -807,6 +859,24 @@ impl Interpreter {
+ 
+     /// Resolve a property value, invoking it if it is a getter.
+     pub(crate) fn get_prop_value(&mut self, o: &Value, p: &Value) -> Result<Value, VmErr> {
++        // An own dense data element needs neither key stringification nor a
++        // prototype/accessor walk. Missing elements and exotic keys retain
++        // the observable general path; numeric -0 names index 0.
++        if let (Value::Array(array), Value::Number(index)) = (o, p)
++            && index.is_finite()
++            && *index >= 0.0
++            && *index < crate::value::MAX_ARRAY_LEN as f64
++            && index.fract() == 0.0
++            && !array.meta.borrow().has_accessors
++            && let Some(value) = array.index_value(*index as usize)
++        {
++            self.check_execution_interrupt()?;
++            return Ok(if matches!(value, Value::Binding(_)) {
++                value.deref_binding()
++            } else {
++                value
++            });
++        }
+         self.get_prop_value_with_receiver(o, p, o)
+     }
+ 
+@@ -912,14 +982,14 @@ impl Interpreter {
+         }
+         if let Some(props) = match o {
+             Value::Object { props } => Some(props.clone()),
+-            _ if !self.seq(o, receiver) => o.exotic_properties(),
++            _ if !self.seq(o, receiver) => o.property_cell(),
+             _ => None,
+         } {
+             let key = self.ecmascript_to_property_key(p)?;
+             let slot = self.property_key(&key)?;
+             let inherited = {
+                 let own = props.borrow().iter().any(|(name, _)| name == &slot);
+-                if own { None } else { props.proto() }
++                if own { None } else { self.prototype_of(o) }
+             };
+             if let Some(prototype) = inherited
+                 && matches!(
+@@ -1068,12 +1138,12 @@ impl Interpreter {
+         // internal operation, retaining the original receiver for accessors.
+         if let Some(props) = match o {
+             Value::Object { props } => Some(props.clone()),
+-            _ if !self.seq(o, receiver) => o.exotic_properties(),
++            _ if !self.seq(o, receiver) => o.property_cell(),
+             _ => None,
+         } {
+             let inherited = {
+                 let own = props.borrow().iter().any(|(name, _)| name == key);
+-                if own { None } else { props.proto() }
++                if own { None } else { self.prototype_of(o) }
+             };
+             if let Some(prototype) = inherited
+                 && matches!(
+@@ -1093,7 +1163,7 @@ impl Interpreter {
+         // names are not sufficient to turn an ordinary binding into a getter.
+         if let Some(cell) = o.property_cell()
+             && cell.own_index(key).is_some()
+-            && !cell.meta.borrow().has_accessors
++            && !cell.meta.borrow().may_have_accessor(key)
+         {
+             return Ok(v);
+         }
+diff --git a/crates/napi-vm-core/src/interpreter/rust_node_api/api/binary.rs b/crates/napi-vm-core/src/interpreter/rust_node_api/api/binary.rs
+index cc08ff6..bdd1f71 100644
+--- a/crates/napi-vm-core/src/interpreter/rust_node_api/api/binary.rs
++++ b/crates/napi-vm-core/src/interpreter/rust_node_api/api/binary.rs
+@@ -292,6 +292,7 @@ pub(super) fn napi_typed_kind(kind: i32) -> Option<TypedKind> {
+         8 => Some(TypedKind::Float64),
+         9 => Some(TypedKind::BigInt64),
+         10 => Some(TypedKind::BigUint64),
++        11 => Some(TypedKind::Float16),
+         _ => None,
+     }
+ }
+@@ -309,6 +310,7 @@ pub(super) fn napi_typed_kind_id(kind: TypedKind) -> i32 {
+         TypedKind::Float64 => 8,
+         TypedKind::BigInt64 => 9,
+         TypedKind::BigUint64 => 10,
++        TypedKind::Float16 => 11,
+     }
+ }
+ 
+diff --git a/crates/napi-vm-core/src/js_string.rs b/crates/napi-vm-core/src/js_string.rs
+index d3cd975..3e29ff2 100644
+--- a/crates/napi-vm-core/src/js_string.rs
++++ b/crates/napi-vm-core/src/js_string.rs
+@@ -1,5 +1,6 @@
+ //! ECMAScript strings are sequences of UTF-16 code units, including unpaired
+ //! surrogates. UTF-8 rendering is only a host-facing, lossy view.
++use std::borrow::Cow;
+ use std::ops::Deref;
+ use std::sync::{Arc, OnceLock};
+ 
+@@ -154,6 +155,28 @@ impl JsString {
+         }
+         out
+     }
++    /// Return the property-key encoding, borrowing ordinary well-formed
++    /// strings and allocating only when lone surrogates or the escape marker
++    /// require the lossless encoding used by [`Self::to_key`].
++    pub fn to_key_cow(&self) -> Cow<'_, str> {
++        let units = self.units();
++        let mut index = 0;
++        while index < units.len() {
++            match units[index] {
++                0xFDD0 => return Cow::Owned(self.to_key()),
++                0xD800..=0xDBFF
++                    if units
++                        .get(index + 1)
++                        .is_some_and(|unit| (0xDC00..=0xDFFF).contains(unit)) =>
++                {
++                    index += 2;
++                }
++                0xD800..=0xDFFF => return Cow::Owned(self.to_key()),
++                _ => index += 1,
++            }
++        }
++        Cow::Borrowed(self.as_str())
++    }
+     pub fn from_key(key: &str) -> Self {
+         let mut units = Vec::new();
+         let mut chars = key.chars();
+@@ -319,3 +342,29 @@ impl<'de> serde::Deserialize<'de> for JsString {
+         }
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn property_key_encoding_borrows_ordinary_and_paired_strings() {
++        for value in [JsString::from("toUpperCase"), JsString::from("😀")] {
++            let encoded = value.to_key_cow();
++            assert!(matches!(encoded, Cow::Borrowed(_)));
++            assert_eq!(encoded, value.to_key());
++        }
++    }
++
++    #[test]
++    fn property_key_encoding_allocates_for_lossless_escapes() {
++        for value in [
++            JsString::from_units(vec![0xD800]),
++            JsString::from("\u{FDD0}"),
++        ] {
++            let encoded = value.to_key_cow();
++            assert!(matches!(encoded, Cow::Owned(_)));
++            assert_eq!(encoded, value.to_key());
++        }
++    }
++}
+diff --git a/crates/napi-vm-core/src/lang/document.rs b/crates/napi-vm-core/src/lang/document.rs
+index abf98e1..6824ac2 100644
+--- a/crates/napi-vm-core/src/lang/document.rs
++++ b/crates/napi-vm-core/src/lang/document.rs
+@@ -1198,6 +1198,7 @@ impl Builder<'_> {
+                     name: MemberName::Static(field_name) | MemberName::Private(field_name),
+                     is_static,
+                     init,
++                    ..
+                 } if !is_static => {
+                     fields.insert(
+                         field_name.clone(),
+diff --git a/crates/napi-vm-core/src/lang/scope.rs b/crates/napi-vm-core/src/lang/scope.rs
+index 3195a28..28af5a5 100644
+--- a/crates/napi-vm-core/src/lang/scope.rs
++++ b/crates/napi-vm-core/src/lang/scope.rs
+@@ -119,6 +119,7 @@ fn walk_stmt(s: &Statement, scope: &mut Scope, runtime_handlers: &HashMap<String
+             walk_stmts(body, scope, runtime_handlers);
+         }
+         Statement::ClassDecl {
++            decorators: _,
+             source_text: _,
+             name,
+             superclass,
+diff --git a/crates/napi-vm-core/src/parser/ast.rs b/crates/napi-vm-core/src/parser/ast.rs
+index 39188ea..1d568e6 100644
+--- a/crates/napi-vm-core/src/parser/ast.rs
++++ b/crates/napi-vm-core/src/parser/ast.rs
+@@ -263,6 +263,7 @@ pub enum Expr {
+     /// `class { … }` / `class Named extends Base { … }` in expression
+     /// position. The name, when present, binds only inside the class body.
+     ClassExpr {
++        decorators: Vec<Expr>,
+         source_text: Option<SourceTextRef>,
+         name: Option<String>,
+         superclass: Option<Box<Expr>>,
+@@ -403,6 +404,7 @@ pub enum Statement {
+         annex_b_statement: bool,
+     },
+     ClassDecl {
++        decorators: Vec<Expr>,
+         source_text: Option<SourceTextRef>,
+         name: String,
+         superclass: Option<Box<Expr>>,
+@@ -581,6 +583,7 @@ pub enum ClassMember {
+     Field {
+         name: MemberName,
+         is_static: bool,
++        auto_accessor: bool,
+         init: Option<Expr>,
+     },
+     /// `static { … }`: runs once against the class, after its static fields
+@@ -601,24 +604,55 @@ pub enum ClassMember {
+     },
+ }
+ 
+-/// Source declarations for eval's lexical validation, independent of which
+-/// private storage forms the runtime currently installs.
++/// A per-element private name that cannot be written by guest source. The
++/// ordinal keeps redeclared public accessors' backing slots independent.
++pub(crate) fn auto_accessor_storage(index: usize) -> String {
++    format!("#\0auto-accessor:{index}")
++}
++
++pub(crate) fn auto_accessor_body(storage: &str, setter: bool) -> Vec<Statement> {
++    let target = Expr::Member {
++        object: Box::new(Expr::This),
++        property: Box::new(Expr::String(crate::JsString::from_key(storage))),
++        computed: false,
++    };
++    if setter {
++        vec![Statement::Expr(Expr::Assignment {
++            target: Box::new(target),
++            op: AssignOp::Assign,
++            value: Box::new(Expr::Identifier("value".into())),
++        })]
++    } else {
++        vec![Statement::Return(Some(Box::new(target)))]
++    }
++}
++
++/// Source private declarations and auto-accessor backing slots, allocated in
++/// the class environment before any computed names or initializers execute.
+ pub(crate) fn class_private_declarations(body: &[ClassMember]) -> Vec<String> {
+-    body.iter()
+-        .filter_map(|member| {
+-            let name = match member {
+-                ClassMember::Method { name, .. }
+-                | ClassMember::Field { name, .. }
+-                | ClassMember::Getter { name, .. }
+-                | ClassMember::Setter { name, .. } => name,
+-                ClassMember::StaticBlock { .. } => return None,
+-            };
+-            match name {
+-                MemberName::Private(name) => Some(name.clone()),
+-                _ => None,
++    let mut names = Vec::new();
++    for (index, member) in body.iter().enumerate() {
++        let name = match member {
++            ClassMember::Method { name, .. }
++            | ClassMember::Getter { name, .. }
++            | ClassMember::Setter { name, .. } => name,
++            ClassMember::Field {
++                name,
++                auto_accessor,
++                ..
++            } => {
++                if *auto_accessor {
++                    names.push(auto_accessor_storage(index));
++                }
++                name
+             }
+-        })
+-        .collect()
++            ClassMember::StaticBlock { .. } => continue,
++        };
++        if let MemberName::Private(name) = name {
++            names.push(name.clone());
++        }
++    }
++    names
+ }
+ 
+ /// An object-pattern key: a static name, or `[expr]` evaluated at bind time.
+@@ -1011,11 +1045,17 @@ pub(crate) fn statements_capture_identifier(stmts: &[Statement], name: &str) ->
+         }
+         Statement::FnDecl { body, .. } => stmts_reference(body, name),
+         Statement::ClassDecl {
+-            superclass, body, ..
++            decorators,
++            superclass,
++            body,
++            ..
+         } => {
+-            superclass
+-                .as_ref()
+-                .is_some_and(|expr| expr_captures_identifier(expr, name))
++            decorators
++                .iter()
++                .any(|expr| expr_captures_identifier(expr, name))
++                || superclass
++                    .as_ref()
++                    .is_some_and(|expr| expr_captures_identifier(expr, name))
+                 || class_members_capture_identifier(body, name)
+         }
+         Statement::Return(expr) => expr
+@@ -1134,11 +1174,17 @@ pub(crate) fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
+         Expr::ArrowFn { body, .. } => arrow_body_references(body, name),
+         Expr::FnExpr { body, .. } => stmts_reference(body, name),
+         Expr::ClassExpr {
+-            superclass, body, ..
++            decorators,
++            superclass,
++            body,
++            ..
+         } => {
+-            superclass
+-                .as_deref()
+-                .is_some_and(|expr| expr_captures_identifier(expr, name))
++            decorators
++                .iter()
++                .any(|expr| expr_captures_identifier(expr, name))
++                || superclass
++                    .as_deref()
++                    .is_some_and(|expr| expr_captures_identifier(expr, name))
+                 || class_members_capture_identifier(body, name)
+         }
+         Expr::Array { items, .. } => items
+@@ -1297,12 +1343,16 @@ fn stmt_references(s: &Statement, name: &str) -> bool {
+         }
+         Statement::FnDecl { body, .. } => stmts_reference(body, name),
+         Statement::ClassDecl {
+-            superclass, body, ..
++            decorators,
++            superclass,
++            body,
++            ..
+         } => {
+-            superclass
+-                .as_ref()
+-                .map(|e| expr_references(e, name))
+-                .unwrap_or(false)
++            decorators.iter().any(|expr| expr_references(expr, name))
++                || superclass
++                    .as_ref()
++                    .map(|e| expr_references(e, name))
++                    .unwrap_or(false)
+                 || body.iter().any(|m| {
+                     member_name_references(m, name)
+                         || match m {
+@@ -1473,12 +1523,16 @@ fn expr_references(e: &Expr, name: &str) -> bool {
+         }
+         Expr::Unary { operand, .. } => expr_references(operand, name),
+         Expr::ClassExpr {
+-            superclass, body, ..
++            decorators,
++            superclass,
++            body,
++            ..
+         } => {
+-            superclass
+-                .as_ref()
+-                .map(|e| expr_references(e, name))
+-                .unwrap_or(false)
++            decorators.iter().any(|expr| expr_references(expr, name))
++                || superclass
++                    .as_ref()
++                    .map(|e| expr_references(e, name))
++                    .unwrap_or(false)
+                 || body.iter().any(|m| {
+                     member_name_references(m, name)
+                         || match m {
+@@ -1705,9 +1759,13 @@ fn statement_has_top_level_await(statement: &Statement) -> bool {
+         | Statement::ExportAll { .. }
+         | Statement::Empty => false,
+         Statement::ClassDecl {
+-            superclass, body, ..
++            decorators,
++            superclass,
++            body,
++            ..
+         } => {
+-            superclass.as_deref().is_some_and(expr_has_top_level_await)
++            decorators.iter().any(expr_has_top_level_await)
++                || superclass.as_deref().is_some_and(expr_has_top_level_await)
+                 || class_has_top_level_await(body)
+         }
+         Statement::Return(expr) => expr.as_deref().is_some_and(expr_has_top_level_await),
+@@ -1841,6 +1899,7 @@ fn class_has_top_level_await(members: &[ClassMember]) -> bool {
+             name,
+             is_static,
+             init,
++            ..
+         } => {
+             member_name_has_top_level_await(name)
+                 || (*is_static && init.as_ref().is_some_and(expr_has_top_level_await))
+@@ -1900,9 +1959,13 @@ fn expr_has_top_level_await(expr: &Expr) -> bool {
+         }
+         Expr::ArrowFn { .. } | Expr::FnExpr { .. } => false,
+         Expr::ClassExpr {
+-            superclass, body, ..
++            decorators,
++            superclass,
++            body,
++            ..
+         } => {
+-            superclass.as_deref().is_some_and(expr_has_top_level_await)
++            decorators.iter().any(expr_has_top_level_await)
++                || superclass.as_deref().is_some_and(expr_has_top_level_await)
+                 || class_has_top_level_await(body)
+         }
+         Expr::DynamicImport {
+diff --git a/crates/napi-vm-core/src/parser/cache.rs b/crates/napi-vm-core/src/parser/cache.rs
+index 75f40a4..87e6b87 100644
+--- a/crates/napi-vm-core/src/parser/cache.rs
++++ b/crates/napi-vm-core/src/parser/cache.rs
+@@ -239,14 +239,26 @@ mod tests {
+         assert_eq!(parse_count() - before, 2);
+     }
+ 
++    #[test]
++    fn nested_functions_parse_on_a_small_native_stack() {
++        let source = "(function(){".repeat(32) + "0;" + &"})()".repeat(32);
++        std::thread::Builder::new()
++            .name("nested-function-parse-probe".into())
++            .stack_size(512 * 1024)
++            .spawn(move || assert!(parse_cached(&source).is_ok()))
++            .unwrap()
++            .join()
++            .unwrap();
++    }
++
+     #[test]
+     fn depth_failure_detail_survives_the_cache_boundary() {
+         let deep = "(".repeat(200) + &")".repeat(200);
+-        // Debug parser frames are fat: 65 guarded levels exceed the default
+-        // test-thread stack, so run the probe on a roomy thread.
++        // Both successful descent and rejection at the resource limit must
++        // remain safe on embedding threads with small native stacks.
+         let failure = std::thread::Builder::new()
+             .name("cache-depth-probe".into())
+-            .stack_size(8 * 1024 * 1024)
++            .stack_size(512 * 1024)
+             .spawn(move || parse_cached(&deep).unwrap_err())
+             .unwrap()
+             .join()
+diff --git a/crates/napi-vm-core/src/parser/compound.rs b/crates/napi-vm-core/src/parser/compound.rs
+index ea17e05..7e36487 100644
+--- a/crates/napi-vm-core/src/parser/compound.rs
++++ b/crates/napi-vm-core/src/parser/compound.rs
+@@ -49,6 +49,71 @@ impl Parser {
+         false
+     }
+ 
++    pub(super) fn decorator_list(&mut self) -> Option<Vec<Expr>> {
++        let mut decorators = Vec::new();
++        while self.eat(&Token::Unknown('@')) {
++            let expression = if self.eat(&Token::LParen) {
++                let expression = self.with_in(true, Self::expr)?;
++                self.expect(&Token::RParen);
++                Expr::Parenthesized(Box::new(expression))
++            } else {
++                if !matches!(
++                    self.cur(),
++                    Token::Identifier(_)
++                        | Token::EscapedIdentifier(_)
++                        | Token::KwYield
++                        | Token::KwAwait
++                        | Token::KwAsync
++                        | Token::KwAs
++                        | Token::KwLet
++                        | Token::KwStatic
++                        | Token::KwConstructor
++                        | Token::KwFrom
++                        | Token::KwGet
++                        | Token::KwOf
++                        | Token::KwSet
++                ) {
++                    self.record_error(
++                        "expected decorator identifier or parenthesized expression".into(),
++                    );
++                    return None;
++                }
++                let mut expression = self.primary()?;
++                while self.eat(&Token::Dot) {
++                    let property = if let Token::PrivateIdentifier(name) = self.cur() {
++                        let name = format!("#{name}");
++                        self.adv();
++                        name
++                    } else {
++                        self.ident_or_keyword()?
++                    };
++                    expression = Expr::Member {
++                        object: Box::new(expression),
++                        property: Box::new(Expr::String(property.into())),
++                        computed: false,
++                    };
++                }
++                if self.eat(&Token::LParen) {
++                    let mut args = Vec::new();
++                    while self.until(&Token::RParen) {
++                        args.push(self.with_in(true, Self::assign)?);
++                        if !matches!(self.cur(), Token::RParen) {
++                            self.expect(&Token::Comma);
++                        }
++                    }
++                    self.expect(&Token::RParen);
++                    expression = Expr::Call {
++                        callee: Box::new(expression),
++                        args,
++                    };
++                }
++                expression
++            };
++            decorators.push(expression);
++        }
++        Some(decorators)
++    }
++
+     pub(super) fn class_decl(&mut self) -> Option<Statement> {
+         self.class_decl_named(None)
+     }
+@@ -57,7 +122,33 @@ impl Parser {
+     /// class { … }`), in which case `fallback` supplies the binding name.
+     pub(crate) fn class_decl_named(&mut self, fallback: Option<&str>) -> Option<Statement> {
+         let source_start = self.pos;
+-        self.adv();
++        let decorators = self.decorator_list()?;
++        if matches!(self.cur(), Token::KwExport) && !decorators.is_empty() {
++            let mut statement = self.export()?;
++            let target = match &mut statement {
++                Statement::Declarations(statements) => statements.first_mut()?,
++                _ => {
++                    self.record_error("decorators require an exported class".into());
++                    return None;
++                }
++            };
++            if let Statement::ClassDecl {
++                decorators: inner, ..
++            } = target
++            {
++                if !inner.is_empty() {
++                    self.record_error("decorators cannot occur on both sides of export".into());
++                }
++                *inner = decorators;
++                return Some(statement);
++            }
++            self.record_error("decorators require an exported class".into());
++            return None;
++        }
++        if !self.eat(&Token::KwClass) {
++            self.record_error("expected class after decorators".into());
++            return None;
++        }
+         let name_span = self.cur_span();
+         let n = match (self.cur(), fallback) {
+             (Token::LBrace | Token::KwExtends, Some(name)) => name.to_string(),
+@@ -98,6 +189,15 @@ impl Parser {
+                 b.push(ClassMember::StaticBlock { body });
+                 continue;
+             }
++            let auto_accessor = matches!(self.cur(), Token::Identifier(name) if name == "accessor")
++                && !self.line_break_after_current()
++                && !matches!(
++                    self.peek(),
++                    Token::LParen | Token::Equal | Token::Semicolon | Token::RBrace
++                );
++            if auto_accessor {
++                self.adv();
++            }
+             let is_async = !self.line_break_after_current() && self.eat_modifier(&Token::KwAsync);
+             let is_generator = self.eat(&Token::Star);
+             let is_getter = self.eat_modifier(&Token::KwGet);
+@@ -187,6 +287,9 @@ impl Parser {
+                 );
+             }
+             if self.eat(&Token::LParen) {
++                if auto_accessor {
++                    self.record_error("auto-accessor cannot be a method".into());
++                }
+                 let method_scope = self.push_scope(true);
+                 let (p, defaults, bd) = self.callable_parts(is_async, is_generator);
+                 self.check_accessor_parameters(&p, &defaults, is_getter, is_setter);
+@@ -236,6 +339,7 @@ impl Parser {
+                 b.push(ClassMember::Field {
+                     name: mn,
+                     is_static: st,
++                    auto_accessor,
+                     init: i,
+                 });
+             }
+@@ -243,6 +347,7 @@ impl Parser {
+         self.expect(&Token::RBrace);
+         self.pop_scope(class_scope);
+         Some(Statement::ClassDecl {
++            decorators,
+             source_text: self.source_since(source_start),
+             name: n,
+             superclass: sc,
+@@ -257,7 +362,9 @@ impl Parser {
+             // *declarations*, not expressions: bind the (possibly synthesized)
+             // name first, then export that binding as the default.
+             let decl = match self.cur() {
+-                Token::KwClass => self.class_decl_named(Some(DEFAULT_BINDING)),
++                Token::KwClass | Token::Unknown('@') => {
++                    self.class_decl_named(Some(DEFAULT_BINDING))
++                }
+                 Token::KwFunction => self.fn_decl_named(false, Some(DEFAULT_BINDING)),
+                 Token::KwAsync
+                     if matches!(self.peek(), Token::KwFunction)
+@@ -390,7 +497,7 @@ impl Parser {
+                 let n = decl_name(&d);
+                 (d, n)
+             }
+-            Token::KwClass => {
++            Token::KwClass | Token::Unknown('@') => {
+                 let d = self.class_decl()?;
+                 let n = decl_name(&d);
+                 (d, n)
+@@ -655,7 +762,7 @@ impl Parser {
+             if self.eof() {
+                 break;
+             }
+-            if let Some(st) = self.stmt() {
++            if let Some(st) = self.statement_list_item() {
+                 s.push(st);
+             } else {
+                 self.record_error("invalid statement in block".into());
+diff --git a/crates/napi-vm-core/src/parser/expr.rs b/crates/napi-vm-core/src/parser/expr.rs
+index 60d84cf..227a524 100644
+--- a/crates/napi-vm-core/src/parser/expr.rs
++++ b/crates/napi-vm-core/src/parser/expr.rs
+@@ -12,7 +12,7 @@ impl Parser {
+         if !self.enter() {
+             return None;
+         }
+-        let r = self.comma();
++        let r = stacker::maybe_grow(1024 * 1024, 8 * 1024 * 1024, || self.comma());
+         self.leave();
+         r
+     }
+diff --git a/crates/napi-vm-core/src/parser/mod.rs b/crates/napi-vm-core/src/parser/mod.rs
+index cd830d2..900ec45 100644
+--- a/crates/napi-vm-core/src/parser/mod.rs
++++ b/crates/napi-vm-core/src/parser/mod.rs
+@@ -35,11 +35,10 @@ use crate::span::Span;
+ /// Maximum statement/expression nesting the parser accepts. The parser is
+ /// recursive descent, so each nesting level costs native stack frames;
+ /// 100k-deep parentheses would overflow the stack and SIGSEGV the host.
+-/// Each recursive expression level passes through several parser functions,
+-/// so even 256 levels can exhaust the smaller native stacks used by embedded
+-/// runtimes before this guard unwinds. Legitimate code rarely nests beyond a
+-/// few dozen levels.
+-const MAX_PARSE_DEPTH: u32 = 64;
++/// Guarded recursive entry points grow the native stack before descending.
++/// Keep a finite resource limit while accepting ordinary nested functions,
++/// which consume several statement/expression levels per function.
++const MAX_PARSE_DEPTH: u32 = 128;
+ 
+ #[cfg(any(test, feature = "test-hooks"))]
+ thread_local! {
+@@ -175,7 +174,7 @@ impl Parser {
+     pub fn parse(&mut self) -> Vec<Statement> {
+         let mut s = Vec::new();
+         while !self.eof() && !self.depth_exceeded {
+-            if let Some(st) = self.stmt() {
++            if let Some(st) = self.statement_list_item() {
+                 s.push(st);
+             } else {
+                 // Record the position of the token that could not start a
+@@ -245,12 +244,13 @@ impl Parser {
+         match self.error.take() {
+             Some(error) => Err(error),
+             None => {
+-                validate::validate(&stmts, new_target, strict, goal, eval.as_ref()).map_err(
+-                    |message| ParseError {
+-                        message,
+-                        span: Span::unknown(),
+-                    },
+-                )?;
++                stacker::maybe_grow(1024 * 1024, 8 * 1024 * 1024, || {
++                    validate::validate(&stmts, new_target, strict, goal, eval.as_ref())
++                })
++                .map_err(|message| ParseError {
++                    message,
++                    span: Span::unknown(),
++                })?;
+                 Ok(stmts)
+             }
+         }
+@@ -619,6 +619,26 @@ mod tests {
+         parser.parse()
+     }
+ 
++    fn parse_program(src: &str) -> Result<Vec<Statement>, ParseError> {
++        let mut lex = Lexer::new(src);
++        let toks = lex.tokenize_with_spans();
++        Parser::new_with_spans(toks).parse_program()
++    }
++
++    #[test]
++    fn consecutive_empty_blocks_collapse_in_statement_lists() {
++        let statements = parse_program("{}{}{}{};").unwrap();
++        assert_eq!(statements.len(), 2);
++        assert!(matches!(&statements[0], Statement::Block(body) if body.is_empty()));
++        assert!(matches!(&statements[1], Statement::Empty));
++    }
++
++    #[test]
++    fn empty_block_collapse_preserves_single_statement_grammar() {
++        assert!(parse_program("if (true) {} else {}").is_ok());
++        assert!(parse_program("if (true) {}{} else {}").is_err());
++    }
++
+     #[test]
+     fn test_var_decl() {
+         let stmts = parse("const x = 42;");
+diff --git a/crates/napi-vm-core/src/parser/primary.rs b/crates/napi-vm-core/src/parser/primary.rs
+index 0b4ef90..2ee6651 100644
+--- a/crates/napi-vm-core/src/parser/primary.rs
++++ b/crates/napi-vm-core/src/parser/primary.rs
+@@ -373,8 +373,9 @@ impl Parser {
+             }
+             Token::KwAsync => self.async_expr(),
+             // `class` in expression position.
+-            Token::KwClass => {
++            Token::KwClass | Token::Unknown('@') => {
+                 let Statement::ClassDecl {
++                    decorators,
+                     source_text,
+                     name,
+                     superclass,
+@@ -384,6 +385,7 @@ impl Parser {
+                     return None;
+                 };
+                 Some(Expr::ClassExpr {
++                    decorators,
+                     source_text,
+                     name: (name != ANONYMOUS_CLASS).then_some(name),
+                     superclass,
+diff --git a/crates/napi-vm-core/src/parser/stmt.rs b/crates/napi-vm-core/src/parser/stmt.rs
+index 5d5bcdd..d82a869 100644
+--- a/crates/napi-vm-core/src/parser/stmt.rs
++++ b/crates/napi-vm-core/src/parser/stmt.rs
+@@ -7,12 +7,38 @@ use super::{
+ use crate::lexer::Token;
+ 
+ impl Parser {
++    /// Parse one statement-list item, collapsing consecutive empty block
++    /// statements. They have no declarations, effects, or completion value,
++    /// so a run is equivalent to a single empty block. Keeping this fast path
++    /// in statement lists preserves the one-statement grammar used by `if`,
++    /// loops, labels, and similar constructs.
++    pub(crate) fn statement_list_item(&mut self) -> Option<Statement> {
++        if !self.single_statement && matches!(self.cur(), Token::LBrace) {
++            let start = self.pos;
++            let mut end = start;
++            while matches!(
++                self.toks.get(end).map(|(token, _)| token),
++                Some(Token::LBrace)
++            ) && matches!(
++                self.toks.get(end + 1).map(|(token, _)| token),
++                Some(Token::RBrace)
++            ) {
++                end += 2;
++            }
++            if end > start {
++                self.pos = end;
++                return Some(Statement::Block(Vec::new()));
++            }
++        }
++        self.stmt()
++    }
++
+     pub(crate) fn stmt(&mut self) -> Option<Statement> {
+         // Nesting guard for nested blocks / control flow; see `Parser::enter`.
+         if !self.enter() {
+             return None;
+         }
+-        let r = self.stmt_inner();
++        let r = stacker::maybe_grow(1024 * 1024, 8 * 1024 * 1024, || self.stmt_inner());
+         self.leave();
+         r
+     }
+@@ -130,7 +156,7 @@ impl Parser {
+                     Some(Statement::Expr(e))
+                 }
+             }
+-            Token::KwClass => {
++            Token::KwClass | Token::Unknown('@') => {
+                 if self.single_statement {
+                     self.record_error("class declaration requires a statement list".into());
+                 }
+diff --git a/crates/napi-vm-core/src/parser/validate.rs b/crates/napi-vm-core/src/parser/validate.rs
+index 106f21a..f3a53d4 100644
+--- a/crates/napi-vm-core/src/parser/validate.rs
++++ b/crates/napi-vm-core/src/parser/validate.rs
+@@ -562,11 +562,15 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
+             statements(body, ctx)
+         }
+         Statement::ClassDecl {
++            decorators,
+             source_text: _,
+             name,
+             superclass,
+             body,
+         } => {
++            for decorator in decorators {
++                expression(decorator, ctx)?;
++            }
+             binding(
+                 name,
+                 &Context {
+@@ -1337,11 +1341,15 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
+             )
+         }
+         Expr::ClassExpr {
++            decorators,
+             source_text: _,
+             name,
+             superclass,
+             body,
+         } => {
++            for decorator in decorators {
++                expression(decorator, ctx)?;
++            }
+             if let Some(name) = name {
+                 binding(
+                     name,
+diff --git a/crates/napi-vm-core/src/regex/mod.rs b/crates/napi-vm-core/src/regex/mod.rs
+index 169cc39..b9bd7b2 100644
+--- a/crates/napi-vm-core/src/regex/mod.rs
++++ b/crates/napi-vm-core/src/regex/mod.rs
+@@ -55,6 +55,12 @@ pub type Captures = Vec<Option<(usize, usize)>>;
+ /// Literals and constructors use the same validator; parsing a literal does
+ /// not execute or compile the engine's partial matcher implementation.
+ pub(crate) fn validate_syntax(source: &crate::JsString, flags: &str) -> Result<String, String> {
++    stacker::maybe_grow(1024 * 1024, 8 * 1024 * 1024, || {
++        validate_syntax_inner(source, flags)
++    })
++}
++
++fn validate_syntax_inner(source: &crate::JsString, flags: &str) -> Result<String, String> {
+     let mut seen = String::new();
+     for flag in flags.chars() {
+         if !"dgimsuvy".contains(flag) {
+@@ -104,7 +110,7 @@ pub(crate) fn validate_syntax(source: &crate::JsString, flags: &str) -> Result<S
+             ')' if classes == 0 => groups = groups.saturating_sub(1),
+             _ => {}
+         }
+-        if groups + classes > 128 {
++        if groups + classes > 256 {
+             return Err("Maximum regular expression nesting exceeded".into());
+         }
+     }
+@@ -128,7 +134,9 @@ impl Regex {
+         let source = source.into();
+         let pattern = validate_syntax(&source, flags)?;
+         let unicode = flags.contains('u') || flags.contains('v');
+-        let parsed = parse::Parser::new(&pattern, unicode, flags.contains('v')).parse()?;
++        let parsed = stacker::maybe_grow(1024 * 1024, 8 * 1024 * 1024, || {
++            parse::Parser::new(&pattern, unicode, flags.contains('v')).parse()
++        })?;
+         Ok(Self {
+             root: parsed.root,
+             group_count: parsed.group_count,
+@@ -227,7 +235,7 @@ type Cont<'k> = &'k mut dyn FnMut(usize, &mut Captures) -> bool;
+ 
+ impl Matcher<'_> {
+     fn enter(&self) -> Result<MatchDepth<'_>, String> {
+-        if self.depth.get() >= 128 {
++        if self.depth.get() >= 512 {
+             return Err("RangeError: Regular expression exceeded the nesting budget".into());
+         }
+         self.depth.set(self.depth.get() + 1);
+@@ -1066,6 +1074,28 @@ impl Matcher<'_> {
+ mod modifier_tests {
+     use super::Regex;
+ 
++    #[test]
++    fn nested_groups_compile_and_match_on_a_small_native_stack() {
++        std::thread::Builder::new()
++            .name("nested-regexp-probe".into())
++            .stack_size(512 * 1024)
++            .spawn(|| {
++                let input: Vec<u16> = "hello".encode_utf16().collect();
++                for opening in ["(", "(?:"] {
++                    let pattern = opening.repeat(200) + "hello" + &")".repeat(200);
++                    let regex = Regex::new(pattern.as_str(), "").unwrap();
++                    let captures = regex.find_at(&input, 0).unwrap().unwrap();
++                    assert_eq!(captures.len(), if opening == "(" { 201 } else { 1 });
++                    assert!(captures.iter().all(|capture| *capture == Some((0, 5))));
++                }
++                let excessive = "(".repeat(257) + "hello" + &")".repeat(257);
++                assert!(Regex::new(excessive.as_str(), "").is_err());
++            })
++            .unwrap()
++            .join()
++            .unwrap();
++    }
++
+     fn matches(pattern: &str, flags: &str, input: &str) -> bool {
+         Regex::new(pattern, flags)
+             .unwrap()
+diff --git a/crates/napi-vm-core/src/value.rs b/crates/napi-vm-core/src/value.rs
+index e399d37..a5dabfb 100644
+--- a/crates/napi-vm-core/src/value.rs
++++ b/crates/napi-vm-core/src/value.rs
+@@ -228,6 +228,7 @@ pub struct ObjectMeta {
+     /// is the difference between allocating a slot name on every write and
+     /// never allocating one.
+     pub has_accessors: bool,
++    pub(crate) legacy_call_accessors: bool,
+     /// Accessor slots with neither a callable getter nor a callable setter.
+     pub(crate) empty_accessors: Vec<String>,
+     /// The primitive carried by a boxed Boolean, Number, String, Symbol, or
+@@ -358,6 +359,9 @@ impl std::fmt::Debug for ObjectMeta {
+ }
+ 
+ impl ObjectMeta {
++    pub(crate) fn may_have_accessor(&self, key: &str) -> bool {
++        self.has_accessors || self.legacy_call_accessors && matches!(key, "caller" | "arguments")
++    }
+     pub fn attrs_of(&self, key: &str) -> PropAttrs {
+         // Most objects never have a non-default attribute, and this runs on
+         // every property read and write.
+@@ -1447,25 +1451,43 @@ impl FunctionData {
+         self.uses_arguments || non_simple
+     }
+ 
+-    pub fn ensure_name_length_properties(&self) {
+-        if self.standard_properties_initialized.replace(true) {
+-            return;
+-        }
+-        let mut properties = self.properties.borrow_mut();
+-        // Legacy ordinary non-strict functions may expose null caller and
+-        // arguments properties. Other function kinds inherit the restricted
+-        // accessors from Function.prototype.
+-        if !self.strict
++    pub(crate) fn exposes_legacy_call_properties(&self) -> bool {
++        !self.strict
+             && self.is_constructor
+             && !self.is_arrow
+             && !self.is_async
+             && !self.is_generator
+             && self.native.is_none()
+             && self.bound.is_none()
+-        {
++    }
++
++    pub fn ensure_name_length_properties(&self) {
++        if self.standard_properties_initialized.replace(true) {
++            return;
++        }
++        let mut properties = self.properties.borrow_mut();
++        // Activation-sensitive properties use stable accessor descriptors.
++        // Other function kinds inherit the restricted Function.prototype
++        // accessors instead.
++        if self.exposes_legacy_call_properties() {
+             for key in ["caller", "arguments"] {
+                 if !properties.iter().any(|(name, _)| name == key) {
+-                    properties.push((key.into(), Value::Null));
++                    let intrinsic = if key == "caller" {
++                        "%LegacyCallerGetter%"
++                    } else {
++                        "%LegacyArgumentsGetter%"
++                    };
++                    let getter = self
++                        .properties
++                        .meta
++                        .borrow()
++                        .realm_global
++                        .clone()
++                        .and_then(|realm| realm.borrow().intrinsic(intrinsic));
++                    if getter.is_some() {
++                        self.properties.meta.borrow_mut().legacy_call_accessors = true;
++                    }
++                    properties.push((key.into(), getter.unwrap_or(Value::Null)));
+                     self.properties.meta.borrow_mut().set_attrs(
+                         key,
+                         PropAttrs {
+@@ -2426,6 +2448,7 @@ pub enum TypedKind {
+     Uint16,
+     Int32,
+     Uint32,
++    Float16,
+     Float32,
+     Float64,
+     BigInt64,
+@@ -2436,7 +2459,7 @@ impl TypedKind {
+     pub fn size(self) -> usize {
+         match self {
+             TypedKind::Int8 | TypedKind::Uint8 | TypedKind::Uint8Clamped => 1,
+-            TypedKind::Int16 | TypedKind::Uint16 => 2,
++            TypedKind::Int16 | TypedKind::Uint16 | TypedKind::Float16 => 2,
+             TypedKind::Int32 | TypedKind::Uint32 | TypedKind::Float32 => 4,
+             TypedKind::Float64 | TypedKind::BigInt64 | TypedKind::BigUint64 => 8,
+         }
+@@ -2451,6 +2474,7 @@ impl TypedKind {
+             TypedKind::Uint16 => "Uint16Array",
+             TypedKind::Int32 => "Int32Array",
+             TypedKind::Uint32 => "Uint32Array",
++            TypedKind::Float16 => "Float16Array",
+             TypedKind::Float32 => "Float32Array",
+             TypedKind::Float64 => "Float64Array",
+             TypedKind::BigInt64 => "BigInt64Array",
+diff --git a/src/bindings/marshal.rs b/src/bindings/marshal.rs
+index b3b262e..5d518f8 100644
+--- a/src/bindings/marshal.rs
++++ b/src/bindings/marshal.rs
+@@ -23,6 +23,9 @@ use napi::sys;
+ use crate::error::VmErr;
+ use crate::value::{Buffer, MAX_ARRAY_LEN, MAX_OBJECT_PROPS, MAX_STRING_LEN, Value};
+ 
++// Node-API's Float16 tag is newer than the napi-sys constants used here.
++const NAPI_FLOAT16_ARRAY: sys::napi_typedarray_type = 11;
++
+ #[inline]
+ pub(super) fn chk(status: sys::napi_status) -> Result<(), VmErr> {
+     if status == sys::Status::napi_ok {
+@@ -393,6 +396,7 @@ fn make_typed_array(
+             crate::value::TypedKind::Uint16 => sys::TypedarrayType::uint16_array,
+             crate::value::TypedKind::Int32 => sys::TypedarrayType::int32_array,
+             crate::value::TypedKind::Uint32 => sys::TypedarrayType::uint32_array,
++            crate::value::TypedKind::Float16 => NAPI_FLOAT16_ARRAY,
+             crate::value::TypedKind::Float32 => sys::TypedarrayType::float32_array,
+             crate::value::TypedKind::Float64 => sys::TypedarrayType::float64_array,
+             crate::value::TypedKind::BigInt64 => sys::TypedarrayType::bigint64_array,
+@@ -551,6 +555,7 @@ fn read_typed_array(env: sys::napi_env, raw: sys::napi_value) -> Result<Value, V
+             sys::TypedarrayType::uint16_array => TypedKind::Uint16,
+             sys::TypedarrayType::int32_array => TypedKind::Int32,
+             sys::TypedarrayType::uint32_array => TypedKind::Uint32,
++            NAPI_FLOAT16_ARRAY => TypedKind::Float16,
+             sys::TypedarrayType::float32_array => TypedKind::Float32,
+             sys::TypedarrayType::float64_array => TypedKind::Float64,
+             sys::TypedarrayType::bigint64_array => TypedKind::BigInt64,

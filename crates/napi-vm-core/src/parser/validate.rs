@@ -562,11 +562,15 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             statements(body, ctx)
         }
         Statement::ClassDecl {
+            decorators,
             source_text: _,
             name,
             superclass,
             body,
         } => {
+            for decorator in decorators {
+                expression(decorator, ctx)?;
+            }
             binding(
                 name,
                 &Context {
@@ -1337,11 +1341,15 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
             )
         }
         Expr::ClassExpr {
+            decorators,
             source_text: _,
             name,
             superclass,
             body,
         } => {
+            for decorator in decorators {
+                expression(decorator, ctx)?;
+            }
             if let Some(name) = name {
                 binding(
                     name,
@@ -1501,6 +1509,9 @@ fn class(body: &[ClassMember], outer: &Context, derived: bool) -> Check {
                 return Err("static prototype element is forbidden".into());
             }
             if !is_static && name == "constructor" {
+                if !member.decorators().is_empty() {
+                    return Err("constructor cannot be decorated".into());
+                }
                 match member {
                     ClassMember::Method {
                         is_async: false,
@@ -1520,6 +1531,9 @@ fn class(body: &[ClassMember], outer: &Context, derived: bool) -> Check {
     ctx.private_names
         .push(Rc::new(private.into_keys().collect()));
     for member in body {
+        for decorator in member.decorators() {
+            expression(decorator, &ctx)?;
+        }
         let name = match member {
             ClassMember::Method { name, .. }
             | ClassMember::Field { name, .. }
@@ -1532,6 +1546,7 @@ fn class(body: &[ClassMember], outer: &Context, derived: bool) -> Check {
         }
         match member {
             ClassMember::Method {
+                decorators: _,
                 source_text: _,
                 name,
                 is_static,

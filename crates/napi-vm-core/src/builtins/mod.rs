@@ -488,6 +488,18 @@ pub(crate) fn is_intrinsic_eval(value: &Value, global: &Env) -> bool {
             .is_none_or(|owner| std::rc::Rc::ptr_eq(&owner, global))
 }
 
+pub(crate) fn is_transparent_native_call(callable: NativeFn) -> bool {
+    [
+        function::function_call as NativeFn,
+        function::function_apply,
+        reflect::reflect_apply,
+        reflect::reflect_construct,
+        eval_indirect,
+    ]
+    .iter()
+    .any(|candidate| std::ptr::fn_addr_eq(callable, *candidate))
+}
+
 pub(crate) fn eval_direct(interp: &mut Interpreter, args: Vec<Value>) -> Result<Value, VmErr> {
     match args.first() {
         Some(Value::String(source)) => {

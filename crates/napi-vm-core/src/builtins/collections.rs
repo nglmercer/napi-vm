@@ -1107,16 +1107,26 @@ fn set_count(v: &Rc<ArrayCell>) -> usize {
 fn set_has_record(i: &mut Interpreter, r: &SetRecord, k: Value) -> Result<bool, VmErr> {
     Ok(i.call_this(&r.has, r.object.clone(), vec![k])?.is_truthy())
 }
-fn set_keys_visit(
-    i: &mut Interpreter,
-    r: &SetRecord,
-    mut visit: impl FnMut(&mut Interpreter, Value) -> Result<bool, VmErr>,
-) -> Result<(), VmErr> {
+fn set_keys_iterator(i: &mut Interpreter, r: &SetRecord) -> Result<(Value, Value), VmErr> {
     let iterator = i.call_this(&r.keys, r.object.clone(), vec![])?;
     if !crate::interpreter::call::is_js_object(&iterator) {
         return Err(VmErr::Msg("TypeError: keys must return iterator".into()));
     }
     let next = i.get_prop_value_str(&iterator, "next")?;
+    if !crate::interpreter::is_callable_value(&next) {
+        return Err(VmErr::Msg(
+            "TypeError: iterator next must be callable".into(),
+        ));
+    }
+    Ok((iterator, next))
+}
+
+fn set_keys_visit(
+    i: &mut Interpreter,
+    iterator: Value,
+    next: Value,
+    mut visit: impl FnMut(&mut Interpreter, Value) -> Result<bool, VmErr>,
+) -> Result<(), VmErr> {
     loop {
         i.consume_loop()?;
         let step = i.call_this(&next, iterator.clone(), vec![])?;
@@ -1178,6 +1188,18 @@ fn set_compose(i: &mut Interpreter, t: Value, a: Vec<Value>, name: &str) -> Resu
     if name == "isSupersetOf" && (size as f64) < other.size {
         return Ok(Value::Bool(false));
     }
+    let by_source = name == "isSubsetOf"
+        || matches!(name, "intersection" | "difference" | "isDisjointFrom")
+            && size as f64 <= other.size;
+    let source_items = (by_source && name == "difference").then(|| source.borrow().clone());
+    // GetIteratorFromMethod includes calling `keys`, validating the iterator,
+    // and reading its `next` method. The Set methods copy their input only
+    // after those observable operations have completed.
+    let iterator = if by_source {
+        None
+    } else {
+        Some(set_keys_iterator(i, &other)?)
+    };
     let predicate = matches!(name, "isSubsetOf" | "isSupersetOf" | "isDisjointFrom");
     let result = if predicate {
         Value::Undefined
@@ -1186,13 +1208,13 @@ fn set_compose(i: &mut Interpreter, t: Value, a: Vec<Value>, name: &str) -> Resu
     } else {
         construct(i, Kind::Set, Value::Undefined, vec![])?
     };
-    let by_source = name == "isSubsetOf"
-        || matches!(name, "intersection" | "difference" | "isDisjointFrom")
-            && size as f64 <= other.size;
     if by_source {
         let mut cursor = 0;
         loop {
-            let item = source.borrow().get(cursor).cloned();
+            let item = match &source_items {
+                Some(items) => items.get(cursor).cloned(),
+                None => source.borrow().get(cursor).cloned(),
+            };
             let Some(item) = item else { break };
             cursor += 1;
             i.consume_loop()?;
@@ -1214,8 +1236,9 @@ fn set_compose(i: &mut Interpreter, t: Value, a: Vec<Value>, name: &str) -> Resu
             }
         }
     } else {
+        let (iterator, next) = iterator.expect("other-set iteration prepares an iterator");
         let mut answer = true;
-        set_keys_visit(i, &other, |i, k| {
+        set_keys_visit(i, iterator, next, |i, k| {
             let has = position(&source, &k).is_some();
             match name {
                 "isSupersetOf" if !has => {

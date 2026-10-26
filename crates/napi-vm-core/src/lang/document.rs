@@ -1198,6 +1198,7 @@ impl Builder<'_> {
                     name: MemberName::Static(field_name) | MemberName::Private(field_name),
                     is_static,
                     init,
+                    ..
                 } if !is_static => {
                     fields.insert(
                         field_name.clone(),

@@ -1,5 +1,6 @@
 //! ECMAScript strings are sequences of UTF-16 code units, including unpaired
 //! surrogates. UTF-8 rendering is only a host-facing, lossy view.
+use std::borrow::Cow;
 use std::ops::Deref;
 use std::sync::{Arc, OnceLock};
 
@@ -153,6 +154,28 @@ impl JsString {
             }
         }
         out
+    }
+    /// Return the property-key encoding, borrowing ordinary well-formed
+    /// strings and allocating only when lone surrogates or the escape marker
+    /// require the lossless encoding used by [`Self::to_key`].
+    pub fn to_key_cow(&self) -> Cow<'_, str> {
+        let units = self.units();
+        let mut index = 0;
+        while index < units.len() {
+            match units[index] {
+                0xFDD0 => return Cow::Owned(self.to_key()),
+                0xD800..=0xDBFF
+                    if units
+                        .get(index + 1)
+                        .is_some_and(|unit| (0xDC00..=0xDFFF).contains(unit)) =>
+                {
+                    index += 2;
+                }
+                0xD800..=0xDFFF => return Cow::Owned(self.to_key()),
+                _ => index += 1,
+            }
+        }
+        Cow::Borrowed(self.as_str())
     }
     pub fn from_key(key: &str) -> Self {
         let mut units = Vec::new();
@@ -316,6 +339,32 @@ impl<'de> serde::Deserialize<'de> for JsString {
         match Representation::deserialize(deserializer)? {
             Representation::Text(text) => Ok(text.into()),
             Representation::Units(units) => Ok(Self::from_units(units)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn property_key_encoding_borrows_ordinary_and_paired_strings() {
+        for value in [JsString::from("toUpperCase"), JsString::from("😀")] {
+            let encoded = value.to_key_cow();
+            assert!(matches!(encoded, Cow::Borrowed(_)));
+            assert_eq!(encoded, value.to_key());
+        }
+    }
+
+    #[test]
+    fn property_key_encoding_allocates_for_lossless_escapes() {
+        for value in [
+            JsString::from_units(vec![0xD800]),
+            JsString::from("\u{FDD0}"),
+        ] {
+            let encoded = value.to_key_cow();
+            assert!(matches!(encoded, Cow::Owned(_)));
+            assert_eq!(encoded, value.to_key());
         }
     }
 }

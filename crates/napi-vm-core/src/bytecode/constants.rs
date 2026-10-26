@@ -83,6 +83,9 @@ pub enum ClassNameTemplate {
 /// under `__class key {i}__`, in order) appear here.
 #[derive(Debug, Clone)]
 pub struct ClassMemberTemplate {
+    pub decorators: Vec<(Reg, Option<Reg>)>,
+    /// Backing storage whose initializer uses this member's public/private name.
+    pub auto_accessor_storage: Option<String>,
     pub kind: ClassMemberKind,
     pub is_static: bool,
     pub name: ClassNameTemplate,
@@ -110,6 +113,8 @@ pub enum ClassStaticTemplate {
 /// placeholders the deferred pass overwrites once each method compiles.
 #[derive(Debug, Clone)]
 pub struct ClassTemplate {
+    pub has_method_decorators: bool,
+    pub decorators: Vec<(Reg, Option<Reg>)>,
     pub source_text: Option<crate::parser::SourceTextRef>,
     pub private_fields: Vec<String>,
     /// Lexically declared names for direct eval's static semantics.

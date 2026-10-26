@@ -1,0 +1,9 @@
+{
+  "engine_sha256": "8a69fbcfe5a21f44341d494c5efbbf7d09858fb7659cbcb71741223f29cad37c",
+  "source": "var getter=Object.getOwnPropertyDescriptor({get x(){return 42;}},'x').get;function f(){}f.x=getter;if(f.x!==getter)throw new Error('data property getter alias was invoked');",
+  "expected_status": "ok",
+  "actual": {
+    "status": "ok",
+    "phase": "runtime"
+  }
+}

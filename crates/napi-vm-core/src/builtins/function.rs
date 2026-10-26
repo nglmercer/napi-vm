@@ -64,6 +64,23 @@ pub(super) fn install(e: &mut Environment) {
         super::object::install_intrinsic_accessor(&prototype, key, &thrower, &thrower, true);
     }
     e.install_intrinsic("%ThrowTypeError%", thrower);
+    for (intrinsic, name, getter) in [
+        (
+            "%LegacyCallerGetter%",
+            "get caller",
+            legacy_caller as super::NativeFn,
+        ),
+        (
+            "%LegacyArgumentsGetter%",
+            "get arguments",
+            legacy_arguments as super::NativeFn,
+        ),
+    ] {
+        e.install_intrinsic(
+            intrinsic,
+            super::native_method(name, 0, getter, Some(prototype.clone())),
+        );
+    }
 
     prototype
         .set_prop("constructor".to_string(), namespace.clone())
@@ -442,7 +459,23 @@ fn function_has_instance(
     interp.ordinary_instance_of(&object, &target)
 }
 
-fn function_call(
+fn legacy_caller(interp: &mut Interpreter, receiver: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    interp
+        .legacy_function_property(&receiver, "caller")?
+        .ok_or_else(|| VmErr::Msg("TypeError: incompatible legacy caller receiver".into()))
+}
+
+fn legacy_arguments(
+    interp: &mut Interpreter,
+    receiver: Value,
+    _: Vec<Value>,
+) -> Result<Value, VmErr> {
+    interp
+        .legacy_function_property(&receiver, "arguments")?
+        .ok_or_else(|| VmErr::Msg("TypeError: incompatible legacy arguments receiver".into()))
+}
+
+pub(super) fn function_call(
     interp: &mut Interpreter,
     target: Value,
     args: Vec<Value>,
@@ -451,7 +484,7 @@ fn function_call(
     interp.request_tail_call(target, receiver, args.into_iter().skip(1).collect())
 }
 
-fn function_apply(
+pub(super) fn function_apply(
     interp: &mut Interpreter,
     target: Value,
     args: Vec<Value>,

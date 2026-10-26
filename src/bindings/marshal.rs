@@ -23,6 +23,9 @@ use napi::sys;
 use crate::error::VmErr;
 use crate::value::{Buffer, MAX_ARRAY_LEN, MAX_OBJECT_PROPS, MAX_STRING_LEN, Value};
 
+// Node-API's Float16 tag is newer than the napi-sys constants used here.
+const NAPI_FLOAT16_ARRAY: sys::napi_typedarray_type = 11;
+
 #[inline]
 pub(super) fn chk(status: sys::napi_status) -> Result<(), VmErr> {
     if status == sys::Status::napi_ok {
@@ -393,6 +396,7 @@ fn make_typed_array(
             crate::value::TypedKind::Uint16 => sys::TypedarrayType::uint16_array,
             crate::value::TypedKind::Int32 => sys::TypedarrayType::int32_array,
             crate::value::TypedKind::Uint32 => sys::TypedarrayType::uint32_array,
+            crate::value::TypedKind::Float16 => NAPI_FLOAT16_ARRAY,
             crate::value::TypedKind::Float32 => sys::TypedarrayType::float32_array,
             crate::value::TypedKind::Float64 => sys::TypedarrayType::float64_array,
             crate::value::TypedKind::BigInt64 => sys::TypedarrayType::bigint64_array,
@@ -551,6 +555,7 @@ fn read_typed_array(env: sys::napi_env, raw: sys::napi_value) -> Result<Value, V
             sys::TypedarrayType::uint16_array => TypedKind::Uint16,
             sys::TypedarrayType::int32_array => TypedKind::Int32,
             sys::TypedarrayType::uint32_array => TypedKind::Uint32,
+            NAPI_FLOAT16_ARRAY => TypedKind::Float16,
             sys::TypedarrayType::float32_array => TypedKind::Float32,
             sys::TypedarrayType::float64_array => TypedKind::Float64,
             sys::TypedarrayType::bigint64_array => TypedKind::BigInt64,

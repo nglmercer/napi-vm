@@ -1,0 +1,59 @@
+{
+  "domain": "ECMAScript",
+  "suite": "Test262",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "selection": [
+    "staging/sm/String/string-upper-lower-mapping.js",
+    "staging/sm/regress/regress-610026.js"
+  ],
+  "groups": [],
+  "engine_sha256": "e9ab8774ceae9eba16e6554e29a3d8f44ef8b00b12ad65ac3c2c828f257fd31c",
+  "skip_features": [],
+  "denominator": "all selected variants, including skips and errors",
+  "worker_jobs": 1,
+  "timeout_seconds": 5.0,
+  "resumed_files": 0,
+  "total": 4,
+  "counts": {
+    "pass": 2,
+    "fail": 0,
+    "skip": 0,
+    "timeout": 2,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "pass_percentage": 50.0,
+  "limitations": [
+    "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
+  ],
+  "results": [
+    {
+      "test": "staging/sm/String/string-upper-lower-mapping.js",
+      "variant": "script",
+      "status": "timeout"
+    },
+    {
+      "test": "staging/sm/String/string-upper-lower-mapping.js",
+      "variant": "strict",
+      "status": "timeout"
+    },
+    {
+      "test": "staging/sm/regress/regress-610026.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "staging/sm/regress/regress-610026.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    }
+  ]
+}

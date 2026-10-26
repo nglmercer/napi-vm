@@ -915,6 +915,12 @@ impl Checker<'_> {
         let Constant::ClassTemplate(template) = &self.function.constants[tmpl as usize] else {
             return Ok(());
         };
+        for (value, receiver) in &template.decorators {
+            self.check_reg(address, *value)?;
+            if let Some(receiver) = receiver {
+                self.check_reg(address, *receiver)?;
+            }
+        }
         if let Some(reg) = template.superclass {
             self.check_reg(address, reg)?;
         }
@@ -926,6 +932,12 @@ impl Checker<'_> {
         }
         self.check_func_const(address, template.ctor_func)?;
         for member in &template.members {
+            for (value, receiver) in &member.decorators {
+                self.check_reg(address, *value)?;
+                if let Some(receiver) = receiver {
+                    self.check_reg(address, *receiver)?;
+                }
+            }
             if let ClassNameTemplate::Computed(reg) = &member.name {
                 self.check_reg(address, *reg)?;
             }

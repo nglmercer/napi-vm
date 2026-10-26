@@ -12,7 +12,7 @@ impl Parser {
         if !self.enter() {
             return None;
         }
-        let r = self.comma();
+        let r = stacker::maybe_grow(1024 * 1024, 8 * 1024 * 1024, || self.comma());
         self.leave();
         r
     }

@@ -22,6 +22,7 @@ pub(super) fn typed_kind(name: &str) -> Option<TypedKind> {
         "Uint16Array" => TypedKind::Uint16,
         "Int32Array" => TypedKind::Int32,
         "Uint32Array" => TypedKind::Uint32,
+        "Float16Array" => TypedKind::Float16,
         "Float32Array" => TypedKind::Float32,
         "Float64Array" => TypedKind::Float64,
         "BigInt64Array" => TypedKind::BigInt64,

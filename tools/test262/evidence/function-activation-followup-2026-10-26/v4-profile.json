@@ -1,0 +1,6 @@
+{
+  "engine_sha256": "f667adedbfa4fbc298bc36f867f5397e09acc406227696f0a8243b7576c0bb00",
+  "method": "Eight GDB SIGINT stack samples approximately 250ms apart",
+  "worker_jobs": 1,
+  "scope": "Diagnostic, not conformance timing. Several samples show binding resolution and property-key allocation."
+}

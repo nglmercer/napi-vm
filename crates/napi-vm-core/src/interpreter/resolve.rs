@@ -47,27 +47,64 @@ impl Interpreter {
     }
     /// Primitive references are boxed with the current execution realm's
     /// intrinsic prototype, regardless of where the primitive was obtained.
-    fn primitive_reference_prototype(&self, value: &Value) -> Option<Value> {
-        let name = match value {
-            Value::Bool(_) => "Boolean",
-            Value::Number(_) => "Number",
-            Value::String(_) => "String",
-            Value::BigInt(_) => "BigInt",
-            Value::Symbol(_) => "Symbol",
+    pub(crate) fn primitive_reference_prototype(&self, value: &Value) -> Option<Value> {
+        let (constructor, prototype) = match value {
+            Value::Bool(_) => ("Boolean", "%BooleanPrototype%"),
+            Value::Number(_) => ("Number", "%NumberPrototype%"),
+            Value::String(_) => ("String", "%StringPrototype%"),
+            Value::BigInt(_) => ("BigInt", "%BigIntPrototype%"),
+            Value::Symbol(_) => ("Symbol", "%SymbolPrototype%"),
             _ => return None,
         };
-        self.persistent_global
-            .borrow()
-            .intrinsic(name)
-            .and_then(|constructor| constructor.get_prop("prototype"))
+        let global = self.persistent_global.borrow();
+        global.intrinsic(prototype).or_else(|| {
+            global
+                .intrinsic(constructor)
+                .and_then(|constructor| constructor.get_prop("prototype"))
+        })
     }
     pub(crate) fn lookup_binding_in(
         &mut self,
         scope: &super::Env,
         name: &str,
     ) -> Result<super::Lookup, VmErr> {
+        if let Some(value) = Self::plain_binding_value(scope, name) {
+            self.check_execution_interrupt()?;
+            return Ok(value);
+        }
         let (base, property) = self.resolve_assignment_binding(scope, name)?;
         self.read_resolved_binding(&base, property, name)
+    }
+
+    /// Plain environment records cannot run guest code between resolution and
+    /// reading. With records and global accessors/prototypes retain the full
+    /// reference algorithm, including its observable HasBinding operations.
+    fn plain_binding_value(scope: &super::Env, name: &str) -> Option<super::Lookup> {
+        let mut cursor = Some(scope.clone());
+        while let Some(environment) = cursor {
+            let frame = environment.borrow();
+            if frame.own_lexical_binding(name) {
+                return Some(frame.lookup(name));
+            }
+            if frame.is_global_scope() {
+                let properties = frame.global_object()?.property_cell()?;
+                if properties.meta.borrow().may_have_accessor(name) {
+                    return None;
+                }
+                return properties.own_value(name).map(|value| {
+                    super::Lookup::Value(if matches!(value, Value::Binding(_)) {
+                        value.deref_binding()
+                    } else {
+                        value
+                    })
+                });
+            }
+            if frame.with_object.is_some() {
+                return None;
+            }
+            cursor = frame.parent_env();
+        }
+        None
     }
 
     /// GetBindingValue on a captured environment reference. A disappearing
@@ -186,6 +223,18 @@ impl Interpreter {
         scope: &super::Env,
         name: &str,
     ) -> Result<(Value, Value), VmErr> {
+        if let Some(value) = Self::plain_binding_value(scope, name) {
+            self.check_execution_interrupt()?;
+            return match value {
+                super::Lookup::Value(value) => Ok((value, Value::Undefined)),
+                super::Lookup::Uninitialized => Err(VmErr::Msg(format!(
+                    "ReferenceError: Cannot access '{name}' before initialization"
+                ))),
+                super::Lookup::Missing => {
+                    Err(VmErr::Msg(format!("ReferenceError: {name} is not defined")))
+                }
+            };
+        }
         let (base, property, receiver) = self.resolve_binding_reference(scope, name)?;
         let value = self.require_resolved_binding(&base, property, name)?;
         Ok((value, receiver))
@@ -263,7 +312,8 @@ impl Interpreter {
 
     /// Resolve a deletion reference using the same environment ordering as
     /// reads and writes. Global object bindings use property configurability;
-    /// declarative bindings are not deletable. With exclusions apply before
+    /// ordinary declarative bindings are not deletable; new eval var/function
+    /// bindings retain their deletable attribute. With exclusions apply before
     /// continuing to the outer environment.
     pub(crate) fn delete_binding_in(
         &mut self,
@@ -282,7 +332,9 @@ impl Interpreter {
                 )
             };
             if local {
-                return Ok(Value::Bool(false));
+                return Ok(Value::Bool(
+                    environment.borrow_mut().delete_declarative_binding(name),
+                ));
             }
             if global {
                 let object = Value::RealmGlobal(environment.clone());
@@ -807,6 +859,24 @@ impl Interpreter {
 
     /// Resolve a property value, invoking it if it is a getter.
     pub(crate) fn get_prop_value(&mut self, o: &Value, p: &Value) -> Result<Value, VmErr> {
+        // An own dense data element needs neither key stringification nor a
+        // prototype/accessor walk. Missing elements and exotic keys retain
+        // the observable general path; numeric -0 names index 0.
+        if let (Value::Array(array), Value::Number(index)) = (o, p)
+            && index.is_finite()
+            && *index >= 0.0
+            && *index < crate::value::MAX_ARRAY_LEN as f64
+            && index.fract() == 0.0
+            && !array.meta.borrow().has_accessors
+            && let Some(value) = array.index_value(*index as usize)
+        {
+            self.check_execution_interrupt()?;
+            return Ok(if matches!(value, Value::Binding(_)) {
+                value.deref_binding()
+            } else {
+                value
+            });
+        }
         self.get_prop_value_with_receiver(o, p, o)
     }
 
@@ -912,14 +982,14 @@ impl Interpreter {
         }
         if let Some(props) = match o {
             Value::Object { props } => Some(props.clone()),
-            _ if !self.seq(o, receiver) => o.exotic_properties(),
+            _ if !self.seq(o, receiver) => o.property_cell(),
             _ => None,
         } {
             let key = self.ecmascript_to_property_key(p)?;
             let slot = self.property_key(&key)?;
             let inherited = {
                 let own = props.borrow().iter().any(|(name, _)| name == &slot);
-                if own { None } else { props.proto() }
+                if own { None } else { self.prototype_of(o) }
             };
             if let Some(prototype) = inherited
                 && matches!(
@@ -952,6 +1022,17 @@ impl Interpreter {
             Ok(name == self.property_key(p)?
                 || matches!(p, Value::Symbol(_)) && name == self.property_function_name(p)?)
         };
+        if accessor_name.is_some()
+            && let Some(cell) = o.property_cell()
+        {
+            let has_data = !cell.meta.borrow().data_property_keys.is_empty();
+            if has_data {
+                let slot = self.property_key(p)?;
+                if cell.own_index(&slot).is_some() && cell.meta.borrow().is_explicit_data(&slot) {
+                    return Ok(v);
+                }
+            }
+        }
         let is_getter = name_matches("get ")?;
         let is_setter_only = !is_getter && name_matches("set ")?;
         if is_getter {
@@ -1068,12 +1149,12 @@ impl Interpreter {
         // internal operation, retaining the original receiver for accessors.
         if let Some(props) = match o {
             Value::Object { props } => Some(props.clone()),
-            _ if !self.seq(o, receiver) => o.exotic_properties(),
+            _ if !self.seq(o, receiver) => o.property_cell(),
             _ => None,
         } {
             let inherited = {
                 let own = props.borrow().iter().any(|(name, _)| name == key);
-                if own { None } else { props.proto() }
+                if own { None } else { self.prototype_of(o) }
             };
             if let Some(prototype) = inherited
                 && matches!(
@@ -1093,7 +1174,7 @@ impl Interpreter {
         // names are not sufficient to turn an ordinary binding into a getter.
         if let Some(cell) = o.property_cell()
             && cell.own_index(key).is_some()
-            && !cell.meta.borrow().has_accessors
+            && !cell.meta.borrow().may_have_accessor(key)
         {
             return Ok(v);
         }

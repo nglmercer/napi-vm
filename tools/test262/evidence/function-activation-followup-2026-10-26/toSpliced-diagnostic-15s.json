@@ -1,0 +1,28 @@
+{
+  "engine_sha256": "8a69fbcfe5a21f44341d494c5efbbf7d09858fb7659cbcb71741223f29cad37c",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_jobs": 2,
+  "diagnostic_timeout_seconds": 15,
+  "test": "staging/sm/Array/toSpliced-dense.js",
+  "scope": "Timing diagnostic only; does not count as a five-second pass.",
+  "results": [
+    {
+      "variant": "script",
+      "elapsed_seconds": 5.063948688002711,
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "variant": "strict",
+      "elapsed_seconds": 5.068363921003765,
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    }
+  ]
+}

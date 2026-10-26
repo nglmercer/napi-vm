@@ -1,0 +1,1164 @@
+diff --git a/crates/napi-vm-core/src/builtins/collections.rs b/crates/napi-vm-core/src/builtins/collections.rs
+index d5ea393..ac54f8c 100644
+--- a/crates/napi-vm-core/src/builtins/collections.rs
++++ b/crates/napi-vm-core/src/builtins/collections.rs
+@@ -1107,16 +1107,26 @@ fn set_count(v: &Rc<ArrayCell>) -> usize {
+ fn set_has_record(i: &mut Interpreter, r: &SetRecord, k: Value) -> Result<bool, VmErr> {
+     Ok(i.call_this(&r.has, r.object.clone(), vec![k])?.is_truthy())
+ }
+-fn set_keys_visit(
+-    i: &mut Interpreter,
+-    r: &SetRecord,
+-    mut visit: impl FnMut(&mut Interpreter, Value) -> Result<bool, VmErr>,
+-) -> Result<(), VmErr> {
++fn set_keys_iterator(i: &mut Interpreter, r: &SetRecord) -> Result<(Value, Value), VmErr> {
+     let iterator = i.call_this(&r.keys, r.object.clone(), vec![])?;
+     if !crate::interpreter::call::is_js_object(&iterator) {
+         return Err(VmErr::Msg("TypeError: keys must return iterator".into()));
+     }
+     let next = i.get_prop_value_str(&iterator, "next")?;
++    if !crate::interpreter::is_callable_value(&next) {
++        return Err(VmErr::Msg(
++            "TypeError: iterator next must be callable".into(),
++        ));
++    }
++    Ok((iterator, next))
++}
++
++fn set_keys_visit(
++    i: &mut Interpreter,
++    iterator: Value,
++    next: Value,
++    mut visit: impl FnMut(&mut Interpreter, Value) -> Result<bool, VmErr>,
++) -> Result<(), VmErr> {
+     loop {
+         i.consume_loop()?;
+         let step = i.call_this(&next, iterator.clone(), vec![])?;
+@@ -1178,6 +1188,18 @@ fn set_compose(i: &mut Interpreter, t: Value, a: Vec<Value>, name: &str) -> Resu
+     if name == "isSupersetOf" && (size as f64) < other.size {
+         return Ok(Value::Bool(false));
+     }
++    let by_source = name == "isSubsetOf"
++        || matches!(name, "intersection" | "difference" | "isDisjointFrom")
++            && size as f64 <= other.size;
++    let source_items = (by_source && name == "difference").then(|| source.borrow().clone());
++    // GetIteratorFromMethod includes calling `keys`, validating the iterator,
++    // and reading its `next` method. The Set methods copy their input only
++    // after those observable operations have completed.
++    let iterator = if by_source {
++        None
++    } else {
++        Some(set_keys_iterator(i, &other)?)
++    };
+     let predicate = matches!(name, "isSubsetOf" | "isSupersetOf" | "isDisjointFrom");
+     let result = if predicate {
+         Value::Undefined
+@@ -1186,13 +1208,13 @@ fn set_compose(i: &mut Interpreter, t: Value, a: Vec<Value>, name: &str) -> Resu
+     } else {
+         construct(i, Kind::Set, Value::Undefined, vec![])?
+     };
+-    let by_source = name == "isSubsetOf"
+-        || matches!(name, "intersection" | "difference" | "isDisjointFrom")
+-            && size as f64 <= other.size;
+     if by_source {
+         let mut cursor = 0;
+         loop {
+-            let item = source.borrow().get(cursor).cloned();
++            let item = match &source_items {
++                Some(items) => items.get(cursor).cloned(),
++                None => source.borrow().get(cursor).cloned(),
++            };
+             let Some(item) = item else { break };
+             cursor += 1;
+             i.consume_loop()?;
+@@ -1214,8 +1236,9 @@ fn set_compose(i: &mut Interpreter, t: Value, a: Vec<Value>, name: &str) -> Resu
+             }
+         }
+     } else {
++        let (iterator, next) = iterator.expect("other-set iteration prepares an iterator");
+         let mut answer = true;
+-        set_keys_visit(i, &other, |i, k| {
++        set_keys_visit(i, iterator, next, |i, k| {
+             let has = position(&source, &k).is_some();
+             match name {
+                 "isSupersetOf" if !has => {
+diff --git a/crates/napi-vm-core/src/builtins/proxy.rs b/crates/napi-vm-core/src/builtins/proxy.rs
+index c333163..bd089b8 100644
+--- a/crates/napi-vm-core/src/builtins/proxy.rs
++++ b/crates/napi-vm-core/src/builtins/proxy.rs
+@@ -339,9 +339,7 @@ impl Interpreter {
+                 }
+             };
+             if length_can_change {
+-                return Err(VmErr::Msg(
+-                    "TypeError: Cannot prevent extensions on a variable-length typed array".into(),
+-                ));
++                return Ok(false);
+             }
+         }
+         if let Value::Array(array) = value {
+diff --git a/crates/napi-vm-core/src/builtins/string.rs b/crates/napi-vm-core/src/builtins/string.rs
+index e4fc0a6..4110283 100644
+--- a/crates/napi-vm-core/src/builtins/string.rs
++++ b/crates/napi-vm-core/src/builtins/string.rs
+@@ -6,6 +6,10 @@ use crate::{
+     interpreter::{Environment, Interpreter},
+     value::{Value, to_integer_or_infinity},
+ };
++use icu_properties::{
++    CodePointSetData,
++    props::{ChangesWhenLowercased, ChangesWhenUppercased},
++};
+ fn bounded_string(value: impl Into<JsString>) -> Result<Value, VmErr> {
+     Value::checked_string(value)
+ }
+@@ -448,6 +452,75 @@ fn map_scalar_runs(text: &JsString, mut map: impl FnMut(&str) -> String) -> JsSt
+     output.extend(map(&run).encode_utf16());
+     JsString::from_units(output)
+ }
++/// Avoid building UTF-8 runs and output buffers for the common one-scalar
++/// case. ICU returns a borrowed string when casing leaves the scalar alone;
++/// in that case the original UTF-16 storage is already the correct result.
++fn map_single_scalar(
++    text: &JsString,
++    mapper: icu_casemap::CaseMapperBorrowed<'static>,
++    language: &icu_locale::LanguageIdentifier,
++    upper: bool,
++) -> Option<JsString> {
++    if text.is_empty() {
++        return Some(text.clone());
++    }
++    let scalar = match text.units() {
++        [unit] => match char::from_u32(u32::from(*unit)) {
++            Some(scalar) => scalar,
++            None => return Some(text.clone()),
++        },
++        [high, low] if (0xd800..=0xdbff).contains(high) && (0xdc00..=0xdfff).contains(low) => {
++            let code_point =
++                0x10000 + ((u32::from(*high) - 0xd800) << 10) + (u32::from(*low) - 0xdc00);
++            char::from_u32(code_point)?
++        }
++        _ => return None,
++    };
++    let changes_when_cased = if upper {
++        CodePointSetData::new::<ChangesWhenUppercased>()
++    } else {
++        CodePointSetData::new::<ChangesWhenLowercased>()
++    };
++    if !changes_when_cased.contains(scalar) {
++        return Some(text.clone());
++    }
++    if *language == icu_locale::LanguageIdentifier::UNKNOWN {
++        let one_to_one_mapping = if upper {
++            let mut mapping = scalar.to_uppercase();
++            match (mapping.next(), mapping.next()) {
++                (Some(mapped), None) => Some(mapped),
++                _ => None,
++            }
++        } else {
++            let mut mapping = scalar.to_lowercase();
++            match (mapping.next(), mapping.next()) {
++                (Some(mapped), None) => Some(mapped),
++                _ => None,
++            }
++        };
++        if let Some(mapped) = one_to_one_mapping
++            && mapped != scalar
++        {
++            let mut units = [0; 2];
++            return Some(JsString::from_units(
++                mapped.encode_utf16(&mut units).to_vec(),
++            ));
++        }
++    }
++    let mut source_buffer = [0; 4];
++    let source = scalar.encode_utf8(&mut source_buffer);
++    let mapped = if upper {
++        mapper.uppercase_to_string(source, language)
++    } else {
++        mapper.lowercase_to_string(source, language)
++    };
++    Some(match mapped {
++        std::borrow::Cow::Borrowed(_) => text.clone(),
++        std::borrow::Cow::Owned(mapped) => {
++            JsString::from_units(mapped.encode_utf16().collect::<Vec<_>>())
++        }
++    })
++}
+ fn case_map(
+     i: &mut Interpreter,
+     t: Value,
+@@ -468,14 +541,18 @@ fn case_map(
+         }
+     }
+     let mapper = icu_casemap::CaseMapper::new();
+-    bounded_string(map_scalar_runs(&text, |s| {
+-        if upper {
+-            mapper.uppercase_to_string(s, &language).into_owned()
+-        } else {
+-            mapper.lowercase_to_string(s, &language).into_owned()
+-        }
+-    }))
++    let mapped = map_single_scalar(&text, mapper, &language, upper).unwrap_or_else(|| {
++        map_scalar_runs(&text, |s| {
++            if upper {
++                mapper.uppercase_to_string(s, &language).into_owned()
++            } else {
++                mapper.lowercase_to_string(s, &language).into_owned()
++            }
++        })
++    });
++    bounded_string(mapped)
+ }
++
+ fn string_to_upper(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+     case_map(i, t, a, true, false)
+ }
+@@ -1231,3 +1308,39 @@ pub(super) fn decode_uri_component(
+ ) -> Result<Value, VmErr> {
+     decode_uri_impl(interp, &args, "")
+ }
++
++#[cfg(test)]
++mod case_map_tests {
++    use super::*;
++
++    #[test]
++    fn single_scalar_fast_path_matches_full_mapping() {
++        let mapper = icu_casemap::CaseMapper::new();
++        let root = icu_locale::LanguageIdentifier::UNKNOWN;
++        let turkish = "tr".parse::<icu_locale::LanguageIdentifier>().unwrap();
++        for source in ["", "a", "Z", "ß", "Σ", "İ", "ᾈ", "😀"] {
++            let text = JsString::from(source);
++            for language in [&root, &turkish] {
++                for upper in [false, true] {
++                    let fast = map_single_scalar(&text, mapper, language, upper).unwrap();
++                    let expected = map_scalar_runs(&text, |run| {
++                        if upper {
++                            mapper.uppercase_to_string(run, language).into_owned()
++                        } else {
++                            mapper.lowercase_to_string(run, language).into_owned()
++                        }
++                    });
++                    assert_eq!(fast, expected, "source={source:?}, upper={upper}");
++                }
++            }
++        }
++        let lone_surrogate = JsString::from_units(vec![0xD800]);
++        assert_eq!(
++            map_single_scalar(&lone_surrogate, mapper, &root, true).unwrap(),
++            map_scalar_runs(&lone_surrogate, |run| {
++                mapper.uppercase_to_string(run, &root).into_owned()
++            })
++        );
++        assert!(map_single_scalar(&JsString::from("ab"), mapper, &root, true).is_none());
++    }
++}
+diff --git a/crates/napi-vm-core/src/bytecode/compiler.rs b/crates/napi-vm-core/src/bytecode/compiler.rs
+index c73c86f..3e5c806 100644
+--- a/crates/napi-vm-core/src/bytecode/compiler.rs
++++ b/crates/napi-vm-core/src/bytecode/compiler.rs
+@@ -788,9 +788,13 @@ fn boxed_block_names(stmts: &[Statement]) -> HashSet<String> {
+     let mut heads = Vec::new();
+     block_loop_heads(stmts, &mut heads);
+     candidates.extend(heads);
++    // Direct eval can read names that are absent from every parsed closure
++    // body. Keep lexical bindings in this block's runtime environment so
++    // those dynamic lookups can follow the same scope chain as the AST tier.
++    let has_eval = crate::parser::stmts_need_arguments(stmts);
+     candidates
+         .into_iter()
+-        .filter(|name| statements_capture_identifier(stmts, name))
++        .filter(|name| has_eval || statements_capture_identifier(stmts, name))
+         .collect()
+ }
+ 
+@@ -5310,9 +5314,13 @@ fn find_captured(params: &[String], body: &FuncBody) -> HashSet<String> {
+             let mut heads = Vec::new();
+             block_loop_heads(stmts, &mut heads);
+             names.extend(heads.iter().map(String::as_str));
++            // A nested direct eval can resolve names that do not appear in
++            // its parsed AST. Keep this function's bindings in the frame
++            // environment so the eval's closure chain can see them.
++            let has_eval = crate::parser::stmts_need_arguments(stmts);
+             names
+                 .into_iter()
+-                .filter(|name| statements_capture_identifier(stmts, name))
++                .filter(|name| has_eval || statements_capture_identifier(stmts, name))
+                 .map(str::to_string)
+                 .collect()
+         }
+diff --git a/crates/napi-vm-core/src/bytecode/parity_tests.rs b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+index beb81a8..9a329ec 100644
+--- a/crates/napi-vm-core/src/bytecode/parity_tests.rs
++++ b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+@@ -1297,6 +1297,27 @@ fn catch_identifier_bindings_remain_lexical_and_mutable_in_both_tiers() {
+     check("try{throw 1;}catch(e){eval('function e(){}');e;}", false);
+ }
+ 
++#[test]
++fn direct_eval_closures_preserve_dynamic_class_bindings() {
++    check(
++        "{ let C = class { static field = () => eval('C'); }; C.field() === C ? 1 : 0; }",
++        true,
++    );
++    check(
++        "{ class C { static field = () => eval('C'); } const D = C; C = null; D.field() === D ? 1 : 0; }",
++        true,
++    );
++}
++
++#[test]
++fn set_difference_uses_the_initial_receiver_snapshot() {
++    let source = "let set; let seen = []; let other = { size: 100, has(value) { seen.push(value); if (seen.length === 1) { set.clear(); set.add(11); set.add(22); } return true; }, keys() { throw new Error('unexpected keys'); } }; set = new Set([1, 2, 3, 4]); let result = set.difference(other); if (seen.join(',') !== '1,2,3,4' || [...result].length !== 0 || [...set].join(',') !== '11,22') throw new Error('Set difference did not use the initial receiver snapshot'); 'pass';";
++    check(source, true);
++    let program = Interpreter::compile(source).expect("compile");
++    let mut vm = Interpreter::with_builtins();
++    assert!(matches!(vm.execute(&program), Ok(Value::String(ref value)) if value == "pass"));
++}
++
+ #[test]
+ fn iteration_assignment_forms_retain_fallback_and_declaration_tier_parity() {
+     for source in [
+@@ -1559,6 +1580,72 @@ fn super_reads_follow_home_object_prototypes_in_both_tiers() {
+     }
+ }
+ 
++#[test]
++fn typed_array_prevent_extensions_reports_rejection_to_the_caller() {
++    let source = "var buffer=new ArrayBuffer(4,{maxByteLength:8});var view=new Uint8Array(buffer);var reflected=Reflect.preventExtensions(view);var threw=false;try{Object.preventExtensions(view);}catch(e){threw=e instanceof TypeError;}reflected===false&&threw&&Object.isExtensible(view);";
++    check(source, true);
++    assert!(matches!(
++        run_ast_with_modules(source, &[]),
++        Ok(Value::Bool(true))
++    ));
++}
++
++#[test]
++fn class_heritage_and_computed_names_use_strict_property_writes() {
++    for source in [
++        "var caught=false;try{class C{[Object.preventExtensions({}).x=1](){}}}catch(e){caught=e instanceof TypeError;}caught;",
++        "var caught=false;try{var C=class extends (Object.preventExtensions({}).x=1,Object){};}catch(e){caught=e instanceof TypeError;}caught;",
++        "var caught=false;try{class C{[Object.freeze({x:1}).x++](){}}}catch(e){caught=e instanceof TypeError;}caught;",
++        "var target=Object.preventExtensions({});var key={toString(){return 'x';}};var caught=false;try{class C{[target[key]=1](){}}}catch(e){caught=e instanceof TypeError;}caught;",
++    ] {
++        check(source, true);
++        assert!(matches!(
++            run_ast_with_modules(source, &[]),
++            Ok(Value::Bool(true))
++        ));
++    }
++}
++
++#[test]
++fn static_super_proxy_reads_preserve_the_original_receiver() {
++    let source = "var seen=[];var key=Symbol();var base=new Proxy(function(){},{get(target,p,receiver){if(p==='x'||p===key){seen.push(receiver);return 42;}return Reflect.get(target,p,receiver);}});class A extends base{}class B extends A{static read(){return super.x+super[key];}}B.read()===84&&seen.length===2&&seen[0]===B&&seen[1]===B;";
++    check(source, true);
++    assert!(matches!(
++        run_ast_with_modules(source, &[]),
++        Ok(Value::Bool(true))
++    ));
++}
++
++#[test]
++fn super_references_capture_the_base_before_key_conversion() {
++    for operation in [
++        "super[key]",
++        "super[key]()",
++        "super[key]+=1",
++        "++super[key]",
++    ] {
++        let callable = operation == "super[key]()";
++        let old = if callable {
++            "function(){return 1;}"
++        } else {
++            "1"
++        };
++        let expected = if operation.contains("+=") || operation.contains("++") {
++            2
++        } else {
++            1
++        };
++        let source = format!(
++            "var key={{toString(){{Object.setPrototypeOf(object,{{p:-1}});return 'p';}}}};var object={{__proto__:{{p:{old}}},method(){{return {operation};}}}};object.method()==={expected};"
++        );
++        check(&source, true);
++        assert!(matches!(
++            run_ast_with_modules(&source, &[]),
++            Ok(Value::Bool(true))
++        ));
++    }
++}
++
+ #[test]
+ fn super_references_writes_calls_and_object_home_objects_share_semantics() {
+     for source in [
+diff --git a/crates/napi-vm-core/src/bytecode/vm.rs b/crates/napi-vm-core/src/bytecode/vm.rs
+index aadd372..b6bf530 100644
+--- a/crates/napi-vm-core/src/bytecode/vm.rs
++++ b/crates/napi-vm-core/src/bytecode/vm.rs
+@@ -57,6 +57,19 @@ pub struct CallFrame<'a> {
+     scopes: Vec<Env>,
+ }
+ 
++/// Reusable storage detached from a completed call frame. Exception-heavy
++/// functions commonly push one handler per invocation, so retaining these
++/// vectors avoids a fresh allocation on every call.
++#[derive(Default)]
++pub(crate) struct ActivationBuffers {
++    registers: Vec<Value>,
++    slots: Vec<RunSlot>,
++    handlers: Vec<HandlerEntry>,
++    pending: Vec<VmErr>,
++    enumerators: Vec<(Reg, crate::interpreter::for_in::ForInEnumerator)>,
++    scopes: Vec<Env>,
++}
++
+ /// One pushed exception handler: `target` resumes after an interception,
+ /// `dst` receives the catch value (catch handlers), `catch_returns`
+ /// selects finally handlers, which also intercept `return` unwinding.
+@@ -79,7 +92,14 @@ impl<'a> CallFrame<'a> {
+         this_value: Value,
+         args: &[Value],
+     ) -> Self {
+-        let (mut registers, mut slots) = interp.activation_pool.pop().unwrap_or_default();
++        let ActivationBuffers {
++            mut registers,
++            mut slots,
++            handlers,
++            pending,
++            enumerators,
++            scopes,
++        } = interp.activation_pool.pop().unwrap_or_default();
+         registers.resize(function.register_count as usize, Value::Undefined);
+         slots.reserve(function.local_count as usize);
+         for (index, info) in function.slots.iter().enumerate() {
+@@ -122,10 +142,10 @@ impl<'a> CallFrame<'a> {
+             registers,
+             slots,
+             this_value,
+-            handlers: Vec::new(),
+-            pending: Vec::new(),
+-            enumerators: Vec::new(),
+-            scopes: Vec::new(),
++            handlers,
++            pending,
++            enumerators,
++            scopes,
+         }
+     }
+ }
+@@ -133,11 +153,26 @@ impl<'a> CallFrame<'a> {
+ fn recycle_activation(interp: &mut Interpreter, mut frame: CallFrame<'_>) {
+     frame.registers.clear();
+     frame.slots.clear();
++    frame.handlers.clear();
++    frame.pending.clear();
++    frame.enumerators.clear();
++    frame.scopes.clear();
+     if interp.activation_pool.len() < 16
+         && frame.registers.capacity() <= 4096
+         && frame.slots.capacity() <= 4096
++        && frame.handlers.capacity() <= 4096
++        && frame.pending.capacity() <= 4096
++        && frame.enumerators.capacity() <= 4096
++        && frame.scopes.capacity() <= 4096
+     {
+-        interp.activation_pool.push((frame.registers, frame.slots));
++        interp.activation_pool.push(ActivationBuffers {
++            registers: frame.registers,
++            slots: frame.slots,
++            handlers: frame.handlers,
++            pending: frame.pending,
++            enumerators: frame.enumerators,
++            scopes: frame.scopes,
++        });
+     }
+ }
+ 
+@@ -216,7 +251,7 @@ pub(crate) fn run_function(
+ ) -> Result<Value, VmErr> {
+     interp.check_execution()?;
+     tier_check(interp, code, args);
+-    let fe = Rc::new(RefCell::new(Environment::function_child(parent_env)));
++    let fe = interp.acquire_function_environment(parent_env);
+     fe.borrow_mut().replace_strict(Some(strict));
+     if !code.is_arrow {
+         fe.borrow_mut().set("this", this_value.clone());
+@@ -236,9 +271,10 @@ pub(crate) fn run_function(
+     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+         run_loop(interp, &mut frame, false)
+     }));
+-    interp.global = saved;
++    let fe = std::mem::replace(&mut interp.global, saved);
+     interp.cur_mod = saved_module;
+     recycle_activation(interp, frame);
++    interp.recycle_function_environment(fe);
+     result.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+ }
+ 
+@@ -290,9 +326,10 @@ fn seed_captured(
+     Ok(())
+ }
+ 
+-/// Property storage of the cell-backed receivers an inline cache serves:
+-/// ordinary objects, classes, and functions. Arrays, strings, proxies,
+-/// and primitives always take the slow path.
++/// Property storage of receivers an inline cache can guard directly:
++/// ordinary objects, classes, and functions. Primitive string prototype
++/// reads are handled separately because their guard is the current realm's
++/// String.prototype cell.
+ fn cached_cell(obj: &Value) -> Option<&Rc<crate::value::ObjectCell>> {
+     match obj {
+         Value::Object { props } => Some(props),
+@@ -333,11 +370,30 @@ fn get_prop_cached(
+     obj: &Value,
+     key: &Value,
+ ) -> Result<Value, VmErr> {
+-    let (Some(props), Value::String(name)) = (cached_cell(obj), key) else {
++    let Value::String(name) = key else {
++        return interp.get_prop_value(obj, key);
++    };
++    let encoded_name = name.to_key_cow();
++    let name = encoded_name.as_ref();
++    if let Value::String(string) = obj {
++        // String length and in-range indices are virtual own properties, so
++        // they must keep using the full exotic-property path. Other named
++        // reads can guard an own data slot on the current String.prototype.
++        if name == "length"
++            || crate::value::array_index(name).is_some_and(|index| index < string.len())
++        {
++            return interp.get_prop_value(obj, key);
++        }
++    }
++    let primitive_prototype = if matches!(obj, Value::String(_)) {
++        interp.primitive_reference_prototype(obj)
++    } else {
++        None
++    };
++    let props = cached_cell(obj).or_else(|| primitive_prototype.as_ref().and_then(cached_cell));
++    let Some(props) = props else {
+         return interp.get_prop_value(obj, key);
+     };
+-    let encoded_name = name.to_key();
+-    let name = encoded_name.as_str();
+     let cache = &function.caches[site];
+     if let Some(index) = cache.probe(props.shape_id())
+         && let Some(value) = props.slot_verified(index, name)
+@@ -377,9 +433,10 @@ fn set_prop_cached(
+     obj: &Value,
+     key: &Value,
+     val: Value,
++    strict: bool,
+ ) -> Result<(), VmErr> {
+     let (Some(props), Value::String(name)) = (cached_cell(obj), key) else {
+-        return interp.assign_member(obj, key, val);
++        return interp.assign_property_with_receiver(obj, key, val, obj, strict);
+     };
+     let encoded_name = name.to_key();
+     let name = encoded_name.as_str();
+@@ -401,7 +458,7 @@ fn set_prop_cached(
+         }
+         return Ok(());
+     }
+-    interp.assign_member(obj, key, val)?;
++    interp.assign_property_with_receiver(obj, key, val, obj, strict)?;
+     if !props.meta.borrow().module_namespace
+         && props.meta.borrow().attrs_of(name).writable
+         && let Some(index) = props.own_index(name)
+@@ -588,10 +645,13 @@ fn run_loop(
+                             frame.registers[src as usize].clone(),
+                         )?;
+                     } else {
+-                        interp.assign_member(
++                        let strict = current_scope(interp, frame).borrow().strict();
++                        interp.assign_property_with_receiver(
+                             &frame.registers[obj as usize],
+                             &frame.registers[key as usize],
+                             frame.registers[src as usize].clone(),
++                            &frame.registers[obj as usize],
++                            strict,
+                         )?;
+                     }
+                 }
+@@ -792,11 +852,13 @@ fn run_loop(
+                     delta,
+                     prefix,
+                 } => {
++                    let strict = current_scope(interp, frame).borrow().strict();
+                     let value = interp.inc_prop_value(
+                         &frame.registers[obj as usize],
+                         &frame.registers[key as usize],
+                         delta > 0,
+                         prefix,
++                        strict,
+                     )?;
+                     frame.registers[dst as usize].assign_for_execution(value);
+                 }
+@@ -892,6 +954,7 @@ fn run_loop(
+                     cache,
+                 } => {
+                     let val = frame.registers[val as usize].clone_for_execution();
++                    let strict = current_scope(interp, frame).borrow().strict();
+                     set_prop_cached(
+                         interp,
+                         frame.function,
+@@ -899,6 +962,7 @@ fn run_loop(
+                         &frame.registers[obj as usize],
+                         &frame.registers[key as usize],
+                         val,
++                        strict,
+                     )?;
+                 }
+                 Instr::DirectEval {
+@@ -2210,6 +2274,24 @@ mod tests {
+         assert_eq!(num(&result), 3.0);
+     }
+ 
++    #[test]
++    fn ic_caches_string_prototype_reads_and_observes_replacement() {
++        let (result, module) = run_module(
++            "let text = 'a'; let matched = 0; \
++             for (let i = 0; i < 6; i++) { \
++               if (i === 3) String.prototype.toUpperCase = function () { return 'later'; }; \
++               let actual = text.toUpperCase(); \
++               if (actual === (i < 3 ? 'A' : 'later')) matched++; \
++             } matched;",
++        );
++        assert_eq!(num(&result), 6.0);
++        let (hits, _, _, _) = cache_stats(&module);
++        assert!(
++            hits > 0,
++            "repeated primitive string reads should hit the cache"
++        );
++    }
++
+     #[test]
+     fn program_stats_aggregate() {
+         let (result, module) = run_module(
+diff --git a/crates/napi-vm-core/src/interpreter/call.rs b/crates/napi-vm-core/src/interpreter/call.rs
+index 77df66b..db00cb7 100644
+--- a/crates/napi-vm-core/src/interpreter/call.rs
++++ b/crates/napi-vm-core/src/interpreter/call.rs
+@@ -1033,6 +1033,13 @@ impl Interpreter {
+                 }
+                 Ok(Value::Bool(true))
+             }
++            Value::String(string) => {
++                let property = self.property_key(key)?;
++                let has_non_configurable_own_property = property == "length"
++                    || crate::value::array_index(&property)
++                        .is_some_and(|index| index < string.len());
++                Ok(Value::Bool(!has_non_configurable_own_property))
++            }
+             _ => {
+                 if matches!(obj, Value::Null | Value::Undefined) {
+                     return Err(VmErr::Msg(
+@@ -1954,6 +1961,7 @@ impl Interpreter {
+         prop: &Value,
+         inc: bool,
+         prefix: bool,
++        strict: bool,
+     ) -> Result<Value, VmErr> {
+         // An own writable Number data slot cannot invoke guest conversion or
+         // prototype setters. Update it directly through the same property cell,
+@@ -1982,7 +1990,7 @@ impl Interpreter {
+         }
+         let cur = self.get_prop_value(obj, &key)?;
+         let (cur, new_val) = self.numeric_update(&cur, inc)?;
+-        self.assign_member(obj, &key, new_val.clone())?;
++        self.assign_property_with_receiver(obj, &key, new_val.clone(), obj, strict)?;
+         if prefix { Ok(new_val) } else { Ok(cur) }
+     }
+ 
+diff --git a/crates/napi-vm-core/src/interpreter/eval.rs b/crates/napi-vm-core/src/interpreter/eval.rs
+index 0411a4c..53a228c 100644
+--- a/crates/napi-vm-core/src/interpreter/eval.rs
++++ b/crates/napi-vm-core/src/interpreter/eval.rs
+@@ -343,12 +343,15 @@ impl Interpreter {
+         key: &Value,
+     ) -> Result<(Value, Value, Value), VmErr> {
+         let receiver = self.resolve_this(scope)?;
+-        let key = self.ecmascript_to_property_key(key)?;
+         let home = scope
+             .borrow()
+             .get(HOME_OBJECT)
+             .ok_or_else(|| VmErr::Msg("ReferenceError: missing super home object".into()))?;
+         let base = self.get_prototype_of(&home)?;
++        // Capture the super base before user code in ToPropertyKey can change
++        // the home object's prototype. The reference keeps that base for both
++        // the read and write of a compound assignment or update.
++        let key = self.ecmascript_to_property_key(key)?;
+         Ok((base, receiver, key))
+     }
+ 
+@@ -3154,7 +3157,8 @@ impl Interpreter {
+                                 return if *prefix { Ok(new_val) } else { Ok(cur) };
+                             }
+                             let prop = self.eval_expr(property)?;
+-                            self.inc_prop_value(&obj, &prop, *op == UnOp::Inc, *prefix)
++                            let strict = self.global.borrow().strict();
++                            self.inc_prop_value(&obj, &prop, *op == UnOp::Inc, *prefix, strict)
+                         }
+                         _ => {
+                             let v = self.eval_expr(operand)?;
+diff --git a/crates/napi-vm-core/src/interpreter/mod.rs b/crates/napi-vm-core/src/interpreter/mod.rs
+index 80c795e..d0560b2 100644
+--- a/crates/napi-vm-core/src/interpreter/mod.rs
++++ b/crates/napi-vm-core/src/interpreter/mod.rs
+@@ -334,7 +334,8 @@ pub struct Interpreter {
+     /// with [`Self::set_jit_policy`].
+     jit_policy: crate::jit::JitPolicy,
+     tier_tracking: crate::jit::TierTracking,
+-    pub(crate) activation_pool: Vec<(Vec<Value>, Vec<crate::bytecode::vm::RunSlot>)>,
++    pub(crate) activation_pool: Vec<crate::bytecode::vm::ActivationBuffers>,
++    pub(crate) function_environment_pool: Vec<Env>,
+     /// Registered native-code backend, if any. `None` (the default) means
+     /// hot functions stay on bytecode; see [`Self::set_jit_backend`].
+     jit_backend: Option<crate::jit::BackendRef>,
+@@ -508,6 +509,7 @@ impl Interpreter {
+             jit_policy: crate::jit::JitPolicy::default(),
+             tier_tracking: crate::jit::TierTracking::Disabled,
+             activation_pool: Vec::new(),
++            function_environment_pool: Vec::new(),
+             jit_backend: None,
+         };
+         interp.publish_module_realm();
+@@ -525,6 +527,19 @@ impl Interpreter {
+         let mut interp = Self::new();
+         let builtins = Rc::new(RefCell::new(Environment::new()));
+         crate::builtins::setup_builtins(&builtins);
++        let primitive_prototypes = ["Boolean", "Number", "String", "BigInt", "Symbol"]
++            .into_iter()
++            .filter_map(|name| {
++                builtins
++                    .borrow()
++                    .get(name)
++                    .and_then(|constructor| constructor.get_prop("prototype"))
++                    .map(|prototype| (format!("%{name}Prototype%"), prototype))
++            })
++            .collect::<Vec<_>>();
++        for (name, prototype) in primitive_prototypes {
++            builtins.borrow_mut().install_intrinsic(&name, prototype);
++        }
+         let global = Rc::new(RefCell::new(Environment::global(Some(builtins))));
+         interp.global = global.clone();
+         interp.persistent_global = global;
+@@ -566,15 +581,25 @@ impl Interpreter {
+     /// Create a host-defined module-source object with an internal class name.
+     /// Guest properties, prototypes, and proxies cannot manufacture this brand.
+     pub fn create_module_source_object(&self, class_name: impl Into<crate::JsString>) -> Value {
+-        let constructor = self.abstract_module_source_constructor();
+-        let prototype = constructor
+-            .get_prop("prototype")
+-            .expect("module-source prototype");
++        let class_name = class_name.into();
++        let intrinsic_name = format!("ModuleSourcePrototype:{}", class_name.to_key());
++        let cached = self.persistent_global.borrow().intrinsic(&intrinsic_name);
++        let prototype = cached.unwrap_or_else(|| {
++            let constructor = self.abstract_module_source_constructor();
++            let abstract_prototype = constructor
++                .get_prop("prototype")
++                .expect("module-source prototype");
++            let prototype = Value::object_with_proto(Vec::new(), Some(Rc::new(abstract_prototype)));
++            self.persistent_global
++                .borrow_mut()
++                .install_intrinsic(&intrinsic_name, prototype.clone());
++            prototype
++        });
+         let value = Value::object_with_proto(Vec::new(), Some(Rc::new(prototype)));
+         let properties = value.property_cell().expect("source object");
+         let mut metadata = properties.meta.borrow_mut();
+         metadata.realm_global = Some(self.persistent_global.clone());
+-        metadata.module_source_class_name = Some(class_name.into());
++        metadata.module_source_class_name = Some(class_name);
+         value
+     }
+ 
+@@ -3012,6 +3037,29 @@ impl Interpreter {
+             mode
+         };
+     }
++
++    pub(crate) fn acquire_function_environment(&mut self, parent: Env) -> Env {
++        if let Some(environment) = self.function_environment_pool.pop() {
++            *environment.borrow_mut() = Environment::function_child(parent);
++            environment
++        } else {
++            Rc::new(RefCell::new(Environment::function_child(parent)))
++        }
++    }
++
++    pub(crate) fn recycle_function_environment(&mut self, environment: Env) {
++        if self.function_environment_pool.len() >= 16
++            || Rc::strong_count(&environment) != 1
++            || !environment.borrow().resources.is_empty()
++        {
++            return;
++        }
++        // Drop the parent chain and bindings before retaining the allocation;
++        // closures that captured this frame fail the strong-count check above.
++        *environment.borrow_mut() = Environment::new();
++        self.function_environment_pool.push(environment);
++    }
++
+     pub(crate) fn note_loop_iter(&self, counters: &crate::jit::TierCounters) {
+         if self.tier_tracking != crate::jit::TierTracking::Disabled {
+             crate::jit::note_loop_iter(counters);
+@@ -3312,6 +3360,37 @@ mod tests {
+     use crate::lexer::Lexer;
+     use crate::parser::Parser;
+ 
++    #[test]
++    fn module_source_types_share_a_realm_owned_intermediate_prototype() {
++        let mut vm = Interpreter::with_builtins();
++        let first = vm.create_module_source_object("HostModule");
++        let second = vm.create_module_source_object("HostModule");
++        let other_type = vm.create_module_source_object("OtherModule");
++        let prototype = vm.get_prototype_of(&first).unwrap();
++        assert!(strict_equals(
++            &prototype,
++            &vm.get_prototype_of(&second).unwrap()
++        ));
++        assert!(!strict_equals(
++            &prototype,
++            &vm.get_prototype_of(&other_type).unwrap()
++        ));
++        let abstract_prototype = vm
++            .abstract_module_source_constructor()
++            .get_prop("prototype")
++            .unwrap();
++        assert!(strict_equals(
++            &vm.get_prototype_of(&prototype).unwrap(),
++            &abstract_prototype
++        ));
++        let mut other_realm = Interpreter::with_builtins();
++        let foreign = other_realm.create_module_source_object("HostModule");
++        assert!(!strict_equals(
++            &prototype,
++            &other_realm.get_prototype_of(&foreign).unwrap()
++        ));
++    }
++
+     fn eval(src: &str) -> Result<Value, VmErr> {
+         let mut interp = Interpreter::with_builtins();
+         let mut lex = Lexer::new(src);
+diff --git a/crates/napi-vm-core/src/interpreter/resolve.rs b/crates/napi-vm-core/src/interpreter/resolve.rs
+index 970de13..775c3e3 100644
+--- a/crates/napi-vm-core/src/interpreter/resolve.rs
++++ b/crates/napi-vm-core/src/interpreter/resolve.rs
+@@ -47,19 +47,21 @@ impl Interpreter {
+     }
+     /// Primitive references are boxed with the current execution realm's
+     /// intrinsic prototype, regardless of where the primitive was obtained.
+-    fn primitive_reference_prototype(&self, value: &Value) -> Option<Value> {
+-        let name = match value {
+-            Value::Bool(_) => "Boolean",
+-            Value::Number(_) => "Number",
+-            Value::String(_) => "String",
+-            Value::BigInt(_) => "BigInt",
+-            Value::Symbol(_) => "Symbol",
++    pub(crate) fn primitive_reference_prototype(&self, value: &Value) -> Option<Value> {
++        let (constructor, prototype) = match value {
++            Value::Bool(_) => ("Boolean", "%BooleanPrototype%"),
++            Value::Number(_) => ("Number", "%NumberPrototype%"),
++            Value::String(_) => ("String", "%StringPrototype%"),
++            Value::BigInt(_) => ("BigInt", "%BigIntPrototype%"),
++            Value::Symbol(_) => ("Symbol", "%SymbolPrototype%"),
+             _ => return None,
+         };
+-        self.persistent_global
+-            .borrow()
+-            .intrinsic(name)
+-            .and_then(|constructor| constructor.get_prop("prototype"))
++        let global = self.persistent_global.borrow();
++        global.intrinsic(prototype).or_else(|| {
++            global
++                .intrinsic(constructor)
++                .and_then(|constructor| constructor.get_prop("prototype"))
++        })
+     }
+     pub(crate) fn lookup_binding_in(
+         &mut self,
+@@ -912,14 +914,14 @@ impl Interpreter {
+         }
+         if let Some(props) = match o {
+             Value::Object { props } => Some(props.clone()),
+-            _ if !self.seq(o, receiver) => o.exotic_properties(),
++            _ if !self.seq(o, receiver) => o.property_cell(),
+             _ => None,
+         } {
+             let key = self.ecmascript_to_property_key(p)?;
+             let slot = self.property_key(&key)?;
+             let inherited = {
+                 let own = props.borrow().iter().any(|(name, _)| name == &slot);
+-                if own { None } else { props.proto() }
++                if own { None } else { self.prototype_of(o) }
+             };
+             if let Some(prototype) = inherited
+                 && matches!(
+@@ -1068,12 +1070,12 @@ impl Interpreter {
+         // internal operation, retaining the original receiver for accessors.
+         if let Some(props) = match o {
+             Value::Object { props } => Some(props.clone()),
+-            _ if !self.seq(o, receiver) => o.exotic_properties(),
++            _ if !self.seq(o, receiver) => o.property_cell(),
+             _ => None,
+         } {
+             let inherited = {
+                 let own = props.borrow().iter().any(|(name, _)| name == key);
+-                if own { None } else { props.proto() }
++                if own { None } else { self.prototype_of(o) }
+             };
+             if let Some(prototype) = inherited
+                 && matches!(
+diff --git a/crates/napi-vm-core/src/js_string.rs b/crates/napi-vm-core/src/js_string.rs
+index d3cd975..3e29ff2 100644
+--- a/crates/napi-vm-core/src/js_string.rs
++++ b/crates/napi-vm-core/src/js_string.rs
+@@ -1,5 +1,6 @@
+ //! ECMAScript strings are sequences of UTF-16 code units, including unpaired
+ //! surrogates. UTF-8 rendering is only a host-facing, lossy view.
++use std::borrow::Cow;
+ use std::ops::Deref;
+ use std::sync::{Arc, OnceLock};
+ 
+@@ -154,6 +155,28 @@ impl JsString {
+         }
+         out
+     }
++    /// Return the property-key encoding, borrowing ordinary well-formed
++    /// strings and allocating only when lone surrogates or the escape marker
++    /// require the lossless encoding used by [`Self::to_key`].
++    pub fn to_key_cow(&self) -> Cow<'_, str> {
++        let units = self.units();
++        let mut index = 0;
++        while index < units.len() {
++            match units[index] {
++                0xFDD0 => return Cow::Owned(self.to_key()),
++                0xD800..=0xDBFF
++                    if units
++                        .get(index + 1)
++                        .is_some_and(|unit| (0xDC00..=0xDFFF).contains(unit)) =>
++                {
++                    index += 2;
++                }
++                0xD800..=0xDFFF => return Cow::Owned(self.to_key()),
++                _ => index += 1,
++            }
++        }
++        Cow::Borrowed(self.as_str())
++    }
+     pub fn from_key(key: &str) -> Self {
+         let mut units = Vec::new();
+         let mut chars = key.chars();
+@@ -319,3 +342,29 @@ impl<'de> serde::Deserialize<'de> for JsString {
+         }
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn property_key_encoding_borrows_ordinary_and_paired_strings() {
++        for value in [JsString::from("toUpperCase"), JsString::from("😀")] {
++            let encoded = value.to_key_cow();
++            assert!(matches!(encoded, Cow::Borrowed(_)));
++            assert_eq!(encoded, value.to_key());
++        }
++    }
++
++    #[test]
++    fn property_key_encoding_allocates_for_lossless_escapes() {
++        for value in [
++            JsString::from_units(vec![0xD800]),
++            JsString::from("\u{FDD0}"),
++        ] {
++            let encoded = value.to_key_cow();
++            assert!(matches!(encoded, Cow::Owned(_)));
++            assert_eq!(encoded, value.to_key());
++        }
++    }
++}
+diff --git a/crates/napi-vm-core/src/parser/cache.rs b/crates/napi-vm-core/src/parser/cache.rs
+index 75f40a4..87e6b87 100644
+--- a/crates/napi-vm-core/src/parser/cache.rs
++++ b/crates/napi-vm-core/src/parser/cache.rs
+@@ -239,14 +239,26 @@ mod tests {
+         assert_eq!(parse_count() - before, 2);
+     }
+ 
++    #[test]
++    fn nested_functions_parse_on_a_small_native_stack() {
++        let source = "(function(){".repeat(32) + "0;" + &"})()".repeat(32);
++        std::thread::Builder::new()
++            .name("nested-function-parse-probe".into())
++            .stack_size(512 * 1024)
++            .spawn(move || assert!(parse_cached(&source).is_ok()))
++            .unwrap()
++            .join()
++            .unwrap();
++    }
++
+     #[test]
+     fn depth_failure_detail_survives_the_cache_boundary() {
+         let deep = "(".repeat(200) + &")".repeat(200);
+-        // Debug parser frames are fat: 65 guarded levels exceed the default
+-        // test-thread stack, so run the probe on a roomy thread.
++        // Both successful descent and rejection at the resource limit must
++        // remain safe on embedding threads with small native stacks.
+         let failure = std::thread::Builder::new()
+             .name("cache-depth-probe".into())
+-            .stack_size(8 * 1024 * 1024)
++            .stack_size(512 * 1024)
+             .spawn(move || parse_cached(&deep).unwrap_err())
+             .unwrap()
+             .join()
+diff --git a/crates/napi-vm-core/src/parser/compound.rs b/crates/napi-vm-core/src/parser/compound.rs
+index ea17e05..e4d3140 100644
+--- a/crates/napi-vm-core/src/parser/compound.rs
++++ b/crates/napi-vm-core/src/parser/compound.rs
+@@ -655,7 +655,7 @@ impl Parser {
+             if self.eof() {
+                 break;
+             }
+-            if let Some(st) = self.stmt() {
++            if let Some(st) = self.statement_list_item() {
+                 s.push(st);
+             } else {
+                 self.record_error("invalid statement in block".into());
+diff --git a/crates/napi-vm-core/src/parser/expr.rs b/crates/napi-vm-core/src/parser/expr.rs
+index 60d84cf..227a524 100644
+--- a/crates/napi-vm-core/src/parser/expr.rs
++++ b/crates/napi-vm-core/src/parser/expr.rs
+@@ -12,7 +12,7 @@ impl Parser {
+         if !self.enter() {
+             return None;
+         }
+-        let r = self.comma();
++        let r = stacker::maybe_grow(1024 * 1024, 8 * 1024 * 1024, || self.comma());
+         self.leave();
+         r
+     }
+diff --git a/crates/napi-vm-core/src/parser/mod.rs b/crates/napi-vm-core/src/parser/mod.rs
+index cd830d2..900ec45 100644
+--- a/crates/napi-vm-core/src/parser/mod.rs
++++ b/crates/napi-vm-core/src/parser/mod.rs
+@@ -35,11 +35,10 @@ use crate::span::Span;
+ /// Maximum statement/expression nesting the parser accepts. The parser is
+ /// recursive descent, so each nesting level costs native stack frames;
+ /// 100k-deep parentheses would overflow the stack and SIGSEGV the host.
+-/// Each recursive expression level passes through several parser functions,
+-/// so even 256 levels can exhaust the smaller native stacks used by embedded
+-/// runtimes before this guard unwinds. Legitimate code rarely nests beyond a
+-/// few dozen levels.
+-const MAX_PARSE_DEPTH: u32 = 64;
++/// Guarded recursive entry points grow the native stack before descending.
++/// Keep a finite resource limit while accepting ordinary nested functions,
++/// which consume several statement/expression levels per function.
++const MAX_PARSE_DEPTH: u32 = 128;
+ 
+ #[cfg(any(test, feature = "test-hooks"))]
+ thread_local! {
+@@ -175,7 +174,7 @@ impl Parser {
+     pub fn parse(&mut self) -> Vec<Statement> {
+         let mut s = Vec::new();
+         while !self.eof() && !self.depth_exceeded {
+-            if let Some(st) = self.stmt() {
++            if let Some(st) = self.statement_list_item() {
+                 s.push(st);
+             } else {
+                 // Record the position of the token that could not start a
+@@ -245,12 +244,13 @@ impl Parser {
+         match self.error.take() {
+             Some(error) => Err(error),
+             None => {
+-                validate::validate(&stmts, new_target, strict, goal, eval.as_ref()).map_err(
+-                    |message| ParseError {
+-                        message,
+-                        span: Span::unknown(),
+-                    },
+-                )?;
++                stacker::maybe_grow(1024 * 1024, 8 * 1024 * 1024, || {
++                    validate::validate(&stmts, new_target, strict, goal, eval.as_ref())
++                })
++                .map_err(|message| ParseError {
++                    message,
++                    span: Span::unknown(),
++                })?;
+                 Ok(stmts)
+             }
+         }
+@@ -619,6 +619,26 @@ mod tests {
+         parser.parse()
+     }
+ 
++    fn parse_program(src: &str) -> Result<Vec<Statement>, ParseError> {
++        let mut lex = Lexer::new(src);
++        let toks = lex.tokenize_with_spans();
++        Parser::new_with_spans(toks).parse_program()
++    }
++
++    #[test]
++    fn consecutive_empty_blocks_collapse_in_statement_lists() {
++        let statements = parse_program("{}{}{}{};").unwrap();
++        assert_eq!(statements.len(), 2);
++        assert!(matches!(&statements[0], Statement::Block(body) if body.is_empty()));
++        assert!(matches!(&statements[1], Statement::Empty));
++    }
++
++    #[test]
++    fn empty_block_collapse_preserves_single_statement_grammar() {
++        assert!(parse_program("if (true) {} else {}").is_ok());
++        assert!(parse_program("if (true) {}{} else {}").is_err());
++    }
++
+     #[test]
+     fn test_var_decl() {
+         let stmts = parse("const x = 42;");
+diff --git a/crates/napi-vm-core/src/parser/stmt.rs b/crates/napi-vm-core/src/parser/stmt.rs
+index 5d5bcdd..7c769ec 100644
+--- a/crates/napi-vm-core/src/parser/stmt.rs
++++ b/crates/napi-vm-core/src/parser/stmt.rs
+@@ -7,12 +7,38 @@ use super::{
+ use crate::lexer::Token;
+ 
+ impl Parser {
++    /// Parse one statement-list item, collapsing consecutive empty block
++    /// statements. They have no declarations, effects, or completion value,
++    /// so a run is equivalent to a single empty block. Keeping this fast path
++    /// in statement lists preserves the one-statement grammar used by `if`,
++    /// loops, labels, and similar constructs.
++    pub(crate) fn statement_list_item(&mut self) -> Option<Statement> {
++        if !self.single_statement && matches!(self.cur(), Token::LBrace) {
++            let start = self.pos;
++            let mut end = start;
++            while matches!(
++                self.toks.get(end).map(|(token, _)| token),
++                Some(Token::LBrace)
++            ) && matches!(
++                self.toks.get(end + 1).map(|(token, _)| token),
++                Some(Token::RBrace)
++            ) {
++                end += 2;
++            }
++            if end > start {
++                self.pos = end;
++                return Some(Statement::Block(Vec::new()));
++            }
++        }
++        self.stmt()
++    }
++
+     pub(crate) fn stmt(&mut self) -> Option<Statement> {
+         // Nesting guard for nested blocks / control flow; see `Parser::enter`.
+         if !self.enter() {
+             return None;
+         }
+-        let r = self.stmt_inner();
++        let r = stacker::maybe_grow(1024 * 1024, 8 * 1024 * 1024, || self.stmt_inner());
+         self.leave();
+         r
+     }

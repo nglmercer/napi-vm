@@ -34,6 +34,13 @@ impl Statement {
 }
 
 impl ClassMember {
+    pub(crate) fn decorators(&self) -> &[Expr] {
+        match self {
+            Self::Method { decorators, .. } => decorators,
+            _ => &[],
+        }
+    }
+
     pub(crate) fn source_text(&self) -> Option<&SourceTextRef> {
         match self {
             Self::Method { source_text, .. }
@@ -263,6 +270,7 @@ pub enum Expr {
     /// `class { … }` / `class Named extends Base { … }` in expression
     /// position. The name, when present, binds only inside the class body.
     ClassExpr {
+        decorators: Vec<Expr>,
         source_text: Option<SourceTextRef>,
         name: Option<String>,
         superclass: Option<Box<Expr>>,
@@ -403,6 +411,7 @@ pub enum Statement {
         annex_b_statement: bool,
     },
     ClassDecl {
+        decorators: Vec<Expr>,
         source_text: Option<SourceTextRef>,
         name: String,
         superclass: Option<Box<Expr>>,
@@ -570,6 +579,7 @@ pub enum MemberName {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClassMember {
     Method {
+        decorators: Vec<Expr>,
         source_text: Option<SourceTextRef>,
         name: MemberName,
         is_static: bool,
@@ -581,6 +591,7 @@ pub enum ClassMember {
     Field {
         name: MemberName,
         is_static: bool,
+        auto_accessor: bool,
         init: Option<Expr>,
     },
     /// `static { … }`: runs once against the class, after its static fields
@@ -601,24 +612,55 @@ pub enum ClassMember {
     },
 }
 
-/// Source declarations for eval's lexical validation, independent of which
-/// private storage forms the runtime currently installs.
+/// A per-element private name that cannot be written by guest source. The
+/// ordinal keeps redeclared public accessors' backing slots independent.
+pub(crate) fn auto_accessor_storage(index: usize) -> String {
+    format!("#\0auto-accessor:{index}")
+}
+
+pub(crate) fn auto_accessor_body(storage: &str, setter: bool) -> Vec<Statement> {
+    let target = Expr::Member {
+        object: Box::new(Expr::This),
+        property: Box::new(Expr::String(crate::JsString::from_key(storage))),
+        computed: false,
+    };
+    if setter {
+        vec![Statement::Expr(Expr::Assignment {
+            target: Box::new(target),
+            op: AssignOp::Assign,
+            value: Box::new(Expr::Identifier("value".into())),
+        })]
+    } else {
+        vec![Statement::Return(Some(Box::new(target)))]
+    }
+}
+
+/// Source private declarations and auto-accessor backing slots, allocated in
+/// the class environment before any computed names or initializers execute.
 pub(crate) fn class_private_declarations(body: &[ClassMember]) -> Vec<String> {
-    body.iter()
-        .filter_map(|member| {
-            let name = match member {
-                ClassMember::Method { name, .. }
-                | ClassMember::Field { name, .. }
-                | ClassMember::Getter { name, .. }
-                | ClassMember::Setter { name, .. } => name,
-                ClassMember::StaticBlock { .. } => return None,
-            };
-            match name {
-                MemberName::Private(name) => Some(name.clone()),
-                _ => None,
+    let mut names = Vec::new();
+    for (index, member) in body.iter().enumerate() {
+        let name = match member {
+            ClassMember::Method { name, .. }
+            | ClassMember::Getter { name, .. }
+            | ClassMember::Setter { name, .. } => name,
+            ClassMember::Field {
+                name,
+                auto_accessor,
+                ..
+            } => {
+                if *auto_accessor {
+                    names.push(auto_accessor_storage(index));
+                }
+                name
             }
-        })
-        .collect()
+            ClassMember::StaticBlock { .. } => continue,
+        };
+        if let MemberName::Private(name) = name {
+            names.push(name.clone());
+        }
+    }
+    names
 }
 
 /// An object-pattern key: a static name, or `[expr]` evaluated at bind time.
@@ -867,7 +909,11 @@ fn member_name_references(member: &ClassMember, name: &str) -> bool {
         | ClassMember::Setter { name, .. } => name,
         ClassMember::StaticBlock { .. } => return false,
     };
-    matches!(key, MemberName::Computed(e) if expr_references(e, name))
+    member
+        .decorators()
+        .iter()
+        .any(|expr| expr_references(expr, name))
+        || matches!(key, MemberName::Computed(e) if expr_references(e, name))
 }
 
 pub(crate) fn stmts_need_arguments(stmts: &[Statement]) -> bool {
@@ -1011,11 +1057,17 @@ pub(crate) fn statements_capture_identifier(stmts: &[Statement], name: &str) -> 
         }
         Statement::FnDecl { body, .. } => stmts_reference(body, name),
         Statement::ClassDecl {
-            superclass, body, ..
+            decorators,
+            superclass,
+            body,
+            ..
         } => {
-            superclass
-                .as_ref()
-                .is_some_and(|expr| expr_captures_identifier(expr, name))
+            decorators
+                .iter()
+                .any(|expr| expr_captures_identifier(expr, name))
+                || superclass
+                    .as_ref()
+                    .is_some_and(|expr| expr_captures_identifier(expr, name))
                 || class_members_capture_identifier(body, name)
         }
         Statement::Return(expr) => expr
@@ -1134,11 +1186,17 @@ pub(crate) fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
         Expr::ArrowFn { body, .. } => arrow_body_references(body, name),
         Expr::FnExpr { body, .. } => stmts_reference(body, name),
         Expr::ClassExpr {
-            superclass, body, ..
+            decorators,
+            superclass,
+            body,
+            ..
         } => {
-            superclass
-                .as_deref()
-                .is_some_and(|expr| expr_captures_identifier(expr, name))
+            decorators
+                .iter()
+                .any(|expr| expr_captures_identifier(expr, name))
+                || superclass
+                    .as_deref()
+                    .is_some_and(|expr| expr_captures_identifier(expr, name))
                 || class_members_capture_identifier(body, name)
         }
         Expr::Array { items, .. } => items
@@ -1228,7 +1286,7 @@ pub(crate) fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
 }
 
 fn class_members_capture_identifier(members: &[ClassMember], name: &str) -> bool {
-    members.iter().any(|member| match member {
+    members.iter().any(|member| member.decorators().iter().any(|expr| expr_captures_identifier(expr, name)) || match member {
         ClassMember::Method {
             body, name: key, ..
         }
@@ -1297,12 +1355,16 @@ fn stmt_references(s: &Statement, name: &str) -> bool {
         }
         Statement::FnDecl { body, .. } => stmts_reference(body, name),
         Statement::ClassDecl {
-            superclass, body, ..
+            decorators,
+            superclass,
+            body,
+            ..
         } => {
-            superclass
-                .as_ref()
-                .map(|e| expr_references(e, name))
-                .unwrap_or(false)
+            decorators.iter().any(|expr| expr_references(expr, name))
+                || superclass
+                    .as_ref()
+                    .map(|e| expr_references(e, name))
+                    .unwrap_or(false)
                 || body.iter().any(|m| {
                     member_name_references(m, name)
                         || match m {
@@ -1473,12 +1535,16 @@ fn expr_references(e: &Expr, name: &str) -> bool {
         }
         Expr::Unary { operand, .. } => expr_references(operand, name),
         Expr::ClassExpr {
-            superclass, body, ..
+            decorators,
+            superclass,
+            body,
+            ..
         } => {
-            superclass
-                .as_ref()
-                .map(|e| expr_references(e, name))
-                .unwrap_or(false)
+            decorators.iter().any(|expr| expr_references(expr, name))
+                || superclass
+                    .as_ref()
+                    .map(|e| expr_references(e, name))
+                    .unwrap_or(false)
                 || body.iter().any(|m| {
                     member_name_references(m, name)
                         || match m {
@@ -1705,9 +1771,13 @@ fn statement_has_top_level_await(statement: &Statement) -> bool {
         | Statement::ExportAll { .. }
         | Statement::Empty => false,
         Statement::ClassDecl {
-            superclass, body, ..
+            decorators,
+            superclass,
+            body,
+            ..
         } => {
-            superclass.as_deref().is_some_and(expr_has_top_level_await)
+            decorators.iter().any(expr_has_top_level_await)
+                || superclass.as_deref().is_some_and(expr_has_top_level_await)
                 || class_has_top_level_await(body)
         }
         Statement::Return(expr) => expr.as_deref().is_some_and(expr_has_top_level_await),
@@ -1833,19 +1903,23 @@ fn pattern_has_top_level_await(pattern: &Pattern) -> bool {
 }
 
 fn class_has_top_level_await(members: &[ClassMember]) -> bool {
-    members.iter().any(|member| match member {
-        ClassMember::Method { name, .. }
-        | ClassMember::Getter { name, .. }
-        | ClassMember::Setter { name, .. } => member_name_has_top_level_await(name),
-        ClassMember::Field {
-            name,
-            is_static,
-            init,
-        } => {
-            member_name_has_top_level_await(name)
-                || (*is_static && init.as_ref().is_some_and(expr_has_top_level_await))
-        }
-        ClassMember::StaticBlock { body } => program_has_top_level_await(body),
+    members.iter().any(|member| {
+        member.decorators().iter().any(expr_has_top_level_await)
+            || match member {
+                ClassMember::Method { name, .. }
+                | ClassMember::Getter { name, .. }
+                | ClassMember::Setter { name, .. } => member_name_has_top_level_await(name),
+                ClassMember::Field {
+                    name,
+                    is_static,
+                    init,
+                    ..
+                } => {
+                    member_name_has_top_level_await(name)
+                        || (*is_static && init.as_ref().is_some_and(expr_has_top_level_await))
+                }
+                ClassMember::StaticBlock { body } => program_has_top_level_await(body),
+            }
     })
 }
 
@@ -1900,9 +1974,13 @@ fn expr_has_top_level_await(expr: &Expr) -> bool {
         }
         Expr::ArrowFn { .. } | Expr::FnExpr { .. } => false,
         Expr::ClassExpr {
-            superclass, body, ..
+            decorators,
+            superclass,
+            body,
+            ..
         } => {
-            superclass.as_deref().is_some_and(expr_has_top_level_await)
+            decorators.iter().any(expr_has_top_level_await)
+                || superclass.as_deref().is_some_and(expr_has_top_level_await)
                 || class_has_top_level_await(body)
         }
         Expr::DynamicImport {

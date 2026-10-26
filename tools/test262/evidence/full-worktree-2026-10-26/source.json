@@ -1,0 +1,13 @@
+{
+  "source_commit": "42ae715ba57ee8b51bbf95e717851f63be0b4641",
+  "source_status": "uncommitted source snapshot; source.diff records the worker implementation",
+  "source_diff_sha256": "c74ee988c8ca9ff3a0fc60aba1cd9c4dac422b5ca79732ccd1870e1367f23731",
+  "engine_sha256": "0714d545067fe2c3a4520d76016941ceceee154506882654ac12ef0148c12e0d",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_jobs": 2,
+  "timeout_seconds": 5.0,
+  "resumed_files": 0,
+  "skip_features": [],
+  "checkpoint": "artifacts/test262/full-worktree-2026-10-25.checkpoint.jsonl",
+  "command": "python3 tools/test262/run.py .napi-vm/test262 --engine target/release/napi-vm-test262 --revision 5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81 --jobs 2 --timeout 5 --checkpoint artifacts/test262/full-worktree-2026-10-25.checkpoint.jsonl --output artifacts/test262/full-worktree-2026-10-25.json"
+}

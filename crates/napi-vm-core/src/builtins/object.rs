@@ -435,6 +435,14 @@ fn accessor_kind(key: &str, value: &Value) -> Option<&'static str> {
 }
 
 fn accessor_kind_for(target: &Value, key: &str, value: &Value) -> Option<&'static str> {
+    let data = match target {
+        Value::Array(array) => array.meta.borrow().is_explicit_data(key),
+        _ => cell(target).is_some_and(|props| props.meta.borrow().is_explicit_data(key)),
+    };
+    if data {
+        return None;
+    }
+
     let empty = match target {
         Value::Array(array) => array.meta.borrow().is_empty_accessor(key),
         _ => cell(target).is_some_and(|props| props.meta.borrow().is_empty_accessor(key)),
@@ -1604,7 +1612,8 @@ fn define_ordinary_property(target: &Value, key: &str, descriptor: &Value) -> Re
     let mut meta = c.meta.borrow_mut();
     meta.set_attrs(key, attrs);
     meta.set_empty_accessor(key, empty_accessor);
-    if new_is_accessor {
+    meta.set_explicit_data(key, !new_is_accessor);
+    if new_is_accessor && !(meta.legacy_call_accessors && matches!(key, "caller" | "arguments")) {
         meta.has_accessors = true;
     }
     Ok(())
@@ -2179,7 +2188,7 @@ fn descriptor_for(target: &Value, key: &str) -> Value {
     match c
         .meta
         .borrow()
-        .has_accessors
+        .may_have_accessor(key)
         .then(|| accessor_kind_for(target, key, &value))
         .flatten()
     {

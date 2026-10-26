@@ -198,7 +198,11 @@ fn reflect_prevent_extensions(
     interp.prevent_extensions(&target).map(Value::Bool)
 }
 
-fn reflect_apply(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+pub(super) fn reflect_apply(
+    interp: &mut Interpreter,
+    _: Value,
+    a: Vec<Value>,
+) -> Result<Value, VmErr> {
     let target = arg(&a, 0);
     if !crate::interpreter::is_callable_value(&target) {
         return Err(VmErr::Msg(
@@ -209,7 +213,11 @@ fn reflect_apply(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Va
     interp.request_tail_call(target, arg(&a, 1), args)
 }
 
-fn reflect_construct(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+pub(super) fn reflect_construct(
+    interp: &mut Interpreter,
+    _: Value,
+    a: Vec<Value>,
+) -> Result<Value, VmErr> {
     let target = arg(&a, 0);
     let new_target = a.get(2).cloned().unwrap_or_else(|| target.clone());
     if !super::is_constructor(&target) || !super::is_constructor(&new_target) {

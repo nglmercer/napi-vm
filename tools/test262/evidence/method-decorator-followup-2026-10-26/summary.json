@@ -1,0 +1,36 @@
+{
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "engine_sha256": "53f7de7fc6149b75fa16664d96295d9aec560d27e551782e45d49d5642ca9f2e",
+  "worker_jobs": 2,
+  "timeout_seconds": 5.0,
+  "total": 26479,
+  "counts": {
+    "pass": 26471,
+    "fail": 8,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "vs_full": {
+    "new_passes": 34,
+    "lost_passes": 0
+  },
+  "vs_class_decorator": {
+    "new_passes": 0,
+    "lost_passes": 0
+  },
+  "worker_smoke_probes_passed": 6,
+  "scope": "Focused selection retains 34 prior gains; method stage has no additional pinned gains yet. Latest complete score remains 102839 / 102956.",
+  "timing_slice": {
+    "total": 6,
+    "counts": {
+      "pass": 6,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    }
+  }
+}

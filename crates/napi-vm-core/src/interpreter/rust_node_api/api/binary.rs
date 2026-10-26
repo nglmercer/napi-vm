@@ -292,6 +292,7 @@ pub(super) fn napi_typed_kind(kind: i32) -> Option<TypedKind> {
         8 => Some(TypedKind::Float64),
         9 => Some(TypedKind::BigInt64),
         10 => Some(TypedKind::BigUint64),
+        11 => Some(TypedKind::Float16),
         _ => None,
     }
 }
@@ -309,6 +310,7 @@ pub(super) fn napi_typed_kind_id(kind: TypedKind) -> i32 {
         TypedKind::Float64 => 8,
         TypedKind::BigInt64 => 9,
         TypedKind::BigUint64 => 10,
+        TypedKind::Float16 => 11,
     }
 }
 

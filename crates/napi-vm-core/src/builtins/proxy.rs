@@ -339,9 +339,7 @@ impl Interpreter {
                 }
             };
             if length_can_change {
-                return Err(VmErr::Msg(
-                    "TypeError: Cannot prevent extensions on a variable-length typed array".into(),
-                ));
+                return Ok(false);
             }
         }
         if let Value::Array(array) = value {
