@@ -1163,7 +1163,8 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
         }
         Expr::Binary { op, left, right } => {
             if *op == BinOp::Pow
-                && matches!(left.as_ref(), Expr::Unary { op, .. } if !matches!(op, UnOp::Inc | UnOp::Dec))
+                && (matches!(left.as_ref(), Expr::Unary { op, .. } if !matches!(op, UnOp::Inc | UnOp::Dec))
+                    || matches!(left.as_ref(), Expr::Await(_)))
             {
                 return Err("unparenthesized unary expression before exponentiation".into());
             }

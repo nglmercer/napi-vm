@@ -189,6 +189,11 @@ impl Parser {
                             self.expect(&Token::RBracket);
                             match self.cur() {
                                 Token::Colon => {
+                                    if is_async || is_generator || is_method || is_setter {
+                                        self.record_error(
+                                            "method modifier on a data property".into(),
+                                        );
+                                    }
                                     self.adv();
                                     let v = self.with_in(true, Self::assign)?;
                                     p.push(ObjectProp::Computed(e, v));
@@ -310,6 +315,9 @@ impl Parser {
                             });
                         }
                     } else if self.eat(&Token::Colon) {
+                        if is_async || is_generator || is_method || is_setter {
+                            self.record_error("method modifier on a data property".into());
+                        }
                         let v = self.with_in(true, Self::assign)?;
                         p.push(ObjectProp::KeyValue(key, v));
                     } else if self.eat(&Token::Equal) {

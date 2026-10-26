@@ -1945,7 +1945,7 @@ impl Interpreter {
                     && matches!(target.as_ref(), Expr::Identifier(target) if target == name)
                     && matches!(value, Value::Undefined)
                 {
-                    value = self.eval_expr(default)?;
+                    value = self.evaluate_class_field(default, &Value::String(name.into()))?;
                 }
             }
             self.declare_binding(name, value, BindKind::Var, true)?;

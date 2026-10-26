@@ -620,6 +620,12 @@ impl Parser {
         let source_start = self.pos;
         let mut e = self.primary()?;
         loop {
+            // An unparenthesized arrow is an AssignmentExpression, not a
+            // MemberExpression. In particular a following computed class field
+            // must not become a property access on a block-bodied arrow.
+            if matches!(e, Expr::ArrowFn { .. }) {
+                break;
+            }
             match self.cur() {
                 Token::LParen => {
                     self.adv();

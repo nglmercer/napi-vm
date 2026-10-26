@@ -5094,6 +5094,7 @@ impl<'a> Compiler<'a> {
         op: LogicalAssignOp,
         value: &'a Expr,
     ) -> Result<Reg, Decline> {
+        let infer_name = matches!(target, Expr::Identifier(_));
         let target = target.unparenthesized();
         // Read the current value, skip the write when it already decides.
         let join = self.alloc_reg()?;
@@ -5156,7 +5157,11 @@ impl<'a> Compiler<'a> {
                     src: current,
                 });
                 let jump = self.logical_skip_jump(op, current)?;
-                let rhs = self.compile_named_assignment_value(value, name)?;
+                let rhs = if infer_name {
+                    self.compile_named_assignment_value(value, name)?
+                } else {
+                    self.compile_expr(value)?
+                };
                 match binding {
                     Binding::Slot(slot) => self.emit(Instr::StoreLocal { slot, src: rhs }),
                     Binding::Global => {

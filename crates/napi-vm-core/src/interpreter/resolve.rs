@@ -328,6 +328,17 @@ impl Interpreter {
                 .get_prop("prototype")
                 .map(Rc::new);
         }
+        if let Value::HostFunction { properties, .. } = object
+            && properties.meta.borrow().uses_default_prototype
+        {
+            let owner =
+                super::realm::value_realm(object).unwrap_or_else(|| self.persistent_global.clone());
+            return owner
+                .borrow()
+                .intrinsic("Function")
+                .and_then(|constructor| constructor.get_prop("prototype"))
+                .map(Rc::new);
+        }
         if let Some(prototype) = object.proto_of() {
             return Some(prototype);
         }
@@ -864,6 +875,9 @@ impl Interpreter {
             let key = self.property_key(p)?;
             return self.get_prop_value_str_with_receiver(o, &key, receiver);
         }
+        if let Some(prototype) = self.primitive_reference_prototype(o) {
+            return self.get_prop_value_with_receiver(&prototype, p, receiver);
+        }
         // A proxy's `get` trap replaces the read entirely; without one the
         // read falls through to the target.
         if let Some(proxy) = o.as_proxy() {
@@ -1009,12 +1023,10 @@ impl Interpreter {
         receiver: &Value,
     ) -> Result<Value, VmErr> {
         self.evaluate_deferred_namespace_string_property(o, key)?;
-        if let Value::String(text) = o {
-            let own = key == "length"
-                || crate::value::array_index(key).is_some_and(|index| index < text.len());
-            if !own && let Some(prototype) = self.primitive_reference_prototype(o) {
-                return self.get_prop_value_str_with_receiver(&prototype, key, receiver);
-            }
+        let string_own = matches!(o, Value::String(text)
+            if key == "length" || crate::value::array_index(key).is_some_and(|index| index < text.len()));
+        if !string_own && let Some(prototype) = self.primitive_reference_prototype(o) {
+            return self.get_prop_value_str_with_receiver(&prototype, key, receiver);
         }
         if let Value::Array(array) = o
             && let Some(index) = crate::value::array_index(key)
@@ -1422,9 +1434,18 @@ impl Interpreter {
                 )? {
                     return Ok(value);
                 }
+                if self
+                    .persistent_global
+                    .borrow()
+                    .intrinsic("Function")
+                    .and_then(|function| function.get_prop("prototype"))
+                    .is_some()
+                {
+                    return Ok(Value::Undefined);
+                }
                 Ok(match k {
-                    // These values are inherited from Function.prototype
-                    // when a callable's configurable own property is deleted.
+                    // Bare interpreters can omit Function.prototype. Materialized
+                    // realms resolve inherited values through the chain above.
                     "name" => Value::String((String::new()).into()),
                     "length" => Value::Number(0.0),
                     _ => crate::builtins::function_method(k).unwrap_or(Value::Undefined),
@@ -1498,6 +1519,15 @@ impl Interpreter {
             Value::HostFunction { .. } => {
                 if let Some(value) = lookup_chain_found(self, o, k)? {
                     return Ok(value);
+                }
+                if self
+                    .persistent_global
+                    .borrow()
+                    .intrinsic("Function")
+                    .and_then(|function| function.get_prop("prototype"))
+                    .is_some()
+                {
+                    return Ok(Value::Undefined);
                 }
                 Ok(match k {
                     "name" => Value::String((String::new()).into()),

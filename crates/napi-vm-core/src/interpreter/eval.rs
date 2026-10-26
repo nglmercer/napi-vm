@@ -2410,7 +2410,11 @@ impl Interpreter {
             ..
         } = binding
         {
-            let value = self.eval_expr(value)?;
+            let value = if let Pattern::Ident(name) = pattern {
+                self.evaluate_class_field(value, &Value::String(name.as_str().into()))?
+            } else {
+                self.eval_expr(value)?
+            };
             self.destructure(pattern, &value)?;
         }
         let o = self.eval_expr(obj)?;
@@ -3235,7 +3239,11 @@ impl Interpreter {
                     if !should_assign {
                         return Ok(current);
                     }
-                    let assigned = self.evaluate_class_field(value, &Value::String(name.into()))?;
+                    let assigned = if matches!(target.as_ref(), Expr::Identifier(_)) {
+                        self.evaluate_class_field(value, &Value::String(name.into()))?
+                    } else {
+                        self.eval_expr(value)?
+                    };
                     self.write_assignment_binding(&base, property, name, assigned.clone())?;
                     return Ok(assigned);
                 }
