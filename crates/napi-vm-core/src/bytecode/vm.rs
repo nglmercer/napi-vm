@@ -397,6 +397,7 @@ fn get_prop_cached(
     let cache = &function.caches[site];
     if let Some(index) = cache.probe(props.shape_id())
         && let Some(value) = props.slot_verified(index, name)
+        && props.meta.borrow().explicit_accessor_kind(name).is_none()
         && !is_accessor_for(&value, name)
     {
         let value = value.deref_binding();
@@ -413,6 +414,7 @@ fn get_prop_cached(
     if let Some(index) = props.own_index(name)
         && let Some(shape_id) = props.shape_id()
         && let Some(slot) = props.slot_verified(index, name)
+        && props.meta.borrow().explicit_accessor_kind(name).is_none()
         && !is_accessor_for(&slot, name)
     {
         cache.fill(shape_id, index);
@@ -446,6 +448,7 @@ fn set_prop_cached(
         && props.meta.borrow().attrs_of(name).writable
         && let Some(index) = function.caches[site].probe(props.shape_id())
         && let Some(current) = props.slot_verified(index, name)
+        && props.meta.borrow().explicit_accessor_kind(name).is_none()
         && !is_accessor_for(&current, name)
     {
         let mut slots = props.borrow_mut();
@@ -464,6 +467,7 @@ fn set_prop_cached(
         && let Some(index) = props.own_index(name)
         && let Some(shape_id) = props.shape_id()
         && let Some(slot) = props.slot_verified(index, name)
+        && props.meta.borrow().explicit_accessor_kind(name).is_none()
         && !is_accessor_for(&slot, name)
     {
         function.caches[site].fill(shape_id, index);

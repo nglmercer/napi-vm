@@ -980,15 +980,11 @@ impl Interpreter {
                 key
             )));
         }
-        if let Some(props) = match o {
-            Value::Object { props } => Some(props.clone()),
-            _ if !self.seq(o, receiver) => o.property_cell(),
-            _ => None,
-        } {
+        if o.property_cell().is_some() || matches!(o, Value::Array(_)) {
             let key = self.ecmascript_to_property_key(p)?;
             let slot = self.property_key(&key)?;
             let inherited = {
-                let own = props.borrow().iter().any(|(name, _)| name == &slot);
+                let own = self.has_stored_own_property(o, &slot);
                 if own { None } else { self.prototype_of(o) }
             };
             if let Some(prototype) = inherited
@@ -1076,6 +1072,20 @@ impl Interpreter {
             return Ok(Value::Undefined);
         }
         Ok(v)
+    }
+
+    fn has_stored_own_property(&self, object: &Value, key: &str) -> bool {
+        match object {
+            Value::Error(_) if matches!(key, "message" | "name" | "stack" | "code") => true,
+            Value::Array(array) => {
+                key == "length"
+                    || crate::value::array_index(key).is_some_and(|index| array.has_index(index))
+                    || array.named_prop(key).is_some()
+            }
+            _ => object
+                .property_cell()
+                .is_some_and(|cell| cell.own_index(key).is_some()),
+        }
     }
 
     fn own_explicit_accessor_kind(&self, object: &Value, key: &str) -> Option<&'static str> {
@@ -1185,13 +1195,9 @@ impl Interpreter {
         }
         // Ordinary [[Get]] delegates missing own properties to the prototype's
         // internal operation, retaining the original receiver for accessors.
-        if let Some(props) = match o {
-            Value::Object { props } => Some(props.clone()),
-            _ if !self.seq(o, receiver) => o.property_cell(),
-            _ => None,
-        } {
+        if o.property_cell().is_some() || matches!(o, Value::Array(_)) {
             let inherited = {
-                let own = props.borrow().iter().any(|(name, _)| name == key);
+                let own = self.has_stored_own_property(o, key);
                 if own { None } else { self.prototype_of(o) }
             };
             if let Some(prototype) = inherited

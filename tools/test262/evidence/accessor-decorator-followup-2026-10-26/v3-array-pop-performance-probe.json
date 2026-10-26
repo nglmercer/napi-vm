@@ -1,0 +1,16 @@
+{
+  "scope": "Single-worker diagnostic; not corpus score",
+  "engine_sha256": "65f9db3ecbe6db2fffc8100b1c0e1128fb6b018b10fbef19b0f25c887f0544ed",
+  "timeout_seconds": 5,
+  "request": {
+    "source": "var a=[];for(var i=0;i<30000;i++)Object.defineProperty(a,String(i),{value:i,writable:true,enumerable:true,configurable:true});var sum=0;while(a.length)sum+=a.pop();if(sum!==449985000)throw Error('incorrect pop result');",
+    "harness": "",
+    "module": false,
+    "asynchronous": false
+  },
+  "actual": {
+    "status": "ok",
+    "phase": "runtime"
+  },
+  "elapsed_seconds": 1.6048885139998674
+}

@@ -2243,3 +2243,19 @@ fn getter_setter_decorators_preserve_pairs_private_brands_and_initializer_order(
         );
     }
 }
+
+#[test]
+fn inherited_explicit_accessors_keep_exotic_receivers_and_shadowing() {
+    for source in [
+        "let get=new Proxy(function read(){return this.marker},{}); for(let object of [[],function(){},(function(){}).bind(null),new Date(),new Number(1),/x/,new Map()]){let proto=Object.getPrototypeOf(object); Object.defineProperty(proto,'probe',{get,configurable:true});object.marker=42;if(object.probe!==42)throw Error('receiver');delete proto.probe;} true;",
+        "let object=[];let key=Symbol();let proto=Object.create(Array.prototype);Object.setPrototypeOf(object,proto);Object.defineProperty(proto,key,{get:new Proxy(function(){return this.marker},{}),configurable:true});object.marker=42;object[key]===42;",
+        "let proto=Object.create(Function.prototype);Object.defineProperty(proto,'probe',{set:function(v){this.marker=v},configurable:true});let f=function(){};Object.setPrototypeOf(f,proto);f.probe=42;f.marker===42&&f.probe===undefined;",
+        "let base={};Object.defineProperty(base,'probe',{get:function(){return 7},configurable:true});let middle=Object.create(base);Object.defineProperty(middle,'probe',{value:19});let object=[];Object.setPrototypeOf(object,middle);object.probe===19;",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}

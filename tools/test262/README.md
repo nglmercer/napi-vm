@@ -76,8 +76,12 @@ passes **32,596 / 32,596** focused variants: eight gains since the method stage,
 or 42 gains with zero losses against the latest complete-report projection.
 All pinned parse residuals are clear in that selection. All 405 core tests,
 five worker tests, static checks, and the standard timing slice pass. Rejected
-array-data and pop-performance candidates remain archived. Getter/setter and
-auto-accessor decorators still need implementation. The latest full score is
+array-data and pop-performance candidates remain archived. The subsequent
+[getter/setter follow-up](evidence/accessor-decorator-followup-2026-10-26/)
+retains **32,596 / 32,596** passes with zero losses, all **408 core tests**,
+five worker tests, and static checks. Accessor identities, cache/Node bridge
+reads, and inherited exotic reads are covered; rejected candidates are retained.
+Auto-accessor decorators still need implementation. The latest full score is
 unchanged until another complete run confirms these gains.
 
 ## Historical measurements

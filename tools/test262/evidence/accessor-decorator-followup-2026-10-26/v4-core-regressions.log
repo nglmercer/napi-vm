@@ -1,0 +1,34 @@
+
+running 408 tests
+....................................................................................... 87/408
+....................................................................................... 174/408
+. 175/408
+interpreter::env::global_quota_tests::guest_global_growth_is_bounded_and_updates_and_deletes_preserve_quota --- FAILED
+....................................................................................... 263/408
+....................................................................................... 350/408
+......................................................... 407/408
+interpreter::node_addon::tests::loads_and_invokes_a_real_node_api_addon --- FAILED
+
+failures:
+
+---- interpreter::env::global_quota_tests::guest_global_growth_is_bounded_and_updates_and_deletes_preserve_quota stdout ----
+
+thread 'interpreter::env::global_quota_tests::guest_global_growth_is_bounded_and_updates_and_deletes_preserve_quota' (120855) panicked at crates/napi-vm-core/src/interpreter/env.rs:1577:9:
+assertion failed: matches!(vm.eval_source("try { for(let i=0;i<16;i++)globalThis['guest_'+i]=i; } catch(e) { e instanceof RangeError && e.message==='Maximum global binding count exceeded'; }"),
+    Ok(Value::Bool(true)))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- interpreter::node_addon::tests::loads_and_invokes_a_real_node_api_addon stdout ----
+
+thread 'interpreter::node_addon::tests::loads_and_invokes_a_real_node_api_addon' (120876) panicked at crates/napi-vm-core/src/interpreter/node_addon/tests.rs:1600:5:
+assertion failed: matches!(error.get_prop("message"), Some(Value::String(ref message)) if
+    message == "fixture failure")
+
+
+failures:
+    interpreter::env::global_quota_tests::guest_global_growth_is_bounded_and_updates_and_deletes_preserve_quota
+    interpreter::node_addon::tests::loads_and_invokes_a_real_node_api_addon
+
+test result: FAILED. 406 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.15s
+
+error: test failed, to rerun pass `-p napi-vm-core --lib`

@@ -1,0 +1,202 @@
+diff --git a/crates/napi-vm-core/src/bytecode/parity_tests.rs b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+index 1183666..eb2fabc 100644
+--- a/crates/napi-vm-core/src/bytecode/parity_tests.rs
++++ b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+@@ -2243,3 +2243,19 @@ fn getter_setter_decorators_preserve_pairs_private_brands_and_initializer_order(
+         );
+     }
+ }
++
++#[test]
++fn inherited_explicit_accessors_keep_exotic_receivers_and_shadowing() {
++    for source in [
++        "let get=new Proxy(function read(){return this.marker},{}); for(let object of [[],function(){},(function(){}).bind(null),new Date(),new Number(1),/x/,new Map()]){let proto=Object.getPrototypeOf(object); Object.defineProperty(proto,'probe',{get,configurable:true});object.marker=42;if(object.probe!==42)throw Error('receiver');delete proto.probe;} true;",
++        "let object=[];let key=Symbol();let proto=Object.create(Array.prototype);Object.setPrototypeOf(object,proto);Object.defineProperty(proto,key,{get:new Proxy(function(){return this.marker},{}),configurable:true});object.marker=42;object[key]===42;",
++        "let proto=Object.create(Function.prototype);Object.defineProperty(proto,'probe',{set:function(v){this.marker=v},configurable:true});let f=function(){};Object.setPrototypeOf(f,proto);f.probe=42;f.marker===42&&f.probe===undefined;",
++        "let base={};Object.defineProperty(base,'probe',{get:function(){return 7},configurable:true});let middle=Object.create(base);Object.defineProperty(middle,'probe',{value:19});let object=[];Object.setPrototypeOf(object,middle);object.probe===19;",
++    ] {
++        check(source, true);
++        assert!(
++            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
++            "{source}"
++        );
++    }
++}
+diff --git a/crates/napi-vm-core/src/bytecode/vm.rs b/crates/napi-vm-core/src/bytecode/vm.rs
+index 57b0be6..d0eecc8 100644
+--- a/crates/napi-vm-core/src/bytecode/vm.rs
++++ b/crates/napi-vm-core/src/bytecode/vm.rs
+@@ -397,6 +397,7 @@ fn get_prop_cached(
+     let cache = &function.caches[site];
+     if let Some(index) = cache.probe(props.shape_id())
+         && let Some(value) = props.slot_verified(index, name)
++        && props.meta.borrow().explicit_accessor_kind(name).is_none()
+         && !is_accessor_for(&value, name)
+     {
+         let value = value.deref_binding();
+@@ -413,6 +414,7 @@ fn get_prop_cached(
+     if let Some(index) = props.own_index(name)
+         && let Some(shape_id) = props.shape_id()
+         && let Some(slot) = props.slot_verified(index, name)
++        && props.meta.borrow().explicit_accessor_kind(name).is_none()
+         && !is_accessor_for(&slot, name)
+     {
+         cache.fill(shape_id, index);
+@@ -446,6 +448,7 @@ fn set_prop_cached(
+         && props.meta.borrow().attrs_of(name).writable
+         && let Some(index) = function.caches[site].probe(props.shape_id())
+         && let Some(current) = props.slot_verified(index, name)
++        && props.meta.borrow().explicit_accessor_kind(name).is_none()
+         && !is_accessor_for(&current, name)
+     {
+         let mut slots = props.borrow_mut();
+@@ -464,6 +467,7 @@ fn set_prop_cached(
+         && let Some(index) = props.own_index(name)
+         && let Some(shape_id) = props.shape_id()
+         && let Some(slot) = props.slot_verified(index, name)
++        && props.meta.borrow().explicit_accessor_kind(name).is_none()
+         && !is_accessor_for(&slot, name)
+     {
+         function.caches[site].fill(shape_id, index);
+diff --git a/crates/napi-vm-core/src/interpreter/node_addon/wire.rs b/crates/napi-vm-core/src/interpreter/node_addon/wire.rs
+index f8ea96b..f7761af 100644
+--- a/crates/napi-vm-core/src/interpreter/node_addon/wire.rs
++++ b/crates/napi-vm-core/src/interpreter/node_addon/wire.rs
+@@ -162,7 +162,12 @@ pub(super) fn guest_to_wire(
+                     json!({"t":"string","v":crate::JsString::from_key(key).units()})
+                 };
+                 let attrs = meta.attrs_of(key);
+-                let kind = guest_accessor_kind(key, value);
++                let canonical = meta.explicit_accessor_kind(key);
++                let kind = if meta.is_explicit_data(key) {
++                    None
++                } else {
++                    canonical.or_else(|| guest_accessor_kind(key, value))
++                };
+                 let getter = (kind == Some("get")).then_some(value);
+                 let setter = if kind == Some("set") {
+                     Some(value)
+@@ -171,13 +176,14 @@ pub(super) fn guest_to_wire(
+                         .iter()
+                         .find(|(slot, _)| slot == &format!("__setter:{key}__"))
+                         .and_then(|(_, candidate)| {
+-                            (guest_accessor_kind(key, candidate) == Some("set"))
+-                                .then_some(candidate)
++                            (canonical == Some("get")
++                                || guest_accessor_kind(key, candidate) == Some("set"))
++                            .then_some(candidate)
+                         })
+                 } else {
+                     None
+                 };
+-                if getter.is_some() || setter.is_some() {
++                if kind.is_some() {
+                     let getter = getter
+                         .map(|getter| guest_to_wire(sidecar, getter, depth + 1, graph, proxy_ids))
+                         .transpose()?
+@@ -471,7 +477,12 @@ pub(super) fn guest_graph_node_snapshot(
+                     json!({"t":"string","v":crate::JsString::from_key(key).units()})
+                 };
+                 let attrs = meta.attrs_of(key);
+-                let kind = guest_accessor_kind(key, item);
++                let canonical = meta.explicit_accessor_kind(key);
++                let kind = if meta.is_explicit_data(key) {
++                    None
++                } else {
++                    canonical.or_else(|| guest_accessor_kind(key, item))
++                };
+                 let getter = (kind == Some("get")).then_some(item);
+                 let setter = if kind == Some("set") {
+                     Some(item)
+@@ -480,13 +491,14 @@ pub(super) fn guest_graph_node_snapshot(
+                         .iter()
+                         .find(|(slot, _)| slot == &format!("__setter:{key}__"))
+                         .and_then(|(_, candidate)| {
+-                            (guest_accessor_kind(key, candidate) == Some("set"))
+-                                .then_some(candidate)
++                            (canonical == Some("get")
++                                || guest_accessor_kind(key, candidate) == Some("set"))
++                            .then_some(candidate)
+                         })
+                 } else {
+                     None
+                 };
+-                if getter.is_some() || setter.is_some() {
++                if kind.is_some() {
+                     let getter = getter
+                         .map(|getter| sidecar.guest_to_wire_with_context(getter, 0, graph))
+                         .transpose()?
+diff --git a/crates/napi-vm-core/src/interpreter/resolve.rs b/crates/napi-vm-core/src/interpreter/resolve.rs
+index 29f7b9c..6a72136 100644
+--- a/crates/napi-vm-core/src/interpreter/resolve.rs
++++ b/crates/napi-vm-core/src/interpreter/resolve.rs
+@@ -980,15 +980,11 @@ impl Interpreter {
+                 key
+             )));
+         }
+-        if let Some(props) = match o {
+-            Value::Object { props } => Some(props.clone()),
+-            _ if !self.seq(o, receiver) => o.property_cell(),
+-            _ => None,
+-        } {
++        if o.property_cell().is_some() || matches!(o, Value::Array(_)) {
+             let key = self.ecmascript_to_property_key(p)?;
+             let slot = self.property_key(&key)?;
+             let inherited = {
+-                let own = props.borrow().iter().any(|(name, _)| name == &slot);
++                let own = self.has_stored_own_property(o, &slot);
+                 if own { None } else { self.prototype_of(o) }
+             };
+             if let Some(prototype) = inherited
+@@ -1078,6 +1074,20 @@ impl Interpreter {
+         Ok(v)
+     }
+ 
++    fn has_stored_own_property(&self, object: &Value, key: &str) -> bool {
++        match object {
++            Value::Error(_) if matches!(key, "message" | "name" | "stack" | "code") => true,
++            Value::Array(array) => {
++                key == "length"
++                    || crate::value::array_index(key).is_some_and(|index| array.has_index(index))
++                    || array.named_prop(key).is_some()
++            }
++            _ => object
++                .property_cell()
++                .is_some_and(|cell| cell.own_index(key).is_some()),
++        }
++    }
++
+     fn own_explicit_accessor_kind(&self, object: &Value, key: &str) -> Option<&'static str> {
+         match object {
+             Value::Array(array) => array.meta.borrow().explicit_accessor_kind(key),
+@@ -1185,13 +1195,9 @@ impl Interpreter {
+         }
+         // Ordinary [[Get]] delegates missing own properties to the prototype's
+         // internal operation, retaining the original receiver for accessors.
+-        if let Some(props) = match o {
+-            Value::Object { props } => Some(props.clone()),
+-            _ if !self.seq(o, receiver) => o.property_cell(),
+-            _ => None,
+-        } {
++        if o.property_cell().is_some() || matches!(o, Value::Array(_)) {
+             let inherited = {
+-                let own = props.borrow().iter().any(|(name, _)| name == key);
++                let own = self.has_stored_own_property(o, key);
+                 if own { None } else { self.prototype_of(o) }
+             };
+             if let Some(prototype) = inherited
+diff --git a/crates/napi-vm-core/src/value.rs b/crates/napi-vm-core/src/value.rs
+index 89dc926..743ecc6 100644
+--- a/crates/napi-vm-core/src/value.rs
++++ b/crates/napi-vm-core/src/value.rs
+@@ -364,7 +364,9 @@ impl std::fmt::Debug for ObjectMeta {
+ 
+ impl ObjectMeta {
+     pub(crate) fn may_have_accessor(&self, key: &str) -> bool {
+-        (self.has_accessors || self.legacy_call_accessors && matches!(key, "caller" | "arguments"))
++        (self.accessor_kinds.contains_key(key)
++            || self.has_accessors
++            || self.legacy_call_accessors && matches!(key, "caller" | "arguments"))
+             && !self.is_explicit_data(key)
+     }
+     pub(crate) fn explicit_accessor_kind(&self, key: &str) -> Option<&'static str> {

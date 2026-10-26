@@ -1,0 +1,16 @@
+{
+  "scope": "Single-worker diagnostic; not corpus score",
+  "engine_sha256": "65f9db3ecbe6db2fffc8100b1c0e1128fb6b018b10fbef19b0f25c887f0544ed",
+  "timeout_seconds": 5,
+  "request": {
+    "source": "var get=new Proxy(function original(){return this.y;},{});var o={y:3};Object.defineProperty(o,'x',{get:get,configurable:true});if(o.x!==3||Object.getOwnPropertyDescriptor(o,'x').get!==get)throw Error('accessor identity');",
+    "harness": "",
+    "module": false,
+    "asynchronous": false
+  },
+  "actual": {
+    "status": "ok",
+    "phase": "runtime"
+  },
+  "elapsed_seconds": 0.009919484000420198
+}

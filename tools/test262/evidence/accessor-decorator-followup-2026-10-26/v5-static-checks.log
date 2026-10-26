@@ -1,0 +1,37 @@
+
+$ cargo clippy -p napi-vm-core --all-targets -- -D warnings
+    Checking napi-vm-core v0.1.5 (/home/meme/Documentos/Default Project/node-vm/crates/napi-vm-core)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.23s
+
+EXIT 0
+
+$ cargo check --all-targets
+    Checking napi-vm-core v0.1.5 (/home/meme/Documentos/Default Project/node-vm/crates/napi-vm-core)
+    Checking napi-vm v0.1.5 (/home/meme/Documentos/Default Project/node-vm)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.55s
+
+EXIT 0
+
+$ cargo test --no-default-features --bin napi-vm-test262 --quiet
+
+running 5 tests
+.....
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+
+EXIT 0
+
+$ cargo fmt --all -- --check
+
+EXIT 0
+
+$ git diff --check -- . :(exclude)tools/test262/evidence/**/*.diff
+
+EXIT 0
+
+$ cargo build --locked --release --no-default-features --bin napi-vm-test262
+   Compiling napi-vm-core v0.1.5 (/home/meme/Documentos/Default Project/node-vm/crates/napi-vm-core)
+   Compiling napi-vm v0.1.5 (/home/meme/Documentos/Default Project/node-vm)
+    Finished `release` profile [optimized] target(s) in 2m 15s
+
+EXIT 0

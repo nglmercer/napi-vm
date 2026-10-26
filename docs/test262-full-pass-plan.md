@@ -54,11 +54,19 @@ order is tested for methods and fields. Prior
 [auto-accessor](../tools/test262/evidence/auto-accessor-followup-2026-10-26/)
 evidence remains preserved.
 
+The subsequent [getter/setter follow-up](../tools/test262/evidence/accessor-decorator-followup-2026-10-26/)
+retains **32,596 / 32,596** passes with zero losses and all 42 focused gains.
+All **408 core tests**, five worker tests, and static checks pass. Canonical
+accessor metadata preserves arbitrary callable identity across reflection,
+reads/writes, caches, Node serialization, and exotic prototype inheritance.
+Rejected core and broad candidates are archived. Auto-accessor decoration
+remains next; this stage does not alter the complete score.
+
 ## Ordered execution
 
 1. **Finish accessor decoration and confirm the 42 syntax gains in a full run.**
-   Class, method, and regular field decorators have focused coverage. Implement
-   getter/setter and auto-accessor decorators, preserving arbitrary callable
+   Class, method, getter/setter, and regular field decorators have focused coverage. Implement
+   auto-accessor decorators, preserving arbitrary callable
    accessor identity, private brands, source-order overrides, and per-element
    initializers. Reuse the tested context creation and initializer lifecycle.
    Preserve class replacement/binding/static initialization semantics. Run

@@ -162,7 +162,12 @@ pub(super) fn guest_to_wire(
                     json!({"t":"string","v":crate::JsString::from_key(key).units()})
                 };
                 let attrs = meta.attrs_of(key);
-                let kind = guest_accessor_kind(key, value);
+                let canonical = meta.explicit_accessor_kind(key);
+                let kind = if meta.is_explicit_data(key) {
+                    None
+                } else {
+                    canonical.or_else(|| guest_accessor_kind(key, value))
+                };
                 let getter = (kind == Some("get")).then_some(value);
                 let setter = if kind == Some("set") {
                     Some(value)
@@ -171,13 +176,14 @@ pub(super) fn guest_to_wire(
                         .iter()
                         .find(|(slot, _)| slot == &format!("__setter:{key}__"))
                         .and_then(|(_, candidate)| {
-                            (guest_accessor_kind(key, candidate) == Some("set"))
-                                .then_some(candidate)
+                            (canonical == Some("get")
+                                || guest_accessor_kind(key, candidate) == Some("set"))
+                            .then_some(candidate)
                         })
                 } else {
                     None
                 };
-                if getter.is_some() || setter.is_some() {
+                if kind.is_some() {
                     let getter = getter
                         .map(|getter| guest_to_wire(sidecar, getter, depth + 1, graph, proxy_ids))
                         .transpose()?
@@ -471,7 +477,12 @@ pub(super) fn guest_graph_node_snapshot(
                     json!({"t":"string","v":crate::JsString::from_key(key).units()})
                 };
                 let attrs = meta.attrs_of(key);
-                let kind = guest_accessor_kind(key, item);
+                let canonical = meta.explicit_accessor_kind(key);
+                let kind = if meta.is_explicit_data(key) {
+                    None
+                } else {
+                    canonical.or_else(|| guest_accessor_kind(key, item))
+                };
                 let getter = (kind == Some("get")).then_some(item);
                 let setter = if kind == Some("set") {
                     Some(item)
@@ -480,13 +491,14 @@ pub(super) fn guest_graph_node_snapshot(
                         .iter()
                         .find(|(slot, _)| slot == &format!("__setter:{key}__"))
                         .and_then(|(_, candidate)| {
-                            (guest_accessor_kind(key, candidate) == Some("set"))
-                                .then_some(candidate)
+                            (canonical == Some("get")
+                                || guest_accessor_kind(key, candidate) == Some("set"))
+                            .then_some(candidate)
                         })
                 } else {
                     None
                 };
-                if getter.is_some() || setter.is_some() {
+                if kind.is_some() {
                     let getter = getter
                         .map(|getter| sidecar.guest_to_wire_with_context(getter, 0, graph))
                         .transpose()?

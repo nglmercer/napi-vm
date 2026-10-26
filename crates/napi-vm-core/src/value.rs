@@ -364,7 +364,9 @@ impl std::fmt::Debug for ObjectMeta {
 
 impl ObjectMeta {
     pub(crate) fn may_have_accessor(&self, key: &str) -> bool {
-        (self.has_accessors || self.legacy_call_accessors && matches!(key, "caller" | "arguments"))
+        (self.accessor_kinds.contains_key(key)
+            || self.has_accessors
+            || self.legacy_call_accessors && matches!(key, "caller" | "arguments"))
             && !self.is_explicit_data(key)
     }
     pub(crate) fn explicit_accessor_kind(&self, key: &str) -> Option<&'static str> {
