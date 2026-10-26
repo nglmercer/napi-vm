@@ -1,0 +1,40 @@
+diff --git a/crates/napi-vm-core/src/builtins/intl/datetime.rs b/crates/napi-vm-core/src/builtins/intl/datetime.rs
+index b5a1be9..bf2c426 100644
+--- a/crates/napi-vm-core/src/builtins/intl/datetime.rs
++++ b/crates/napi-vm-core/src/builtins/intl/datetime.rs
+@@ -237,11 +237,7 @@ fn read_raw_options(i: &mut Interpreter, options: &Value) -> Result<RawOptions,
+         Value::Undefined => None,
+         v => Some(v.is_truthy()),
+     };
+-    // An unsupported but well-formed hourCycle value is ignored (falling
+-    // back to the locale extension or default) rather than throwing, matching
+-    // the calendar fallback semantics pinned by
+-    // resolved-calendar-unicode-extensions-and-options.
+-    let hour_cycle_option = option(i, options, "hourCycle")?;
++    let hour_cycle_option = choice(i, options, "hourCycle", &["h11", "h12", "h23", "h24"])?;
+     let time_zone = option(i, options, "timeZone")?;
+     let weekday = choice(i, options, "weekday", &["long", "short", "narrow"])?;
+     let era = choice(i, options, "era", &["long", "short", "narrow"])?;
+diff --git a/crates/napi-vm-core/src/bytecode/parity_tests.rs b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+index 988cd8c..b40b003 100644
+--- a/crates/napi-vm-core/src/bytecode/parity_tests.rs
++++ b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+@@ -2357,3 +2357,18 @@ fn typed_array_numeric_reads_do_not_fall_through_to_prototype() {
+         );
+     }
+ }
++
++#[test]
++fn date_time_format_validates_hour_cycle_before_use() {
++    for source in [
++        "let ok=0;for(let x of ['h24\0cookie','invalid','H12']){try{new Intl.DateTimeFormat('en',{hourCycle:x});}catch(e){if(e instanceof RangeError)ok++;}}ok===3;",
++        "let log='';let o={get hour12(){log+='a';return true;},get hourCycle(){log+='b';return 'invalid';},get timeZone(){log+='c';return 'UTC';}};try{new Intl.DateTimeFormat('en',o);}catch(e){if(!(e instanceof RangeError))throw e;}log==='ab';",
++        "let d=new Intl.DateTimeFormat('en',{hour:'numeric',hourCycle:'h24'});d.resolvedOptions().hourCycle==='h24';",
++    ] {
++        check(source, true);
++        assert!(
++            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
++            "{source}"
++        );
++    }
++}

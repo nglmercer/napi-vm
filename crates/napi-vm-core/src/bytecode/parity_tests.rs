@@ -2357,3 +2357,18 @@ fn typed_array_numeric_reads_do_not_fall_through_to_prototype() {
         );
     }
 }
+
+#[test]
+fn date_time_format_validates_hour_cycle_before_use() {
+    for source in [
+        "let ok=0;for(let x of ['h24\0cookie','invalid','H12']){try{new Intl.DateTimeFormat('en',{hourCycle:x});}catch(e){if(e instanceof RangeError)ok++;}}ok===3;",
+        "let log='';let o={get hour12(){log+='a';return true;},get hourCycle(){log+='b';return 'invalid';},get timeZone(){log+='c';return 'UTC';}};try{new Intl.DateTimeFormat('en',o);}catch(e){if(!(e instanceof RangeError))throw e;}log==='ab';",
+        "let d=new Intl.DateTimeFormat('en',{hour:'numeric',hourCycle:'h24'});d.resolvedOptions().hourCycle==='h24';",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}

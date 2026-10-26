@@ -95,6 +95,10 @@ The [buffer follow-up](evidence/buffer-cap-2026-10-26/) gains both DataView
 variants with zero losses in a 4,664-variant selection; six prior TypedArray
 timeouts remain. All 414 core tests and the standard timing slice pass.
 
+The [hour-cycle follow-up](evidence/intl-hour-cycle-2026-10-26/) passes
+**838 / 838** focused variants, gaining both NUL-option variants with zero
+losses. All 415 core tests and the standard timing slice pass.
+
 ## Historical measurements
 
 The preceding completed full pinned Test262 run (archived 2026-10-20, corpus

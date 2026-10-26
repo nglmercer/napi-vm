@@ -79,6 +79,11 @@ gains both DataView variants with zero losses in 4,664 focused variants;
 six existing TypedArray timeouts remain. All 414 core tests and the standard
 timing slice pass. The byte storage limit is independent of dense arrays.
 
+The [hour-cycle follow-up](../tools/test262/evidence/intl-hour-cycle-2026-10-26/)
+passes **838 / 838** focused variants, gaining both NUL-option variants with
+zero losses. All 415 core tests and the standard timing slice pass. The gains
+need confirmation in another complete run.
+
 ## Ordered execution
 
 1. **Confirm decorator gains in a full run.** Class, method, getter/setter,
@@ -94,9 +99,9 @@ timing slice pass. The byte storage limit is independent of dense arrays.
    timezone offsets, and strict ISO rejection. Ten resource-limit variants
    need legitimate large strings and a flat JSON array with 2^21 + 1 entries.
    The 20 MiB DataView buffer now passes in a focused run after separating
-   byte and dense-array limits; confirm it in the next complete run. The remaining runtime variants also include legacy NUL quoting (two).
-   Array ToLength (two) and object primitive conversion (one) now pass in a
-   focused run and require full-run confirmation. Each cause needs its neighboring comparison.
+   byte and dense-array limits; confirm it in the next complete run. Array ToLength (two), object primitive conversion (one), and legacy NUL
+   option validation (two) now pass in focused runs and require full-run
+   confirmation. Each cause needs its neighboring comparison.
 
 3. **Remove all 52 timeouts.** The inventory includes 22 staging/sm, eight
    RegExp-literal, six TypedArray, four URI-decode, four Annex B, two RegExp, four URI-encode,

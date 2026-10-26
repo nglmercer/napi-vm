@@ -237,11 +237,7 @@ fn read_raw_options(i: &mut Interpreter, options: &Value) -> Result<RawOptions, 
         Value::Undefined => None,
         v => Some(v.is_truthy()),
     };
-    // An unsupported but well-formed hourCycle value is ignored (falling
-    // back to the locale extension or default) rather than throwing, matching
-    // the calendar fallback semantics pinned by
-    // resolved-calendar-unicode-extensions-and-options.
-    let hour_cycle_option = option(i, options, "hourCycle")?;
+    let hour_cycle_option = choice(i, options, "hourCycle", &["h11", "h12", "h23", "h24"])?;
     let time_zone = option(i, options, "timeZone")?;
     let weekday = choice(i, options, "weekday", &["long", "short", "narrow"])?;
     let era = choice(i, options, "era", &["long", "short", "narrow"])?;
