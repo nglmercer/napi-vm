@@ -2,26 +2,31 @@
 
 ## Current measured state
 
-The latest complete pinned evaluation archived **2026-10-25** on clean source
-`3816dcf` passes **102,661 / 102,956 variants (99.7135%)**. It records 232
-failures, 63 timeouts, and zero skips, crashes, or harness errors. It gains 18
-passes and loses 102 against `d942b04`, so it is retained as rejected
-regression evidence. The best accepted complete result remains `d942b04` at
-**102,745 / 102,956 (99.7951%)**, with 151 failures and 60 timeouts.
-Both complete evaluations use corpus `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`,
-two workers, five-second deadlines, no feature exclusions, and no resumed
-outcomes. The `d942b04` worker SHA-256 is
-`364ea4a28f71ebf488f5c1a7ff78849e3bba8f3efee1f173366436bec3762b3d`; the
-rejected `3816dcf` worker SHA-256 is
-`b607aaf8547f6df2ad6f3ce9996cc76931024d8a52a6d57e6a4a0f204ff7d612`.
+The latest complete pinned run archived **2026-10-25** on clean source
+`259402f` passes **102,760 / 102,956 variants (99.8096%)**. It records 133
+failures, 63 timeouts, and zero skips, crashes, or harness errors. Compared
+with `d942b04`, it gains 18 passes and loses three; compared with the rejected
+`3816dcf` run, it gains 99 passes with zero losses.
 
-The rejected full report and exact transitions are archived in
+The three losses versus `d942b04` are the script and strict variants of
+`staging/sm/String/string-upper-lower-mapping.js` and the script variant of
+`staging/sm/regress/regress-610026.js`. All timed out at five seconds; the
+five-second rerun reproduced those same three timeouts while the strict
+`regress-610026.js` variant passed. All four selected variants pass with a
+15-second diagnostic deadline, confirming a performance-margin issue.
+
+The run used corpus `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, two workers,
+five-second deadlines, no feature exclusions, and no resumed outcomes. Worker
+SHA-256 is
+`269671273c067f74e93e0cb3df85f33f98477c6e2f3e92005d665253f80b2b7d`.
+[Full evidence](../tools/test262/evidence/full-native-prototype-repair-2026-10-25/)
+contains the report, comparisons, triage, source identity, and all 196 residuals.
+
+The previous `3816dcf` report passed 102,661 with 232 failures and 63 timeouts,
+gaining 18 and losing 102 against `d942b04`; it is archived as
 [regression evidence](../tools/test262/evidence/full-regression-function-binding-2026-10-25/).
-A repair candidate passes **120 / 315** variants in a 175-file focused recheck,
-restoring 100 passes with zero losses against the rejected candidate. Its
-projection against `d942b04` is 18 gains and two timing-sensitive case-mapping
-timeouts; the complete repaired-candidate gate has not run yet. The best
-accepted full report and its 211 residuals remain in
+The zero-loss full reference remains `d942b04` at 102,745 passes, 151 failures,
+and 60 timeouts; its 211 residuals are in
 [full refresh evidence](../tools/test262/evidence/full-refresh-2026-10-25/).
 See the [full-pass plan](test262-full-pass-plan.md) for the ordered work.
 The subsequent `d30e770` continuation passes 4,486 / 4,492 focused variants,

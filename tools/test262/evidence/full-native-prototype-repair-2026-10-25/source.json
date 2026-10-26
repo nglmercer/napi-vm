@@ -1,0 +1,36 @@
+{
+  "source_commit": "259402f694f9495e564c0b93679c4040a2b2c262",
+  "source_status": "clean at build and run launch",
+  "engine_sha256": "269671273c067f74e93e0cb3df85f33f98477c6e2f3e92005d665253f80b2b7d",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_jobs": 2,
+  "timeout_seconds": 5.0,
+  "skip_features": [],
+  "build_command": [
+    "cargo",
+    "build",
+    "--locked",
+    "--release",
+    "--no-default-features",
+    "--bin",
+    "napi-vm-test262"
+  ],
+  "run_command": [
+    "python3",
+    "tools/test262/run.py",
+    ".napi-vm/test262",
+    "--engine",
+    "target/release/napi-vm-test262",
+    "--revision",
+    "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "--jobs",
+    "2",
+    "--timeout",
+    "5",
+    "--checkpoint",
+    "artifacts/test262/full-native-prototype-repair-2026-10-25.checkpoint.jsonl",
+    "--output",
+    "artifacts/test262/full-native-prototype-repair-2026-10-25.json"
+  ],
+  "scope": "Complete pinned corpus; every selected variant remains in the denominator."
+}

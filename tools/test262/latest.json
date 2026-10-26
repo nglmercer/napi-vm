@@ -6,7 +6,7 @@
     "."
   ],
   "groups": [],
-  "engine_sha256": "852c7c9cb1f864d31d97b26518de85032d71dfeeaa6345c0b7b49bdca8fa57d4",
+  "engine_sha256": "269671273c067f74e93e0cb3df85f33f98477c6e2f3e92005d665253f80b2b7d",
   "skip_features": [],
   "denominator": "all selected variants, including skips and errors",
   "worker_jobs": 2,
@@ -14,21 +14,21 @@
   "resumed_files": 0,
   "total": 102956,
   "counts": {
-    "pass": 101978,
-    "fail": 753,
+    "pass": 102760,
+    "fail": 133,
     "skip": 0,
-    "timeout": 225,
+    "timeout": 63,
     "crash": 0,
     "harness_error": 0
   },
-  "pass_percentage": 99.05007964567388,
+  "pass_percentage": 99.80962741365244,
   "limitations": [
     "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
   ],
-  "source_base": "daadb9b6b748bb6f65d6a9219a723636dec68b80",
-  "source_state": "clean frozen committed snapshot; Includes Object constructor metadata, Object locale-string invocation, and Array string invocation. Excludes sparse indices, logical Array lengths, core constructor metadata/unscopables, and String semantic fixes. All 155 lost passes are measured timeouts, retained without reclassification.",
-  "evidence": "evidence/full-array-string-2026-10-20/final-full.json.gz",
-  "note": "Latest completed full pinned run: 101,978 / 102,956 (99.0501%). Includes Object constructor metadata, Object locale-string invocation, and Array string invocation. Excludes sparse indices, logical Array lengths, core constructor metadata/unscopables, and String semantic fixes. All 155 lost passes are measured timeouts, retained without reclassification.",
+  "source_base": "259402f694f9495e564c0b93679c4040a2b2c262",
+  "source_state": "Clean committed source measured in the complete pinned Test262 run. It passes 102,760 / 102,956 variants; compared with d942b04, the result has 18 gains and 3 timeout losses.",
+  "evidence": "evidence/full-native-prototype-repair-2026-10-25/full.json.gz",
+  "note": "Latest complete full pinned run: 102,760 / 102,956 (99.8096%), with 133 failures and 63 timeouts. Compared with the zero-loss d942b04 reference, it gains 18 passes and loses 3 timeouts; compared with the rejected 3816dcf candidate, it gains 99 passes with no losses.",
   "current_focused": {
     "selection": [
       "built-ins/Object/fromEntries",
@@ -2293,5 +2293,28 @@
     "source_commit": "c306dee",
     "evidence": "tools/test262/evidence/import-meta-identity-2026-10-20",
     "note": "Isolated optimized combined selection; baseline is explicit disjoint union of identical-worker reports."
+  },
+  "zero_loss_reference": {
+    "source": "d942b04",
+    "pass": 102745,
+    "total": 102956,
+    "fail": 151,
+    "timeout": 60,
+    "worker_sha256": "364ea4a28f71ebf488f5c1a7ff78849e3bba8f3efee1f173366436bec3762b3d",
+    "evidence": "evidence/full-refresh-2026-10-25/full.json.gz"
+  },
+  "prior_rejected_full": {
+    "source": "3816dcf",
+    "pass": 102661,
+    "total": 102956,
+    "fail": 232,
+    "timeout": 63,
+    "worker_sha256": "b607aaf8547f6df2ad6f3ce9996cc76931024d8a52a6d57e6a4a0f204ff7d612",
+    "evidence": "evidence/full-regression-function-binding-2026-10-25/full.json.gz"
+  },
+  "non_passing_phases": {
+    "parse": 44,
+    "runtime": 89,
+    "timeout": 63
   }
 }

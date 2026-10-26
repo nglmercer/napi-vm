@@ -6,30 +6,43 @@ skips, timeouts, crashes, failures, or harness errors. Measurements use two
 workers and five-second per-variant deadlines. Focused reports do not update
 the full score.
 
-## Latest complete evaluation: `3816dcf` (rejected)
+## Latest complete evaluation: `259402f`
 
-Clean source `3816dcf` passed **102,661 / 102,956 (99.7135%)** in the
-2026-10-25 complete run. It had 232 failures and 63 timeouts, with no skips,
-crashes, or harness errors. Compared with the prior complete `d942b04` run, it
-gained 18 passes and lost 102. This candidate is retained as regression
-evidence and does not replace the best accepted full result below.
+Clean source `259402f` passed **102,760 / 102,956 (99.8096%)** in the
+2026-10-25 full run. It had 133 failures and 63 timeouts, with no skips,
+crashes, or harness errors. Against the prior zero-loss reference `d942b04`, it
+gained 18 passes and lost three; against the rejected `3816dcf` candidate it
+gained 99 passes with zero losses.
 
-[Regression evidence](../tools/test262/evidence/full-regression-function-binding-2026-10-25/)
-contains the report, comparison, triage, source identity, and exact transitions.
-The root cause was native methods failing to inherit their realm's
-`Function.prototype`, together with function property lookup using the wrong
-receiver/prototype chain.
+The three losses versus `d942b04` are the script and strict variants of
+`staging/sm/String/string-upper-lower-mapping.js` and the script variant of
+`staging/sm/regress/regress-610026.js`; all timed out at five seconds. The
+five-second rerun reproduced those same three timeouts while the strict
+`regress-610026.js` variant passed. All four selected variants pass with a
+15-second diagnostic deadline, confirming a performance-margin issue for these
+cases rather than a semantic failure.
 
-The repair candidate passes **120 / 315** variants in a 175-file recheck of all
-`d942b04` residuals and all transitions from the rejected run. It records 133
-failures and 62 timeouts, restoring 100 passes with zero losses against
-`3816dcf`. Compared with `d942b04`, it gains 18 passes and loses two
-case-mapping variants. Those same two variants timed out in a fresh five-second
-diagnostic on the old worker on this host; both pass with a 15-second
-diagnostic. This focused recheck is not a new full score. Its full projection
-is 102,761 passes, 133 failures, and 62 timeouts.
+[Full evidence](../tools/test262/evidence/full-native-prototype-repair-2026-10-25/)
+contains the report, comparisons, triage, source identity, build log, and exact
+196 remaining variants.
 
-## Best accepted full refresh
+The residual inventory has 44 parse failures (25 class statements, 15 class
+expressions, four staging decorators), 89 runtime failures (71 in `staging/sm`
+plus super, RegExp, arguments, eval, built-in, and module cases), and 63
+timeouts. Timeouts include 27 `staging/sm`, eight RegExp literal, six
+TypedArray, eight URI decode, and 14 Annex B/ArrayBuffer/RegExp/URI encode/
+comment cases.
+
+## Prior rejected full evaluation: `3816dcf`
+
+Clean source `3816dcf` passed **102,661 / 102,956 (99.7135%)** with 232
+failures and 63 timeouts. It gained 18 passes and lost 102 against `d942b04`.
+The cause was native methods not inheriting their realm's `Function.prototype`
+and function property lookup using the wrong receiver/prototype chain. The
+[regression evidence](../tools/test262/evidence/full-regression-function-binding-2026-10-25/)
+preserves the full report and transitions.
+
+## Zero-loss full reference: `d942b04`
 
 Clean source `d942b04` passes **102,745 / 102,956 (99.7951%)** in the completed
 2026-10-25 full run. There are **151 failures and 60 timeouts**, with zero
@@ -42,7 +55,7 @@ Worker SHA-256 is
 `364ea4a28f71ebf488f5c1a7ff78849e3bba8f3efee1f173366436bec3762b3d`.
 [Archived evidence](../tools/test262/evidence/full-refresh-2026-10-25/)
 contains every result, the comparison, triage, source/configuration identity,
-and the exact 211 remaining variants.
+and the 211 residual variants.
 
 Those variants comprise 44 parse failures, 107 runtime failures, and 60
 timeouts. The largest runtime cluster is 89 `staging/sm` failures. Parse
@@ -164,22 +177,33 @@ The follow-up patch was compared on **212 variants** from the latest residual
 file inventory, gaining **18 passes and losing zero** against the matching
 projection of the full refresh. Gains cover function name inference, async
 property names, exponentiation grammar, anonymous function names in logical
-assignment, method definitions, and primitive getter receivers. The full score
-remains the completed **102,745 / 102,956** run until a clean full run finishes.
+assignment, method definitions, and primitive getter receivers. The later
+`3816dcf` complete evaluation exposed native method inheritance and function
+lookup regressions. The repaired `259402f` full run restores 99 passes with
+zero losses against that rejected candidate and records 102,760 passes, 133
+failures, and 63 timeouts. It gains 18 and loses three against the zero-loss
+`d942b04` reference. The three losses are timing-sensitive five-second timeouts.
 
 The patch also passes the 373 core tests, ten focused regressions, neighboring
 integration suites, 23 worker tests, all-target Clippy with warnings denied,
 and formatting. [Focused evidence](../tools/test262/evidence/function-binding-followup-2026-10-25/)
 retains the report, no-loss comparison, source identity, and validation logs.
+The subsequent [repair evidence](../tools/test262/evidence/native-prototype-repair-2026-10-25/)
+contains the 315-variant recheck and its no-loss comparison against the rejected
+candidate.
 
 ## Remaining gates
 
-1. Commit the focused no-loss follow-up and run the complete corpus on it.
-   Triage the resulting inventory before selecting the next implementation.
-2. Implement decorator/auto-accessor parsing and class runtime semantics, then
-   close `staging/sm`, scope/eval, super ordering, RegExp, and other residual
-   semantics using focused regressions and neighboring groups.
-3. Profile and remove all 60 timeouts under the same five-second limit.
+1. Remove the three five-second timeout regressions identified in the complete
+   run. The same three time out in an exact five-second rerun, while all four
+   selected variants pass at 15 seconds. Add runtime headroom under the original
+   deadline without changing the denominator.
+2. Implement the current 44 class and decorator parse cases, then close the 89
+   runtime failures beginning with `staging/sm`, super ordering, and RegExp.
+   Use focused regressions and neighboring groups after each implementation.
+3. Profile and remove the remaining 63 timeouts under the same five-second
+   limit, including `staging/sm`, RegExp literals, TypedArray, URI, Annex B,
+   ArrayBuffer, and comment cases.
 4. Run the complete corpus on a clean committed candidate and require 102,956
    passes with zero failures, timeouts, skips, crashes, or harness errors.
 

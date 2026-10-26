@@ -44,28 +44,29 @@ report still contains all selected outcomes and records the restored file count.
 
 ## Current full result
 
-The most recent complete pinned evaluation archived **2026-10-25** on clean
-source `3816dcf` passes **102,661 / 102,956 variants (99.7135%)**, with 232
-failures, 63 timeouts, and zero skips, crashes, or harness errors. It gains 18
-passes and loses 102 against `d942b04`, so it is retained as rejected
-regression evidence. The best accepted full result remains clean source
-`d942b04` at **102,745 / 102,956 (99.7951%)**, with 151 failures and 60
-timeouts; it gained 76 passes with zero losses against its predecessor.
+The latest complete pinned run archived **2026-10-25** on clean source
+`259402f` passes **102,760 / 102,956 variants (99.8096%)**, with 133 failures,
+63 timeouts, and zero skips, crashes, or harness errors. It gains 18 passes
+and loses three against the `d942b04` zero-loss reference; against the rejected
+`3816dcf` candidate it gains 99 passes with zero losses.
 
-Both runs use corpus `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, two workers,
-five-second deadlines, no exclusions, and no resumed outcomes. Worker
-SHA-256 values are `b607aaf8547f6df2ad6f3ce9996cc76931024d8a52a6d57e6a4a0f204ff7d612`
-for `3816dcf` and
-`364ea4a28f71ebf488f5c1a7ff78849e3bba8f3efee1f173366436bec3762b3d` for
-`d942b04`.
+All three losses versus `d942b04` are five-second timeouts: script and strict
+variants of `staging/sm/String/string-upper-lower-mapping.js`, and the script
+variant of `staging/sm/regress/regress-610026.js`. A focused five-second rerun
+reproduced those three timeouts; all four selected variants pass with a
+15-second diagnostic deadline. The latest run uses corpus
+`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, two workers, five-second deadlines,
+no exclusions, and no resumed outcomes. Worker SHA-256 is
+`269671273c067f74e93e0cb3df85f33f98477c6e2f3e92005d665253f80b2b7d`.
 
-[Regression evidence](evidence/full-regression-function-binding-2026-10-25/)
-contains the latest full report, comparison, triage, source identity, and exact
-transitions. The best accepted result's [evidence](evidence/full-refresh-2026-10-25/)
-contains all 211 residual variants. A repair candidate restores 100 passes
-with zero losses against `3816dcf` in a 315-variant focused recheck; a full run
-on the repaired candidate is the next gate. See the
-[full-pass plan](../../docs/test262-full-pass-plan.md).
+[Current full evidence](evidence/full-native-prototype-repair-2026-10-25/)
+contains the report, comparisons, triage, source identity, and all 196 residual
+variants. The previous rejected `3816dcf` full result is preserved in
+[regression evidence](evidence/full-regression-function-binding-2026-10-25/).
+The zero-loss reference `d942b04` passed 102,745 with 151 failures and 60
+timeouts; its [evidence](evidence/full-refresh-2026-10-25/) contains 211
+residual variants. See the [full-pass plan](../../docs/test262-full-pass-plan.md)
+for the next steps.
 
 ## Historical measurements
 
