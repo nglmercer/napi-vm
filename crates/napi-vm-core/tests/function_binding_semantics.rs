@@ -82,6 +82,22 @@ fn deleting_inherited_function_properties_does_not_resurrect_defaults() {
 }
 
 #[test]
+fn native_builtin_methods_inherit_and_respect_function_prototype() {
+    assert_both("Object.getPrototypeOf(String.prototype.anchor)===Function.prototype");
+    assert_both("typeof String.prototype.anchor.call==='function'");
+    assert_both("String.prototype.anchor.call(42,42)==='<a name=\"42\">42</a>'");
+    assert_both(
+        "Object.getPrototypeOf(Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype),Symbol.toStringTag).get)===Function.prototype",
+    );
+    assert_both(
+        "Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype),Symbol.toStringTag).get.call(42)===undefined",
+    );
+    assert_both(
+        "var anchor=String.prototype.anchor;var call=Function.prototype.call;delete Function.prototype.call;var absent=anchor.call===undefined;Function.prototype.call=call;absent&&anchor.call===call",
+    );
+}
+
+#[test]
 fn parenthesized_logical_assignment_targets_do_not_infer_names() {
     assert_both(
         r#"

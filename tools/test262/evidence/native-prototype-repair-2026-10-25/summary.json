@@ -1,0 +1,38 @@
+{
+  "domain": "ECMAScript",
+  "suite": "Test262",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "source_commit": "3816dcfec05c0d4d5d2e05d20e8cff71e98ac1ee",
+  "engine_sha256": "269671273c067f74e93e0cb3df85f33f98477c6e2f3e92005d665253f80b2b7d",
+  "worker_jobs": 2,
+  "timeout_seconds": 5.0,
+  "selected_files": 175,
+  "total": 315,
+  "counts": {
+    "pass": 120,
+    "fail": 133,
+    "skip": 0,
+    "timeout": 62,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "vs_rejected_full_candidate": {
+    "new_passes": 100,
+    "lost_passes": 0
+  },
+  "vs_accepted_d942_full_projection": {
+    "new_passes": 18,
+    "lost_passes": 2
+  },
+  "timing_sensitive_losses": [
+    "staging/sm/String/string-upper-lower-mapping.js (script)",
+    "staging/sm/String/string-upper-lower-mapping.js (strict)"
+  ],
+  "full_projection_only": {
+    "pass": 102761,
+    "fail": 133,
+    "timeout": 62
+  },
+  "accepted_as_latest_full_baseline": false,
+  "scope": "Focused recheck of all d942 residual files and all status-transition files from the rejected complete run."
+}

@@ -44,20 +44,28 @@ report still contains all selected outcomes and records the restored file count.
 
 ## Current full result
 
-The latest complete pinned run archived **2026-10-25** on clean source `d942b04`
-passes **102,745 / 102,956 variants (99.7951%)**, with 151 failures, 60
-timeouts, and zero skips, crashes, or harness errors. It gains **76 passes with
-zero lost passes** against the previous complete full report. Configuration is
-two workers and five-second deadlines, with no exclusions or resumed outcomes.
-The corpus is `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`; worker SHA-256 is
-`364ea4a28f71ebf488f5c1a7ff78849e3bba8f3efee1f173366436bec3762b3d`.
+The most recent complete pinned evaluation archived **2026-10-25** on clean
+source `3816dcf` passes **102,661 / 102,956 variants (99.7135%)**, with 232
+failures, 63 timeouts, and zero skips, crashes, or harness errors. It gains 18
+passes and loses 102 against `d942b04`, so it is retained as rejected
+regression evidence. The best accepted full result remains clean source
+`d942b04` at **102,745 / 102,956 (99.7951%)**, with 151 failures and 60
+timeouts; it gained 76 passes with zero losses against its predecessor.
 
-[Evidence](evidence/full-refresh-2026-10-25/) includes every outcome, the
-comparison, source identity, build log, triage, and all 211 remaining variants.
-The [full-pass plan](../../docs/test262-full-pass-plan.md) tracks the final
-gate. A follow-up patch gains 18 passes with zero losses in a 212-variant
-residual-file comparison; the full score remains unchanged pending a complete
-run on that candidate.
+Both runs use corpus `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, two workers,
+five-second deadlines, no exclusions, and no resumed outcomes. Worker
+SHA-256 values are `b607aaf8547f6df2ad6f3ce9996cc76931024d8a52a6d57e6a4a0f204ff7d612`
+for `3816dcf` and
+`364ea4a28f71ebf488f5c1a7ff78849e3bba8f3efee1f173366436bec3762b3d` for
+`d942b04`.
+
+[Regression evidence](evidence/full-regression-function-binding-2026-10-25/)
+contains the latest full report, comparison, triage, source identity, and exact
+transitions. The best accepted result's [evidence](evidence/full-refresh-2026-10-25/)
+contains all 211 residual variants. A repair candidate restores 100 passes
+with zero losses against `3816dcf` in a 315-variant focused recheck; a full run
+on the repaired candidate is the next gate. See the
+[full-pass plan](../../docs/test262-full-pass-plan.md).
 
 ## Historical measurements
 

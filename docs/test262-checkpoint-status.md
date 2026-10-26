@@ -2,20 +2,27 @@
 
 ## Current measured state
 
-The latest complete pinned run archived **2026-10-25** on clean source `d942b04`
-passes **102,745 / 102,956 variants (99.7951%)**. It records 151 failures,
-60 timeouts, and zero skips, crashes, or harness errors. Against the previous
-completed full report it gains **76 passes with zero lost passes**.
-The corpus remains `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`; the run uses
-two workers, five-second deadlines, no feature exclusions, and worker SHA-256
-`364ea4a28f71ebf488f5c1a7ff78849e3bba8f3efee1f173366436bec3762b3d`.
-It completed without resuming a checkpoint.
+The latest complete pinned evaluation archived **2026-10-25** on clean source
+`3816dcf` passes **102,661 / 102,956 variants (99.7135%)**. It records 232
+failures, 63 timeouts, and zero skips, crashes, or harness errors. It gains 18
+passes and loses 102 against `d942b04`, so it is retained as rejected
+regression evidence. The best accepted complete result remains `d942b04` at
+**102,745 / 102,956 (99.7951%)**, with 151 failures and 60 timeouts.
+Both complete evaluations use corpus `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`,
+two workers, five-second deadlines, no feature exclusions, and no resumed
+outcomes. The `d942b04` worker SHA-256 is
+`364ea4a28f71ebf488f5c1a7ff78849e3bba8f3efee1f173366436bec3762b3d`; the
+rejected `3816dcf` worker SHA-256 is
+`b607aaf8547f6df2ad6f3ce9996cc76931024d8a52a6d57e6a4a0f204ff7d612`.
 
-All 211 non-passing variants and the complete report are archived in
+The rejected full report and exact transitions are archived in
+[regression evidence](../tools/test262/evidence/full-regression-function-binding-2026-10-25/).
+A repair candidate passes **120 / 315** variants in a 175-file focused recheck,
+restoring 100 passes with zero losses against the rejected candidate. Its
+projection against `d942b04` is 18 gains and two timing-sensitive case-mapping
+timeouts; the complete repaired-candidate gate has not run yet. The best
+accepted full report and its 211 residuals remain in
 [full refresh evidence](../tools/test262/evidence/full-refresh-2026-10-25/).
-The follow-up patch is newer than the measured source. It gains 18 passes with
-zero losses in a 212-variant residual-file comparison and passes native checks.
-The full score remains unchanged until the complete run on that candidate.
 See the [full-pass plan](test262-full-pass-plan.md) for the ordered work.
 The subsequent `d30e770` continuation passes 4,486 / 4,492 focused variants,
 gaining 35 passes with zero losses; these results remain outside the full score.

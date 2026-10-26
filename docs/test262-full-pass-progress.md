@@ -6,7 +6,30 @@ skips, timeouts, crashes, failures, or harness errors. Measurements use two
 workers and five-second per-variant deadlines. Focused reports do not update
 the full score.
 
-## Latest full refresh
+## Latest complete evaluation: `3816dcf` (rejected)
+
+Clean source `3816dcf` passed **102,661 / 102,956 (99.7135%)** in the
+2026-10-25 complete run. It had 232 failures and 63 timeouts, with no skips,
+crashes, or harness errors. Compared with the prior complete `d942b04` run, it
+gained 18 passes and lost 102. This candidate is retained as regression
+evidence and does not replace the best accepted full result below.
+
+[Regression evidence](../tools/test262/evidence/full-regression-function-binding-2026-10-25/)
+contains the report, comparison, triage, source identity, and exact transitions.
+The root cause was native methods failing to inherit their realm's
+`Function.prototype`, together with function property lookup using the wrong
+receiver/prototype chain.
+
+The repair candidate passes **120 / 315** variants in a 175-file recheck of all
+`d942b04` residuals and all transitions from the rejected run. It records 133
+failures and 62 timeouts, restoring 100 passes with zero losses against
+`3816dcf`. Compared with `d942b04`, it gains 18 passes and loses two
+case-mapping variants. Those same two variants timed out in a fresh five-second
+diagnostic on the old worker on this host; both pass with a 15-second
+diagnostic. This focused recheck is not a new full score. Its full projection
+is 102,761 passes, 133 failures, and 62 timeouts.
+
+## Best accepted full refresh
 
 Clean source `d942b04` passes **102,745 / 102,956 (99.7951%)** in the completed
 2026-10-25 full run. There are **151 failures and 60 timeouts**, with zero

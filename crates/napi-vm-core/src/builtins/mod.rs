@@ -392,6 +392,7 @@ pub(crate) fn native_method(
     callable: NativeFn,
     prototype: Option<Value>,
 ) -> Value {
+    let uses_default_prototype = prototype.is_none();
     let properties = crate::heap::tracked(std::rc::Rc::new(crate::value::ObjectCell::new(
         vec![
             ("length".into(), Value::Number(length as f64)),
@@ -399,6 +400,9 @@ pub(crate) fn native_method(
         ],
         prototype.map(std::rc::Rc::new),
     )));
+    if uses_default_prototype {
+        properties.meta.borrow_mut().uses_default_prototype = true;
+    }
     properties.meta.borrow_mut().native_function_name = Some(name.into());
     for key in ["name", "length"] {
         properties.meta.borrow_mut().set_attrs(

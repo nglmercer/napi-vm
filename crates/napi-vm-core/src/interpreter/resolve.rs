@@ -1425,13 +1425,7 @@ impl Interpreter {
                     return Ok(function.prototype_value(o));
                 }
                 function.ensure_name_length_properties();
-                if let Some(value) = lookup_chain_found(
-                    self,
-                    &Value::Object {
-                        props: function.properties.clone(),
-                    },
-                    k,
-                )? {
+                if let Some(value) = lookup_chain_found(self, o, k)? {
                     return Ok(value);
                 }
                 if self

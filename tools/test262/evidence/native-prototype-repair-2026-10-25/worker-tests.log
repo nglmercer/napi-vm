@@ -1,0 +1,31 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running tests/test262_worker.rs (target/debug/deps/test262_worker-beeab49b4e66fa6f)
+
+running 23 tests
+test worker_agent_blocking_permission_is_explicit ... ok
+diagnostic text
+test conformance_host_timers_use_the_owner_queue_and_can_be_cancelled ... ok
+test contextual_early_errors_precede_harness_or_runtime_execution ... ok
+child
+test module_source_intrinsic_is_abstract_and_owned_by_each_realm ... ok
+test worker_async_waits_settle_on_owner_after_foreign_notifications ... ok
+test worker_eval_script_uses_the_global_environment ... ok
+test worker_agents_parse_source_with_script_goal ... ok
+test print_is_available_in_each_realm_without_corrupting_worker_json ... ok
+test worker_agents_share_memory_and_report_without_transferring_guest_state ... ok
+test worker_create_realm_has_distinct_globals_and_intrinsics ... ok
+test worker_loads_module_fixtures ... ok
+test worker_distinguishes_module_linking_and_evaluation_errors ... ok
+test worker_agents_wait_notify_and_shutdown_blocked_waits ... ok
+test worker_gc_keeps_registered_agent_callbacks_and_their_closures_alive ... ok
+test worker_only_exposes_done_to_tests_with_the_async_flag ... ok
+test worker_loads_nested_and_dynamic_fixtures_within_the_explicit_root ... ok
+test worker_loads_raw_byte_modules_within_its_explicit_root ... ok
+test worker_detaches_buffers_and_accepts_gc_requests ... ok
+test worker_separates_parse_runtime_and_harness_errors ... ok
+test harness_errors_are_identified_by_prototype_without_guest_stringification ... ok
+test worker_propagates_agent_errors_and_preserves_report_utf16 ... ok
+test worker_requires_exact_async_completion ... ok
+test worker_budgets_track_engine_defaults ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.43s
