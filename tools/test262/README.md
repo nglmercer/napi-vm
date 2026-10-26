@@ -107,6 +107,12 @@ The [large JSON follow-up](evidence/large-json-2026-10-26/) passes
 **13,661 / 13,661** focused variants, gaining both large-array variants with
 zero losses. All 416 core tests and the standard timing slice pass.
 
+The [Annex B follow-up](evidence/annex-arguments-labels-2026-10-26/) passes
+**2,947 / 2,949** selected variants, gaining two labeled-function variants with
+zero losses. Two staging arguments variants conflict with the pinned normative
+arguments test; the candidate that passes staging loses that normative test.
+All 418 core tests and the standard timing slice pass.
+
 ## Historical measurements
 
 The preceding completed full pinned Test262 run (archived 2026-10-20, corpus

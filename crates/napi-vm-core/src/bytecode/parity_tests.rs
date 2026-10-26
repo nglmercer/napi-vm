@@ -2387,3 +2387,35 @@ fn large_json_arrays_preserve_index_storage_and_truncation() {
         );
     }
 }
+
+#[test]
+fn annex_b_preserves_arguments_and_formal_parameter_bindings() {
+    for source in [
+        "(function(){let before=arguments;{function arguments(){return 4;}}return arguments===before&&typeof arguments==='object';})();",
+        "(function(arguments){{function arguments(){return 4;}}return arguments===3;})(3);",
+        "(function(...arguments){{function arguments(){return 4;}}return Array.isArray(arguments)&&arguments[0]===3;})(3);",
+        r#"let ok=false;try{eval("'use strict';{function arguments(){}}");}catch(e){ok=e instanceof SyntaxError;}ok;"#,
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn annex_b_labeled_and_duplicate_functions_are_block_hoisted() {
+    for source in [
+        "let before,after;{before=f();label:function f(){return 4;}after=f();}before===4&&after===4&&f()===4;",
+        "let before,between,after;{before=f();function f(){return 3;}between=f();label:function f(){return 4;}after=f();}before===4&&between===4&&after===4&&f()===4;",
+        "(function(){let first;{first=f();function f(){return 1;}function f(){return 2;}}return first===2&&f()===2;})();",
+        "let out;{out=f();a:b:function f(){return 8;}}out===8&&f()===8;",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}

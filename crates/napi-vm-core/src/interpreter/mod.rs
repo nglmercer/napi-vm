@@ -400,6 +400,13 @@ pub(crate) fn produces_completion_value(statement: &Statement) -> bool {
 /// Keep this walk aligned with `hoist_lexical`: declarator groups are
 /// transparent, while nested statements establish their own scopes when they
 /// execute.
+pub(crate) fn labeled_function(mut statement: &Statement) -> Option<&Statement> {
+    while let Statement::Labeled { body, .. } = statement {
+        statement = body;
+    }
+    matches!(statement, Statement::FnDecl { .. }).then_some(statement)
+}
+
 pub(crate) fn block_needs_lexical_scope(stmts: &[Statement]) -> bool {
     stmts.iter().any(|stmt| match stmt {
         Statement::VarDecl { kind, .. } => matches!(kind, VarKind::Let | VarKind::Const),
@@ -407,6 +414,7 @@ pub(crate) fn block_needs_lexical_scope(stmts: &[Statement]) -> bool {
         | Statement::ClassInitialization { .. }
         | Statement::FnDecl { .. }
         | Statement::ClassDecl { .. } => true,
+        Statement::Labeled { .. } => labeled_function(stmt).is_some(),
         Statement::Declarations(inner)
         | Statement::ResourceDeclaration {
             declarations: inner,
@@ -442,6 +450,7 @@ fn body_needs_lexical_hoist(stmts: &[Statement]) -> bool {
         | Statement::ClassInitialization { .. }
         | Statement::FnDecl { .. }
         | Statement::ClassDecl { .. } => true,
+        Statement::Labeled { .. } => labeled_function(stmt).is_some(),
         Statement::Declarations(inner)
         | Statement::ResourceDeclaration {
             declarations: inner,
@@ -2626,8 +2635,8 @@ impl Interpreter {
         // Second pass: function declarations, after every lexical name exists,
         // so a hoisted function closing over a later `let` sees the binding.
         for stmt in stmts {
-            if let Statement::FnDecl { name, .. } = stmt {
-                let value = self.instantiate_function_declaration(stmt)?;
+            if let Some(function @ Statement::FnDecl { name, .. }) = labeled_function(stmt) {
+                let value = self.instantiate_function_declaration(function)?;
                 let _ = value;
                 let _ = name;
             }

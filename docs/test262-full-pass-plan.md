@@ -94,6 +94,12 @@ passes **13,661 / 13,661** focused variants, gaining both large-array variants
 with zero losses. All 416 core tests and the standard timing slice pass. JSON
 uses a bounded total element budget while retaining sparse array growth.
 
+The [Annex B follow-up](../tools/test262/evidence/annex-arguments-labels-2026-10-26/)
+passes **2,947 / 2,949** focused variants, gaining two labeled-declaration
+variants with zero losses. The remaining two staging arguments tests conflict
+with the pinned normative arguments test; the alternate candidate and its
+regression are archived. All 418 core tests and the standard timing slice pass.
+
 ## Ordered execution
 
 1. **Confirm decorator gains in a full run.** Class, method, getter/setter,
@@ -103,8 +109,9 @@ uses a bounded total element budget while retaining sparse array growth.
    investigate any remaining conformance gaps and preserve replacement,
    binding, and static initialization semantics.
 
-2. **Close the other runtime causes.** Four Annex B declaration variants need
-   argument-shadowing, labeled declarations, and redeclaration ordering. Four
+2. **Close the other runtime causes.** Two Annex B labeled-declaration variants now pass in focused runs. Two
+   staging arguments variants conflict with the pinned normative test and need
+   a corpus resolution or an explicit change to the acceptance scope. Four
    legacy Date variants need two-digit-year heuristics, written months, compact
    timezone offsets, and strict ISO rejection. The ten resource-limit variants now pass focused runs: six large-string,
    two DataView, and two large JSON-array variants. Confirm them in the next

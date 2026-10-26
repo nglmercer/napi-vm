@@ -901,6 +901,11 @@ fn block_fn_decls<'a>(stmts: &'a [Statement], out: &mut Vec<FnDeclRef<'a>>) {
                 });
             }
             Statement::Declarations(inner) => block_fn_decls(inner, out),
+            Statement::Labeled { .. } => {
+                if let Some(function) = crate::interpreter::labeled_function(stmt) {
+                    block_fn_decls(std::slice::from_ref(function), out);
+                }
+            }
             _ => {}
         }
     }

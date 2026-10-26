@@ -5,8 +5,8 @@ use std::collections::HashSet;
 
 fn functions(body: &[Statement]) -> Vec<String> {
     body.iter()
-        .filter_map(|s| match s {
-            Statement::FnDecl { name, .. } => Some(name.clone()),
+        .filter_map(|s| match labeled_function(s) {
+            Some(Statement::FnDecl { name, .. }) => Some(name.clone()),
             _ => None,
         })
         .collect()
@@ -108,7 +108,12 @@ fn collect<'a>(
                 }
             }
             Statement::Labeled { body, .. } => {
-                collect(std::slice::from_ref(body.as_ref()), &nested, block, out)
+                let names = if labeled_function(statement).is_some() {
+                    &blocked
+                } else {
+                    &nested
+                };
+                collect(std::slice::from_ref(body.as_ref()), names, block, out)
             }
             _ => {}
         }
@@ -197,7 +202,10 @@ pub(crate) fn eligible<'a>(
     parameters: &[String],
     arguments: bool,
 ) -> Vec<(&'a Statement, String)> {
-    let mut blocked: HashSet<String> = parameters.iter().cloned().collect();
+    let mut blocked: HashSet<String> = parameters
+        .iter()
+        .map(|name| name.trim_start_matches("...").to_owned())
+        .collect();
     if arguments {
         blocked.insert("arguments".into());
     }
