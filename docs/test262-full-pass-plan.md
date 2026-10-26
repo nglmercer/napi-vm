@@ -105,6 +105,11 @@ passes **1,718 / 1,734** focused variants, gaining four passes with zero losses;
 sixteen prior DST-caching timeouts remain. All 419 core tests and the standard
 timing slice pass. The four Date gains need full-run confirmation.
 
+The [object-index follow-up](../tools/test262/evidence/object-index-performance-2026-10-26/)
+passes **22,058 / 22,058** focused variants, gaining six TypedArray timeouts
+and the two earlier DataView variants with zero losses against the full
+projection. The timing cases pass repeatedly; all 423 core tests pass.
+
 ## Ordered execution
 
 1. **Confirm decorator gains in a full run.** Class, method, getter/setter,
@@ -126,10 +131,9 @@ timing slice pass. The four Date gains need full-run confirmation.
 3. **Remove all 52 timeouts.** The inventory includes 22 staging/sm, eight
    RegExp-literal, six TypedArray, four URI-decode, four Annex B, two RegExp, four URI-encode,
    and two comment variants.
-   Separate nontermination from slow execution. Several TypedArray cases copy
-   buffers byte by byte through numeric indexed reads/writes; inspect redundant
-   property-key conversion and descriptor work while preserving coercion,
-   detachment, immutable-buffer, and Proxy semantics. Profile the URI, string,
+   Separate nontermination from slow execution. Six TypedArray copyWithin timeouts now pass repeatedly in focused runs after
+   reducing object-index, TypedArray access, and intrinsic Array.from overhead;
+   confirm them in the next full run. Profile the URI, string,
    and regexp loops as separate causes. Keep headroom with two workers and
    five-second deadlines; longer diagnostics do not count as passes.
 

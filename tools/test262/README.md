@@ -118,6 +118,11 @@ The [Date parsing follow-up](evidence/date-parsing-2026-10-26/) passes
 sixteen previous DST-caching timeouts remain. All 419 core tests and the
 standard timing slice pass.
 
+The [object-index follow-up](evidence/object-index-performance-2026-10-26/)
+passes **22,058 / 22,058** focused variants, including all six formerly timed
+out TypedArray copyWithin variants; it gains eight passes with zero losses
+against the full projection. All 423 core tests and repeated timing checks pass.
+
 ## Historical measurements
 
 The preceding completed full pinned Test262 run (archived 2026-10-20, corpus

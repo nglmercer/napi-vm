@@ -1,0 +1,6 @@
+{
+  "source_commit": "123ce93bbca543052d784691eb88c66c437e7f36",
+  "source_diff_sha256": "d00f3ad47bb3919f94da14caf3ee79ebd913e8f07273c08f88ce7240b50da925",
+  "engine_sha256": "666c0ea05ec122496d084cecd2c84009e220a5d2fab6bf78a110e09cb19d3c54",
+  "diagnostic": "All six target variants still time out at five seconds."
+}

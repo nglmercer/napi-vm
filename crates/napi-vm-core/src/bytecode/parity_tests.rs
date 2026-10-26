@@ -2436,3 +2436,54 @@ fn legacy_date_parsing_and_iso_time_validation() {
         );
     }
 }
+
+#[test]
+fn numeric_object_writes_preserve_prototype_descriptors_and_mutations() {
+    for source in [
+        "let o={};for(let i=0;i<150;i++)o[i]=i;let a=o[120];delete o[80];Object.defineProperty(o,'120',{value:4,writable:false,configurable:true});let ok=!Reflect.set(o,'120',9);o[80]=7;a===120&&ok&&o[80]===7&&o[120]===4&&Object.keys(o).length===150;",
+        "let n=0;let p={set 5(v){n=v;}};let o=Object.create(p);o[5]=7;n===7&&!Object.hasOwn(o,'5');",
+        "let o={};Object.preventExtensions(o);!Reflect.set(o,'0',1)&&!('0' in o);",
+        "let get=Object.getOwnPropertyDescriptor({get x(){return 7;}},'x').get;let o={};o[0]=get;Object.defineProperty(o,'1',{get(){return 2;}});o[0]===get&&o[0]()===7;",
+        "let seen=0;let p=new Proxy({},{set(t,k,v,r){seen++;return true;}});let o=Object.create(p);o[1]=4;seen===1&&!Object.hasOwn(o,'1');",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn numeric_typed_array_access_preserves_coercion_and_receivers() {
+    for source in [
+        "let a=new Uint8Array([1,2]);a[-0]=9;a[0]===9&&a[-0]===9&&a[1]===2;",
+        "let log='';let a=new Uint8Array(1);a[9]={valueOf(){log+='v';return 4;}};a[9]===undefined&&log==='v';",
+        "let a=new Uint8Array(1),b={};Reflect.set(a,0,7,b);a[0]===0&&b[0]===7;",
+        "let a=new Uint8Array(1),n=0,p=new Proxy(a,{get(t,k){n++;return 7;},set(t,k,v){n++;return true;}});p[0]=3;p[0]===7&&a[0]===0&&n===2;",
+        "let b=new ArrayBuffer(8,{maxByteLength:16}),a=new Uint8Array(b,0,4);a[0]=1;b.resize(0);a[0]===undefined&&!(0 in a);",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn array_from_fast_iterator_preserves_observable_protocol() {
+    for source in [
+        "let a=[1,2,3],b=Array.from(a);b!==a&&b.join(',')==='1,2,3'&&Object.getOwnPropertyDescriptor(b,'0').writable;",
+        "let a=[1,2],log='';let b=Array.from(a,function(v,i){log+=i;a[1]=8;return v;});log==='01'&&b[1]===8;",
+        "let log='';let a=[1,2];a[Symbol.iterator]=function(){log+='i';let it=[3,4].values();return new Proxy(it,{get(t,k){if(k==='next')log+='n';let v=t[k];return typeof v==='function'?v.bind(t):v;}});};let b=Array.from(a);log==='in'&&b.join(',')==='3,4';",
+        "let a=[1,2];function C(){return a;}let b=Array.from.call(C,a);b===a&&a.join(',')==='1,2';",
+        "let a=[1,,3],p=Object.create(Array.prototype);Object.defineProperty(p,'1',{get(){return 7;}});Object.setPrototypeOf(a,p);Array.from(a).join(',')==='1,7,3';",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}

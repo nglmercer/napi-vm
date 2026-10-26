@@ -2274,6 +2274,14 @@ impl Interpreter {
 
     pub(crate) fn drain_iterator(&mut self, iterator: &Value) -> Result<Vec<Value>, VmErr> {
         let next_fn = self.member(iterator, "next")?;
+        self.drain_iterator_with_next(iterator, next_fn)
+    }
+
+    pub(crate) fn drain_iterator_with_next(
+        &mut self,
+        iterator: &Value,
+        next_fn: Value,
+    ) -> Result<Vec<Value>, VmErr> {
         // A dense Array iterator with the intrinsic next method cannot invoke
         // guest code while reading its elements. Avoid allocating a temporary
         // result object and entering a callable realm for every element. Keep

@@ -417,6 +417,59 @@ fn array_from(
         let result = array_result_create(interp, &constructor, 0.0, true)?;
         let iterator = interp.iterator_from_method(&source, &method)?;
         let next = interp.get_prop_value_str(&iterator, "next")?;
+        // A fresh intrinsic Array result and a dense intrinsic Array iterator
+        // have no guest-observable operations between successive steps.
+        let intrinsic_array = interp.persistent_global.borrow().intrinsic("Array");
+        let constructor_call = match constructor.get_prop(crate::interpreter::call::CALL_SLOT) {
+            Some(Value::NativeFunction { callable, .. }) => Some(callable),
+            Some(Value::Function(ref function)) if function.bound.is_none() => function.native,
+            _ => None,
+        };
+        let builtin_constructor = intrinsic_array
+            .as_ref()
+            .is_some_and(|value| crate::interpreter::strict_equals(value, &constructor))
+            && constructor_call
+                .is_some_and(|callable| std::ptr::fn_addr_eq(callable, array_ctor as NativeFn))
+            && constructor
+                .get_prop(crate::interpreter::call::CONSTRUCT_SLOT)
+                .is_none();
+        let intrinsic_next = match &next {
+            Value::NativeFunction { callable, .. } => Some(*callable),
+            Value::Function(function) if function.bound.is_none() => function.native,
+            _ => None,
+        }
+        .is_some_and(|callable| {
+            std::ptr::fn_addr_eq(
+                callable,
+                crate::interpreter::resolve::array_iter_next as NativeFn,
+            )
+        });
+        let dense_iterator = if let Value::Object { props } = &iterator {
+            !props.meta.borrow().has_accessors
+                && props.meta.borrow().attrs_of("__cursor__").writable
+                && props.meta.borrow().attrs_of("__items__").writable
+                && matches!(props.own_value("__cursor__"), Some(Value::Number(_)))
+                && matches!(props.own_value("__kind__"), Some(Value::String(ref kind)) if kind == "values")
+                && matches!(props.own_value("__items__"), Some(Value::Array(ref array))
+                    if !array.meta.borrow().has_accessors
+                        && array.array_length() <= crate::value::MAX_ARRAY_LEN
+                        && array.array_length() == array.borrow().len()
+                        && array.presence_snapshot().iter().all(|present| *present))
+        } else {
+            false
+        };
+        if mapper.is_none()
+            && builtin_constructor
+            && intrinsic_next
+            && dense_iterator
+            && let Value::Array(result_array) = &result
+        {
+            let items = interp.drain_iterator_with_next(&iterator, next)?;
+            for (index, value) in items.into_iter().enumerate() {
+                result_array.store_index(index, value);
+            }
+            return Ok(result);
+        }
         let mut index = 0;
         loop {
             interp.consume_loop()?;

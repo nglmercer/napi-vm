@@ -1259,7 +1259,10 @@ impl Interpreter {
         throw: bool,
     ) -> Result<(), VmErr> {
         let accepted = self.set_member_with_receiver(base, key, value, receiver)?;
-        self.finish_property_write(accepted, &self.property_key(key)?, throw)
+        if accepted || !throw {
+            return Ok(());
+        }
+        self.finish_property_write(false, &self.property_key(key)?, true)
     }
 
     pub(crate) fn numeric_update(
@@ -1556,8 +1559,63 @@ impl Interpreter {
         value: Value,
         receiver: &Value,
     ) -> Result<bool, VmErr> {
+        if let (Value::TypedArray(view), Value::Number(index)) = (target, property)
+            && crate::interpreter::strict_equals(target, receiver)
+        {
+            if view.buffer.is_immutable() {
+                return Ok(false);
+            }
+            let index = if *index == 0.0 { 0.0 } else { *index };
+            crate::builtins::set_integer_index_in(self, view, index, &value)?;
+            return Ok(true);
+        }
         let key = self.ecmascript_to_property_key(property)?;
         let slot = self.property_key(&key)?;
+        // Plain objects with ordinary data slots can use their direct storage
+        // when the prototype chain cannot intercept a numeric assignment.
+        if let Value::Object { props } = target
+            && crate::interpreter::strict_equals(target, receiver)
+            && crate::value::array_index(&slot).is_some()
+            && !props.meta.borrow().module_namespace
+            && props.meta.borrow().boxed_primitive.is_none()
+            && !props.meta.borrow().may_have_accessor(&slot)
+        {
+            let own = props.own_index(&slot).is_some();
+            if own {
+                if !props.meta.borrow().attrs_of(&slot).writable {
+                    return Ok(false);
+                }
+                target.set_prop(slot.clone(), value)?;
+                props.meta.borrow_mut().set_explicit_data(&slot, true);
+                return Ok(true);
+            }
+            if props.meta.borrow().non_extensible {
+                return Ok(false);
+            }
+            let mut prototype = self.prototype_of(target);
+            let mut clear = false;
+            for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+                let Some(current) = prototype else {
+                    clear = true;
+                    break;
+                };
+                let Value::Object { props } = current.as_ref() else {
+                    break;
+                };
+                if props.meta.borrow().module_namespace
+                    || props.meta.borrow().boxed_primitive.is_some()
+                    || props.own_index(&slot).is_some()
+                {
+                    break;
+                }
+                prototype = self.prototype_of(current.as_ref());
+            }
+            if clear {
+                target.set_prop(slot.clone(), value)?;
+                props.meta.borrow_mut().set_explicit_data(&slot, true);
+                return Ok(true);
+            }
+        }
         // Dense array construction should not materialize descriptor objects
         // for every element. Only bypass OrdinarySet when the receiver is the
         // target and no inherited indexed property can intercept a new write.

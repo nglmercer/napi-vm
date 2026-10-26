@@ -1040,6 +1040,8 @@ impl std::ops::Deref for ArrayCell {
 pub struct ObjectCell {
     pub(crate) weak: RefCell<weak::WeakStorage>,
     slots: RefCell<Vec<(String, Value)>>,
+    index: RefCell<Option<std::collections::HashMap<String, usize>>>,
+    index_disabled: Cell<bool>,
     pub meta: RefCell<ObjectMeta>,
     /// Cached canonical layout of the slot keys, built lazily on the
     /// second indexed read (see `own_index`). A cache, never authority:
@@ -1059,6 +1061,8 @@ impl ObjectCell {
         Self {
             weak: RefCell::new(weak::WeakStorage::None),
             slots: RefCell::new(props),
+            index: RefCell::new(None),
+            index_disabled: Cell::new(false),
             meta: RefCell::new(ObjectMeta {
                 proto,
                 realm_global: crate::interpreter::realm::allocation_global(),
@@ -1073,6 +1077,8 @@ impl ObjectCell {
         Self {
             weak: RefCell::new(weak::WeakStorage::None),
             slots: RefCell::new(props),
+            index: RefCell::new(None),
+            index_disabled: Cell::new(false),
             meta: RefCell::new(ObjectMeta {
                 uses_default_prototype: true,
                 proto: crate::interpreter::realm::allocation_prototype("Object"),
@@ -1094,8 +1100,20 @@ impl ObjectCell {
         meta.uses_default_prototype = false;
     }
 
+    /// Borrow slots without exposing the underlying RefCell.
+    pub fn borrow(&self) -> Ref<'_, Vec<(String, Value)>> {
+        self.slots.borrow()
+    }
+
+    /// Raw mutations invalidate the dictionary; maintained writes update it directly.
+    pub fn borrow_mut(&self) -> RefMut<'_, Vec<(String, Value)>> {
+        *self.index.borrow_mut() = None;
+        self.slots.borrow_mut()
+    }
+
     /// Uncontended access to the slots.
     pub fn slots_mut(&mut self) -> &mut Vec<(String, Value)> {
+        *self.index.get_mut() = None;
         self.slots.get_mut()
     }
 
@@ -1170,6 +1188,7 @@ impl ObjectCell {
             return false;
         };
         slots.clear();
+        *self.index.borrow_mut() = None;
         if let Ok(mut weak) = self.weak.try_borrow_mut() {
             *weak = weak::WeakStorage::None;
         }
@@ -1210,6 +1229,17 @@ impl ObjectCell {
     /// foreign keys) never builds one either.
     pub(crate) fn own_index(&self, key: &str) -> Option<usize> {
         let slots = self.slots.borrow();
+        if slots.len() >= 64 && !self.index_disabled.get() {
+            let mut index = self.index.borrow_mut();
+            let dictionary = index.get_or_insert_with(|| {
+                let mut dictionary = std::collections::HashMap::with_capacity(slots.len());
+                for (position, (name, _)) in slots.iter().enumerate() {
+                    dictionary.entry(name.clone()).or_insert(position);
+                }
+                dictionary
+            });
+            return dictionary.get(key).copied();
+        }
         let cached = self.shape.borrow().clone();
         if let Some(shape) = &cached
             && let Some(index) = shape.slot_of(key)
@@ -1295,12 +1325,17 @@ impl ObjectCell {
     /// the slots; until then the object behaves exactly as before shapes.
     pub(crate) fn note_mutated(&self) {
         *self.shape.borrow_mut() = None;
+        *self.index.borrow_mut() = None;
     }
 }
 
 impl std::ops::Deref for ObjectCell {
     type Target = RefCell<Vec<(String, Value)>>;
     fn deref(&self) -> &Self::Target {
+        // External code may retain the raw RefCell and mutate it later,
+        // so cached absence cannot be trusted after that reference escapes.
+        self.index_disabled.set(true);
+        *self.index.borrow_mut() = None;
         &self.slots
     }
 }
@@ -1309,14 +1344,14 @@ fn set_cell_prop(props: &ObjectCell, key: String, val: Value) -> Result<(), VmEr
     let writable = props.meta.borrow().attrs_of(&key).writable;
     // Cold objects scan linearly without touching the shape machinery:
     // writes never build layouts, only repeated reads do.
-    let index = if props.has_shape() {
+    let index = if props.has_shape() || props.slots.borrow().len() >= 64 {
         props.own_index(&key)
     } else {
         props.borrow().iter().position(|(name, _)| *name == key)
     };
     if let Some(index) = index {
         if writable {
-            let mut slots = props.borrow_mut();
+            let mut slots = props.slots.borrow_mut();
             if props.meta.borrow().is_arguments
                 && let Value::Binding(cell) = &slots[index].1
             {
@@ -1330,16 +1365,18 @@ fn set_cell_prop(props: &ObjectCell, key: String, val: Value) -> Result<(), VmEr
     if props.meta.borrow().non_extensible {
         return Ok(());
     }
-    let mut slots = props.borrow_mut();
+    let mut slots = props.slots.borrow_mut();
     if slots.len() >= MAX_OBJECT_PROPS {
         return Err(limit_err("Maximum object property count exceeded"));
     }
+    let index = slots.len();
+    slots.push((key.clone(), val));
+    drop(slots);
+    if let Some(dictionary) = props.index.borrow_mut().as_mut() {
+        dictionary.insert(key.clone(), index);
+    }
     if props.has_shape() {
-        slots.push((key.clone(), val));
-        drop(slots);
         props.note_key_added(&key);
-    } else {
-        slots.push((key, val));
     }
     Ok(())
 }
@@ -4299,5 +4336,26 @@ mod weak_registry_drop_tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod object_index_tests {
+    use super::{ObjectCell, Value};
+    use std::ops::Deref;
+
+    #[test]
+    fn escaped_raw_slot_cell_disables_index_even_after_later_mutation() {
+        let props = ObjectCell::new_with_default_proto(
+            (0..100)
+                .map(|i| (i.to_string(), Value::Number(i as f64)))
+                .collect(),
+        );
+        assert_eq!(props.own_index("50"), Some(50));
+        let raw = props.deref();
+        assert_eq!(props.own_index("50"), Some(50));
+        raw.borrow_mut()[50].0 = "replacement".into();
+        assert_eq!(props.own_index("50"), None);
+        assert_eq!(props.own_index("replacement"), Some(50));
     }
 }

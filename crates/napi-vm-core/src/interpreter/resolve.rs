@@ -859,6 +859,17 @@ impl Interpreter {
 
     /// Resolve a property value, invoking it if it is a getter.
     pub(crate) fn get_prop_value(&mut self, o: &Value, p: &Value) -> Result<Value, VmErr> {
+        // A numeric key on an integer-indexed exotic bypasses ordinary
+        // property lookup; numeric -0 is converted to the property key "0".
+        if let (Value::TypedArray(view), Value::Number(index)) = (o, p) {
+            self.check_execution_interrupt()?;
+            let index = if *index == 0.0 { 0.0 } else { *index };
+            return Ok(if crate::builtins::valid_integer_index(view, index) {
+                crate::builtins::read_element(view, index as usize).unwrap_or(Value::Undefined)
+            } else {
+                Value::Undefined
+            });
+        }
         // An own dense data element needs neither key stringification nor a
         // prototype/accessor walk. Missing elements and exotic keys retain
         // the observable general path; numeric -0 names index 0.
@@ -2305,7 +2316,7 @@ pub(crate) fn array_iter_with_kind(
 
 /// Read the source at each step. Array iterators observe changes to both
 /// values and length, but remain exhausted after the first done result.
-pub(super) fn array_iter_next(
+pub(crate) fn array_iter_next(
     interp: &mut super::Interpreter,
     this: super::Value,
     _args: Vec<super::Value>,

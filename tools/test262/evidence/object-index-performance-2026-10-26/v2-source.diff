@@ -1,0 +1,263 @@
+diff --git a/crates/napi-vm-core/src/bytecode/parity_tests.rs b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+index cb87902..cc3b8a2 100644
+--- a/crates/napi-vm-core/src/bytecode/parity_tests.rs
++++ b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+@@ -2436,3 +2436,37 @@ fn legacy_date_parsing_and_iso_time_validation() {
+         );
+     }
+ }
++
++#[test]
++fn numeric_object_writes_preserve_prototype_descriptors_and_mutations() {
++    for source in [
++        "let o={};for(let i=0;i<150;i++)o[i]=i;let a=o[120];delete o[80];Object.defineProperty(o,'120',{value:4,writable:false,configurable:true});let ok=!Reflect.set(o,'120',9);o[80]=7;a===120&&ok&&o[80]===7&&o[120]===4&&Object.keys(o).length===150;",
++        "let n=0;let p={set 5(v){n=v;}};let o=Object.create(p);o[5]=7;n===7&&!Object.hasOwn(o,'5');",
++        "let o={};Object.preventExtensions(o);!Reflect.set(o,'0',1)&&!('0' in o);",
++        "let get=Object.getOwnPropertyDescriptor({get x(){return 7;}},'x').get;let o={};o[0]=get;Object.defineProperty(o,'1',{get(){return 2;}});o[0]===get&&o[0]()===7;",
++        "let seen=0;let p=new Proxy({},{set(t,k,v,r){seen++;return true;}});let o=Object.create(p);o[1]=4;seen===1&&!Object.hasOwn(o,'1');",
++    ] {
++        check(source, true);
++        assert!(
++            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
++            "{source}"
++        );
++    }
++}
++
++#[test]
++fn numeric_typed_array_access_preserves_coercion_and_receivers() {
++    for source in [
++        "let a=new Uint8Array([1,2]);a[-0]=9;a[0]===9&&a[-0]===9&&a[1]===2;",
++        "let log='';let a=new Uint8Array(1);a[9]={valueOf(){log+='v';return 4;}};a[9]===undefined&&log==='v';",
++        "let a=new Uint8Array(1),b={};Reflect.set(a,0,7,b);a[0]===0&&b[0]===7;",
++        "let a=new Uint8Array(1),n=0,p=new Proxy(a,{get(t,k){n++;return 7;},set(t,k,v){n++;return true;}});p[0]=3;p[0]===7&&a[0]===0&&n===2;",
++        "let b=new ArrayBuffer(8,{maxByteLength:16}),a=new Uint8Array(b,0,4);a[0]=1;b.resize(0);a[0]===undefined&&!(0 in a);",
++    ] {
++        check(source, true);
++        assert!(
++            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
++            "{source}"
++        );
++    }
++}
+diff --git a/crates/napi-vm-core/src/interpreter/call.rs b/crates/napi-vm-core/src/interpreter/call.rs
+index 87691c3..647aff7 100644
+--- a/crates/napi-vm-core/src/interpreter/call.rs
++++ b/crates/napi-vm-core/src/interpreter/call.rs
+@@ -1259,7 +1259,10 @@ impl Interpreter {
+         throw: bool,
+     ) -> Result<(), VmErr> {
+         let accepted = self.set_member_with_receiver(base, key, value, receiver)?;
+-        self.finish_property_write(accepted, &self.property_key(key)?, throw)
++        if accepted || !throw {
++            return Ok(());
++        }
++        self.finish_property_write(false, &self.property_key(key)?, true)
+     }
+ 
+     pub(crate) fn numeric_update(
+@@ -1556,8 +1559,63 @@ impl Interpreter {
+         value: Value,
+         receiver: &Value,
+     ) -> Result<bool, VmErr> {
++        if let (Value::TypedArray(view), Value::Number(index)) = (target, property)
++            && crate::interpreter::strict_equals(target, receiver)
++        {
++            if view.buffer.is_immutable() {
++                return Ok(false);
++            }
++            let index = if *index == 0.0 { 0.0 } else { *index };
++            crate::builtins::set_integer_index_in(self, view, index, &value)?;
++            return Ok(true);
++        }
+         let key = self.ecmascript_to_property_key(property)?;
+         let slot = self.property_key(&key)?;
++        // Plain objects with ordinary data slots can use their direct storage
++        // when the prototype chain cannot intercept a numeric assignment.
++        if let Value::Object { props } = target
++            && crate::interpreter::strict_equals(target, receiver)
++            && crate::value::array_index(&slot).is_some()
++            && !props.meta.borrow().module_namespace
++            && props.meta.borrow().boxed_primitive.is_none()
++            && !props.meta.borrow().may_have_accessor(&slot)
++        {
++            let own = props.own_index(&slot).is_some();
++            if own {
++                if !props.meta.borrow().attrs_of(&slot).writable {
++                    return Ok(false);
++                }
++                target.set_prop(slot.clone(), value)?;
++                props.meta.borrow_mut().set_explicit_data(&slot, true);
++                return Ok(true);
++            }
++            if props.meta.borrow().non_extensible {
++                return Ok(false);
++            }
++            let mut prototype = self.prototype_of(target);
++            let mut clear = false;
++            for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
++                let Some(current) = prototype else {
++                    clear = true;
++                    break;
++                };
++                let Value::Object { props } = current.as_ref() else {
++                    break;
++                };
++                if props.meta.borrow().module_namespace
++                    || props.meta.borrow().boxed_primitive.is_some()
++                    || props.own_index(&slot).is_some()
++                {
++                    break;
++                }
++                prototype = self.prototype_of(current.as_ref());
++            }
++            if clear {
++                target.set_prop(slot.clone(), value)?;
++                props.meta.borrow_mut().set_explicit_data(&slot, true);
++                return Ok(true);
++            }
++        }
+         // Dense array construction should not materialize descriptor objects
+         // for every element. Only bypass OrdinarySet when the receiver is the
+         // target and no inherited indexed property can intercept a new write.
+diff --git a/crates/napi-vm-core/src/interpreter/resolve.rs b/crates/napi-vm-core/src/interpreter/resolve.rs
+index d0f8566..f2084df 100644
+--- a/crates/napi-vm-core/src/interpreter/resolve.rs
++++ b/crates/napi-vm-core/src/interpreter/resolve.rs
+@@ -859,6 +859,17 @@ impl Interpreter {
+ 
+     /// Resolve a property value, invoking it if it is a getter.
+     pub(crate) fn get_prop_value(&mut self, o: &Value, p: &Value) -> Result<Value, VmErr> {
++        // A numeric key on an integer-indexed exotic bypasses ordinary
++        // property lookup; numeric -0 is converted to the property key "0".
++        if let (Value::TypedArray(view), Value::Number(index)) = (o, p) {
++            self.check_execution_interrupt()?;
++            let index = if *index == 0.0 { 0.0 } else { *index };
++            return Ok(if crate::builtins::valid_integer_index(view, index) {
++                crate::builtins::read_element(view, index as usize).unwrap_or(Value::Undefined)
++            } else {
++                Value::Undefined
++            });
++        }
+         // An own dense data element needs neither key stringification nor a
+         // prototype/accessor walk. Missing elements and exotic keys retain
+         // the observable general path; numeric -0 names index 0.
+diff --git a/crates/napi-vm-core/src/value.rs b/crates/napi-vm-core/src/value.rs
+index ae7cc21..950ca02 100644
+--- a/crates/napi-vm-core/src/value.rs
++++ b/crates/napi-vm-core/src/value.rs
+@@ -1040,6 +1040,7 @@ impl std::ops::Deref for ArrayCell {
+ pub struct ObjectCell {
+     pub(crate) weak: RefCell<weak::WeakStorage>,
+     slots: RefCell<Vec<(String, Value)>>,
++    index: RefCell<Option<std::collections::HashMap<String, usize>>>,
+     pub meta: RefCell<ObjectMeta>,
+     /// Cached canonical layout of the slot keys, built lazily on the
+     /// second indexed read (see `own_index`). A cache, never authority:
+@@ -1059,6 +1060,7 @@ impl ObjectCell {
+         Self {
+             weak: RefCell::new(weak::WeakStorage::None),
+             slots: RefCell::new(props),
++            index: RefCell::new(None),
+             meta: RefCell::new(ObjectMeta {
+                 proto,
+                 realm_global: crate::interpreter::realm::allocation_global(),
+@@ -1073,6 +1075,7 @@ impl ObjectCell {
+         Self {
+             weak: RefCell::new(weak::WeakStorage::None),
+             slots: RefCell::new(props),
++            index: RefCell::new(None),
+             meta: RefCell::new(ObjectMeta {
+                 uses_default_prototype: true,
+                 proto: crate::interpreter::realm::allocation_prototype("Object"),
+@@ -1094,8 +1097,15 @@ impl ObjectCell {
+         meta.uses_default_prototype = false;
+     }
+ 
++    /// Raw mutations invalidate the dictionary; maintained writes update it directly.
++    pub fn borrow_mut(&self) -> RefMut<'_, Vec<(String, Value)>> {
++        *self.index.borrow_mut() = None;
++        self.slots.borrow_mut()
++    }
++
+     /// Uncontended access to the slots.
+     pub fn slots_mut(&mut self) -> &mut Vec<(String, Value)> {
++        *self.index.get_mut() = None;
+         self.slots.get_mut()
+     }
+ 
+@@ -1170,6 +1180,7 @@ impl ObjectCell {
+             return false;
+         };
+         slots.clear();
++        *self.index.borrow_mut() = None;
+         if let Ok(mut weak) = self.weak.try_borrow_mut() {
+             *weak = weak::WeakStorage::None;
+         }
+@@ -1210,6 +1221,17 @@ impl ObjectCell {
+     /// foreign keys) never builds one either.
+     pub(crate) fn own_index(&self, key: &str) -> Option<usize> {
+         let slots = self.slots.borrow();
++        if slots.len() >= 64 {
++            let mut index = self.index.borrow_mut();
++            let dictionary = index.get_or_insert_with(|| {
++                let mut dictionary = std::collections::HashMap::with_capacity(slots.len());
++                for (position, (name, _)) in slots.iter().enumerate() {
++                    dictionary.entry(name.clone()).or_insert(position);
++                }
++                dictionary
++            });
++            return dictionary.get(key).copied();
++        }
+         let cached = self.shape.borrow().clone();
+         if let Some(shape) = &cached
+             && let Some(index) = shape.slot_of(key)
+@@ -1295,6 +1317,7 @@ impl ObjectCell {
+     /// the slots; until then the object behaves exactly as before shapes.
+     pub(crate) fn note_mutated(&self) {
+         *self.shape.borrow_mut() = None;
++        *self.index.borrow_mut() = None;
+     }
+ }
+ 
+@@ -1309,14 +1332,14 @@ fn set_cell_prop(props: &ObjectCell, key: String, val: Value) -> Result<(), VmEr
+     let writable = props.meta.borrow().attrs_of(&key).writable;
+     // Cold objects scan linearly without touching the shape machinery:
+     // writes never build layouts, only repeated reads do.
+-    let index = if props.has_shape() {
++    let index = if props.has_shape() || props.slots.borrow().len() >= 64 {
+         props.own_index(&key)
+     } else {
+         props.borrow().iter().position(|(name, _)| *name == key)
+     };
+     if let Some(index) = index {
+         if writable {
+-            let mut slots = props.borrow_mut();
++            let mut slots = props.slots.borrow_mut();
+             if props.meta.borrow().is_arguments
+                 && let Value::Binding(cell) = &slots[index].1
+             {
+@@ -1330,16 +1353,18 @@ fn set_cell_prop(props: &ObjectCell, key: String, val: Value) -> Result<(), VmEr
+     if props.meta.borrow().non_extensible {
+         return Ok(());
+     }
+-    let mut slots = props.borrow_mut();
++    let mut slots = props.slots.borrow_mut();
+     if slots.len() >= MAX_OBJECT_PROPS {
+         return Err(limit_err("Maximum object property count exceeded"));
+     }
++    let index = slots.len();
++    slots.push((key.clone(), val));
++    drop(slots);
++    if let Some(dictionary) = props.index.borrow_mut().as_mut() {
++        dictionary.insert(key.clone(), index);
++    }
+     if props.has_shape() {
+-        slots.push((key.clone(), val));
+-        drop(slots);
+         props.note_key_added(&key);
+-    } else {
+-        slots.push((key, val));
+     }
+     Ok(())
+ }
