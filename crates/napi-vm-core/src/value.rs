@@ -42,7 +42,7 @@ pub const MAX_GLOBAL_BINDINGS: usize = MAX_OBJECT_PROPS;
 
 /// Hard cap (bytes) on any string the VM produces — concatenation, `repeat`,
 /// `join`, `replaceAll`, `JSON.stringify`. Same rationale as `MAX_ARRAY_LEN`.
-pub const MAX_STRING_LEN: usize = 16 * 1024 * 1024;
+pub const MAX_STRING_LEN: usize = 64 * 1024 * 1024;
 
 /// Maximum prototype links followed by a property lookup. Prototype chains
 /// are guest-controlled and must not be allowed to consume the native stack

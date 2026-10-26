@@ -84,6 +84,11 @@ passes **838 / 838** focused variants, gaining both NUL-option variants with
 zero losses. All 415 core tests and the standard timing slice pass. The gains
 need confirmation in another complete run.
 
+The [large-string follow-up](../tools/test262/evidence/string-cap-2026-10-26/)
+passes **3,663 / 3,663** focused variants, gaining six Unicode escape variants
+with zero losses. All 415 core tests and the standard timing slice pass. The
+string limit now accommodates the 16 MiB-plus test inputs within a bounded cap.
+
 ## Ordered execution
 
 1. **Confirm decorator gains in a full run.** Class, method, getter/setter,
@@ -97,9 +102,9 @@ need confirmation in another complete run.
    argument-shadowing, labeled declarations, and redeclaration ordering. Four
    legacy Date variants need two-digit-year heuristics, written months, compact
    timezone offsets, and strict ISO rejection. Ten resource-limit variants
-   need legitimate large strings and a flat JSON array with 2^21 + 1 entries.
-   The 20 MiB DataView buffer now passes in a focused run after separating
-   byte and dense-array limits; confirm it in the next complete run. Array ToLength (two), object primitive conversion (one), and legacy NUL
+   need a flat JSON array with 2^21 + 1 entries. Six large-string variants and
+   the 20 MiB DataView buffer now pass in focused runs after adjusting bounded
+   storage limits; confirm them in the next complete run. Array ToLength (two), object primitive conversion (one), and legacy NUL
    option validation (two) now pass in focused runs and require full-run
    confirmation. Each cause needs its neighboring comparison.
 

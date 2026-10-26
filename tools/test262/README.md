@@ -99,6 +99,10 @@ The [hour-cycle follow-up](evidence/intl-hour-cycle-2026-10-26/) passes
 **838 / 838** focused variants, gaining both NUL-option variants with zero
 losses. All 415 core tests and the standard timing slice pass.
 
+The [large-string follow-up](evidence/string-cap-2026-10-26/) passes
+**3,663 / 3,663** focused variants, gaining six Unicode escape variants with
+zero losses. All 415 core tests and the standard timing slice pass.
+
 ## Historical measurements
 
 The preceding completed full pinned Test262 run (archived 2026-10-20, corpus
