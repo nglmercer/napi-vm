@@ -693,6 +693,7 @@ struct JsonParser<'a> {
     /// nested document errors out instead of overflowing the native stack.
     depth: usize,
     record_source: bool,
+    remaining_elements: usize,
     path: Vec<String>,
     records: JsonSourceRecords,
     original_source: Option<(crate::JsString, Vec<(usize, usize)>)>,
@@ -705,6 +706,7 @@ impl<'a> JsonParser<'a> {
             pos: 0,
             depth: 0,
             record_source: false,
+            remaining_elements: 4 * 1024 * 1024,
             path: Vec::new(),
             records: JsonSourceRecords::new(),
             original_source: None,
@@ -932,21 +934,28 @@ impl<'a> JsonParser<'a> {
         self.skip_ws();
         if self.peek() == Some(b']') {
             self.pos += 1;
-            return Value::checked_array(items);
+            return Ok(Value::array(items));
         }
         loop {
-            if items.len() >= crate::value::MAX_ARRAY_LEN {
-                return Err(crate::value::limit_err("Maximum array length exceeded"));
+            if self.remaining_elements == 0 {
+                return Err(crate::value::limit_err(
+                    "Maximum JSON array elements exceeded",
+                ));
             }
-            self.path.push(items.len().to_string());
+            self.remaining_elements -= 1;
+            if self.record_source {
+                self.path.push(items.len().to_string());
+            }
             items.push(self.value()?);
-            self.path.pop();
+            if self.record_source {
+                self.path.pop();
+            }
             self.skip_ws();
             match self.peek() {
                 Some(b',') => self.pos += 1,
                 Some(b']') => {
                     self.pos += 1;
-                    return Value::checked_array(items);
+                    return Ok(Value::array(items));
                 }
                 _ => return vm_err("SyntaxError: Invalid JSON"),
             }

@@ -103,6 +103,10 @@ The [large-string follow-up](evidence/string-cap-2026-10-26/) passes
 **3,663 / 3,663** focused variants, gaining six Unicode escape variants with
 zero losses. All 415 core tests and the standard timing slice pass.
 
+The [large JSON follow-up](evidence/large-json-2026-10-26/) passes
+**13,661 / 13,661** focused variants, gaining both large-array variants with
+zero losses. All 416 core tests and the standard timing slice pass.
+
 ## Historical measurements
 
 The preceding completed full pinned Test262 run (archived 2026-10-20, corpus

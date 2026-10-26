@@ -656,6 +656,10 @@ impl ArrayCell {
                 .retain(|(key, _)| array_index(key).is_none_or(|index| index < length));
         }
         if length > MAX_ARRAY_LEN {
+            if length < old_length {
+                self.elements.borrow_mut().truncate(length);
+                self.truncate_presence(length);
+            }
             *self.length_override.borrow_mut() = Some(length);
             return;
         }
@@ -694,7 +698,7 @@ impl ArrayCell {
 
     /// Read an own indexed slot from dense or sparse storage.
     pub fn index_value(&self, index: usize) -> Option<Value> {
-        if index >= MAX_ARRAY_LEN {
+        if index >= self.elements.borrow().len() && index >= MAX_ARRAY_LEN {
             return self.named_prop(&index.to_string());
         }
         self.has_index(index)
@@ -704,7 +708,7 @@ impl ArrayCell {
 
     /// Store a canonical array index without allocating intervening holes.
     pub fn store_index(&self, index: usize, value: Value) {
-        if index >= MAX_ARRAY_LEN {
+        if index >= MAX_ARRAY_LEN && index >= self.elements.borrow().len() {
             self.set_named(index.to_string(), value);
             let length = self.array_length().max(index + 1);
             *self.length_override.borrow_mut() = Some(length);
@@ -729,7 +733,7 @@ impl ArrayCell {
     }
 
     pub fn has_index(&self, index: usize) -> bool {
-        if index >= MAX_ARRAY_LEN {
+        if index >= MAX_ARRAY_LEN && index >= self.elements.borrow().len() {
             return self.named_prop(&index.to_string()).is_some();
         }
         let elements = self.elements.borrow();
@@ -745,7 +749,7 @@ impl ArrayCell {
     }
 
     pub fn set_index_presence(&self, index: usize, present: bool) {
-        if index >= MAX_ARRAY_LEN {
+        if index >= MAX_ARRAY_LEN && index >= self.elements.borrow().len() {
             if !present {
                 let key = index.to_string();
                 self.named.borrow_mut().retain(|(name, _)| name != &key);

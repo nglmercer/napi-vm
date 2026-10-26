@@ -2372,3 +2372,18 @@ fn date_time_format_validates_hour_cycle_before_use() {
         );
     }
 }
+
+#[test]
+fn large_json_arrays_preserve_index_storage_and_truncation() {
+    for source in [
+        "let a=JSON.parse('['+'0,'.repeat(262146)+'1]');let before=a.length===262147&&a[262146]===1&&262146 in a; a[262146]=9;delete a[262145];before&&a[262146]===9&&!(262145 in a)&&Object.getOwnPropertyDescriptor(a,'262146').value===9;",
+        "let a=JSON.parse('['+'0,'.repeat(262148)+'1]');a.length=262146;let first=a.length===262146&&a[262145]===0&&!(262146 in a);a.length=262149;first&&a[262148]===undefined&&!(262148 in a);",
+        "let a=JSON.parse('['+'0,'.repeat(262146)+'1]');a[262147]=3; a.length===262148&&a[262146]===1&&a[262147]===3;",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}

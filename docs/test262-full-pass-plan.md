@@ -89,6 +89,11 @@ passes **3,663 / 3,663** focused variants, gaining six Unicode escape variants
 with zero losses. All 415 core tests and the standard timing slice pass. The
 string limit now accommodates the 16 MiB-plus test inputs within a bounded cap.
 
+The [large JSON follow-up](../tools/test262/evidence/large-json-2026-10-26/)
+passes **13,661 / 13,661** focused variants, gaining both large-array variants
+with zero losses. All 416 core tests and the standard timing slice pass. JSON
+uses a bounded total element budget while retaining sparse array growth.
+
 ## Ordered execution
 
 1. **Confirm decorator gains in a full run.** Class, method, getter/setter,
@@ -101,10 +106,9 @@ string limit now accommodates the 16 MiB-plus test inputs within a bounded cap.
 2. **Close the other runtime causes.** Four Annex B declaration variants need
    argument-shadowing, labeled declarations, and redeclaration ordering. Four
    legacy Date variants need two-digit-year heuristics, written months, compact
-   timezone offsets, and strict ISO rejection. Ten resource-limit variants
-   need a flat JSON array with 2^21 + 1 entries. Six large-string variants and
-   the 20 MiB DataView buffer now pass in focused runs after adjusting bounded
-   storage limits; confirm them in the next complete run. Array ToLength (two), object primitive conversion (one), and legacy NUL
+   timezone offsets, and strict ISO rejection. The ten resource-limit variants now pass focused runs: six large-string,
+   two DataView, and two large JSON-array variants. Confirm them in the next
+   complete run. Array ToLength (two), object primitive conversion (one), and legacy NUL
    option validation (two) now pass in focused runs and require full-run
    confirmation. Each cause needs its neighboring comparison.
 
