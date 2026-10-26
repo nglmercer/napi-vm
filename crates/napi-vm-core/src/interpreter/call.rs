@@ -113,6 +113,14 @@ fn array_property_setter(
     if array.meta.borrow().is_explicit_data(key) {
         return None;
     }
+    if let Some(kind) = array.meta.borrow().explicit_accessor_kind(key) {
+        return match kind {
+            "get" => array.named_prop(&format!("__setter:{key}__")),
+            "set" => current.cloned(),
+            _ => None,
+        };
+    }
+
     if let Some(current) = current.filter(|value| is_setter_value(value)) {
         return Some(current.clone());
     }
@@ -1141,7 +1149,7 @@ impl Interpreter {
                     });
                     items.forget_symbol_key(&property);
                 }
-                items.meta.borrow_mut().set_explicit_data(&property, false);
+                items.meta.borrow_mut().forget(&property);
                 Ok(Value::Bool(true))
             }
             Value::String(string) => {
@@ -1486,7 +1494,28 @@ impl Interpreter {
                 }
                 _ => return Ok(None),
             };
+            let explicit = match &current {
+                Value::Array(array) => array.meta.borrow().explicit_accessor_kind(key),
+                _ => current
+                    .property_cell()
+                    .and_then(|cell| cell.meta.borrow().explicit_accessor_kind(key)),
+            };
             if let Some((_, property)) = slots.iter().find(|(name, _)| name == key) {
+                if let Some(kind) = explicit {
+                    let setter = match kind {
+                        "set" => Some(property.clone()),
+                        "get" => slots
+                            .iter()
+                            .find(|(name, _)| name == &format!("__setter:{key}__"))
+                            .map(|(_, value)| value.clone()),
+                        _ => None,
+                    };
+                    if let Some(setter) = setter {
+                        self.call_this(&setter, receiver.clone(), vec![value.clone()])?;
+                        return Ok(Some(true));
+                    }
+                    return Ok(Some(false));
+                }
                 let companion = format!("__setter:{}__", key);
                 let paired_setter = has_accessors.then(|| {
                     slots

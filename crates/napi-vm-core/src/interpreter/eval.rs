@@ -1245,6 +1245,7 @@ impl Interpreter {
                     }
                 }
                 ClassMember::Getter {
+                    decorators: _,
                     source_text: _,
                     name,
                     is_static: st,
@@ -1297,7 +1298,7 @@ impl Interpreter {
                             private: matches!(name, MemberName::Private(_)),
                             is_static: *st,
                             value: getter_fn.clone(),
-                            decorators: Vec::new(),
+                            decorators: member_decorators,
                         });
                     }
 
@@ -1328,6 +1329,7 @@ impl Interpreter {
                     }
                 }
                 ClassMember::Setter {
+                    decorators: _,
                     source_text: _,
                     name,
                     param,
@@ -1381,7 +1383,7 @@ impl Interpreter {
                             private: matches!(name, MemberName::Private(_)),
                             is_static: *st,
                             value: setter_fn.clone(),
-                            decorators: Vec::new(),
+                            decorators: member_decorators,
                         });
                     }
 

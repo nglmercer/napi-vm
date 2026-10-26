@@ -36,7 +36,10 @@ impl Statement {
 impl ClassMember {
     pub(crate) fn decorators(&self) -> &[Expr] {
         match self {
-            Self::Method { decorators, .. } | Self::Field { decorators, .. } => decorators,
+            Self::Method { decorators, .. }
+            | Self::Field { decorators, .. }
+            | Self::Getter { decorators, .. }
+            | Self::Setter { decorators, .. } => decorators,
             _ => &[],
         }
     }
@@ -599,12 +602,14 @@ pub enum ClassMember {
     /// are installed, with `this` bound to the class.
     StaticBlock { body: Vec<Statement> },
     Getter {
+        decorators: Vec<Expr>,
         source_text: Option<SourceTextRef>,
         name: MemberName,
         is_static: bool,
         body: Vec<Statement>,
     },
     Setter {
+        decorators: Vec<Expr>,
         source_text: Option<SourceTextRef>,
         name: MemberName,
         param: String,

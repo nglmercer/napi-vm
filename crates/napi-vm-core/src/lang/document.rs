@@ -1212,6 +1212,7 @@ impl Builder<'_> {
                     name: MemberName::Static(field_name) | MemberName::Private(field_name),
                     is_static,
                     body,
+                    ..
                 } if !is_static => {
                     fields.insert(field_name.clone(), self.function_result(&[], body, outer));
                 }
@@ -1221,6 +1222,7 @@ impl Builder<'_> {
                     is_static,
                     param,
                     body,
+                    ..
                 } if !is_static => {
                     fields.insert(
                         field_name.clone(),

@@ -1,0 +1,18 @@
+{
+  "scope": "Worker probe; not corpus conformance",
+  "source_commit": "bd723f7d784d20ef9c35aeac7b2676c8abce4070",
+  "engine_sha256": "7d881d2b6d00a5c6a34f4e31d3ef5822342d647aea45125a87aa08b0989c0faa",
+  "request": {
+    "source": "var get=new Proxy(function original(){return this.y;},{});var o={y:3};Object.defineProperty(o,'x',{get:get,configurable:true});if(o.x!==3||Object.getOwnPropertyDescriptor(o,'x').get!==get)throw Error('accessor identity');",
+    "harness": "",
+    "module": false,
+    "asynchronous": false
+  },
+  "expected_status": "ok",
+  "actual": {
+    "status": "error",
+    "phase": "runtime",
+    "error_type": "TypeError",
+    "message": "TypeError: Property descriptor accessor must be callable"
+  }
+}

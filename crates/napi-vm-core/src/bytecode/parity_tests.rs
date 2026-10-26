@@ -2194,3 +2194,52 @@ fn array_data_descriptor_tags_survive_writes_and_clear_on_deletion_or_truncation
         );
     }
 }
+
+#[test]
+fn explicit_accessors_preserve_arbitrary_callable_identity_and_receiver() {
+    for source in [
+        "function read(){return this.y;}function write(v){this.y=v;}var pg=new Proxy(read,{}),ps=new Proxy(write,{});var p={};Object.defineProperty(p,'x',{get:pg,set:ps,configurable:true});var o=Object.create(p);o.x=4;var d=Object.getOwnPropertyDescriptor(p,'x');o.x===4&&d.get===pg&&d.set===ps&&read.name==='read'&&write.name==='write'&&Reflect.get(p,'x',{y:5})===5;",
+        "function read(){return 3;}var o={};Object.defineProperty(o,'x',{get:read,configurable:true});o.x===3&&read.name==='read'&&Object.getOwnPropertyDescriptor(o,'x').get===read;",
+        "class C{}var o={};Object.defineProperty(o,'x',{get:C,configurable:true});var ok=false;try{o.x;}catch(e){ok=e instanceof TypeError;}ok&&Object.getOwnPropertyDescriptor(o,'x').get===C;",
+        "var o={};Object.defineProperty(o,'x',{get:String,configurable:true});o.x===''&&Object.getOwnPropertyDescriptor(o,'x').get===String;",
+        "var key=Symbol('x');function read(){return this.y;}function write(v){this.y=v;}var o=[];var g=new Proxy(read,{}),s=new Proxy(write,{});Object.defineProperty(o,key,{get:g,set:s,configurable:true});o[key]=6;var d=Object.getOwnPropertyDescriptor(o,key);o[key]===6&&d.get===g&&d.set===s;",
+        "var o=[];var g=new Proxy(function read(){return 7;},{});Object.defineProperty(o,'0',{get:g,configurable:true});var before=o[0];o.length=0;o[0]=4;var d=Object.getOwnPropertyDescriptor(o,'0');before===7&&o[0]===4&&d.value===4&&d.writable&&d.configurable&&d.enumerable;",
+        "var g=new Proxy(function read(){return 7;},{});var o=[];Object.defineProperty(o,'0',{get:g,configurable:true});delete o[0];o[0]=4;var d=Object.getOwnPropertyDescriptor(o,'0');o[0]===4&&d.value===4&&d.writable;",
+        "var o={};var g=new Proxy(function read(){return 7;},{});Object.defineProperty(o,'x',{get:g});Object.defineProperty(o,'x',{get:g});o.x===7&&Object.getOwnPropertyDescriptor(o,'x').get===g;",
+        "var y=0;var o=[];var s=new Proxy(function write(v){y=v;},{});Object.defineProperty(o,'0',{set:s,configurable:true});o[0]=4;o[0]===undefined&&y===4&&Object.getOwnPropertyDescriptor(o,'0').set===s;",
+        "var g=Proxy.revocable(function read(){return 7;},{});var o={};Object.defineProperty(o,'x',{get:g.proxy});g.revoke();var ok=false;try{o.x;}catch(e){ok=e instanceof TypeError;}ok&&Object.getOwnPropertyDescriptor(o,'x').get===g.proxy;",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn getter_setter_decorators_preserve_pairs_private_brands_and_initializer_order() {
+    for source in [
+        "var g,s;function dg(f,c){if(c.kind!=='getter'||'set' in c.access)throw 42;g=function read(){return f.call(this)+1;};return g;}function ds(f,c){if(c.kind!=='setter'||'get' in c.access)throw 42;s=function write(v){f.call(this,v*2);};return s;}class C{v=1;@dg get x(){return this.v;}@ds set x(v){this.v=v;}}var c=new C();c.x=3;var d=Object.getOwnPropertyDescriptor(C.prototype,'x');c.x===7&&d.get===g&&d.set===s&&g.name==='read'&&s.name==='write';",
+        "function dg(f){return new Proxy(f,{apply(t,r,a){return Reflect.apply(t,r,a)+2;}});}function ds(f){return new Proxy(f,{apply(t,r,a){return Reflect.apply(t,r,[a[0]+1]);}});}class C{v=1;@dg get x(){return this.v;}@ds set x(v){this.v=v;}}var c=new C();c.x=3;c.x===6;",
+        "var getAccess,setAccess;function dg(f,c){if(!c.private||c.name!=='#x')throw 42;getAccess=c.access;return function(){return f.call(this)+1;};}function ds(f,c){setAccess=c.access;return function(v){f.call(this,v+2);};}class C{#v=1;@dg get #x(){return this.#v;}@ds set #x(v){this.#v=v;}}var c=new C();setAccess.set(c,3);var bad=0;try{getAccess.get({});}catch(e){if(e instanceof TypeError)bad++;}getAccess.get(c)===6&&getAccess.has(c)&&!getAccess.has(new Proxy(c,{}))&&bad===1;",
+        "function dg(f){return function(){return f.call(this)+1;};}class C{#v=2;@dg get #x(){return this.#v;}set #x(v){this.#v=v;}use(){this.#x=4;return this.#x;}}new C().use()===5;",
+        "function ds(f){return function(v){f.call(this,v+1);};}class C{#v=2;get #x(){return this.#v;}@ds set #x(v){this.#v=v;}use(){this.#x=4;return this.#x;}}new C().use()===5;",
+        "var ga,sa;function dg(f,c){if(!c.static||!c.private)throw 42;ga=c.access;return function(){return f.call(this)+1;};}function ds(f,c){sa=c.access;return function(v){f.call(this,v+2);};}class C{static #v=1;@dg static get #x(){return this.#v;}@ds static set #x(v){this.#v=v;}}sa.set(C,3);ga.get(C)===6&&ga.has(C);",
+        "var log='';function d(f,c){log+='d'+c.kind;c.addInitializer(function(){log+='i'+c.kind;});}class C{@d get x(){return 1;}@d set x(v){}y=(log+='f',2);}new C();log==='dgetterdsetterigetterisetterf';",
+        "var log='';function cls(C){log+='c';}function d(f,c){c.addInitializer(function(){log+='i';});}@cls class C{@d static get x(){return 1;}static y=(log+='f',2);}log==='cif';",
+        "var symbol=Symbol('x'),access;function d(f,c){if(c.name!==symbol)throw 42;access=c.access;return function(){return 4;};}class C{@d get [symbol](){return 1;}}var c=new C();access.has(c)&&access.get(c)===4&&c[symbol]===4;",
+        "function d(f){return function(){return 4;};}class C{@d get x(){return 1;}x(){return 2;}}new C().x()===2;",
+        "function d(f){return function(){return 4;};}class C{x(){return 2;}@d get x(){return 1;}}new C().x===4;",
+        "function d(f){return function(){return 4;};}class C{@d get x(){return 1;}accessor x=3;}new C().x===3;",
+        "var saved;function d(f,c){saved=c.addInitializer;}class C{@d get x(){return 1;}}var ok=false;try{saved(function(){});}catch(e){ok=e instanceof TypeError;}ok;",
+        "function d(){return 1;}var ok=false;try{var C=class{@d get x(){return 1;}};}catch(e){ok=e instanceof TypeError;}ok;",
+        "function d(){return undefined;}class C{@d get x(){return 1;}}var c=new C();!Reflect.set(c,'x',2)&&c.x===1;",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}

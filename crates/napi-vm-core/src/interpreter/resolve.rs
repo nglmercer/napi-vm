@@ -1001,6 +1001,23 @@ impl Interpreter {
             }
         }
         let v = self.prop(o, p)?;
+        let has_explicit = match o {
+            Value::Array(array) => !array.meta.borrow().accessor_kinds.is_empty(),
+            _ => o
+                .property_cell()
+                .is_some_and(|cell| !cell.meta.borrow().accessor_kinds.is_empty()),
+        };
+        if has_explicit {
+            let key = self.property_key(p)?;
+            if let Some(kind) = self.own_explicit_accessor_kind(o, &key) {
+                return if kind == "get" {
+                    self.call_this(&v, receiver.clone(), vec![])
+                } else {
+                    Ok(Value::Undefined)
+                };
+            }
+        }
+
         // Accessors are represented by specially named functions. Most
         // property reads return ordinary methods or data, so avoid converting
         // the key and allocating both candidate names on that hot path.
@@ -1059,6 +1076,19 @@ impl Interpreter {
             return Ok(Value::Undefined);
         }
         Ok(v)
+    }
+
+    fn own_explicit_accessor_kind(&self, object: &Value, key: &str) -> Option<&'static str> {
+        match object {
+            Value::Array(array) => array.meta.borrow().explicit_accessor_kind(key),
+            _ => object.property_cell().and_then(|cell| {
+                if cell.own_index(key).is_some() {
+                    cell.meta.borrow().explicit_accessor_kind(key)
+                } else {
+                    None
+                }
+            }),
+        }
     }
 
     /// Borrowed-key variant of [`get_prop_value`](Self::get_prop_value).
@@ -1178,6 +1208,14 @@ impl Interpreter {
             }
         }
         let v = self.prop_str(o, key)?;
+        if let Some(kind) = self.own_explicit_accessor_kind(o, key) {
+            return if kind == "get" {
+                self.call_this(&v, receiver.clone(), vec![])
+            } else {
+                Ok(Value::Undefined)
+            };
+        }
+
         if let Value::Array(array) = o
             && array.meta.borrow().is_explicit_data(key)
         {

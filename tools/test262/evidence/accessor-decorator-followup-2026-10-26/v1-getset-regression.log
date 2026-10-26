@@ -1,0 +1,18 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running unittests src/lib.rs (target/debug/deps/napi_vm_core-19729054f91d83f3)
+
+running 1 test
+
+thread 'bytecode::parity_tests::getter_setter_decorators_preserve_pairs_private_brands_and_initializer_order' (82707) panicked at crates/napi-vm-core/src/bytecode/parity_tests.rs:2240:9:
+var g,s;function dg(f,c){if(c.kind!=='getter'||'set' in c.access)throw 42;g=function read(){return f.call(this)+1;};return g;}function ds(f,c){if(c.kind!=='setter'||'get' in c.access)throw 42;s=function write(v){f.call(this,v*2);};return s;}class C{v=1;@dg get x(){return this.v;}@ds set x(v){this.v=v;}}var c=new C();c.x=3;var d=Object.getOwnPropertyDescriptor(C.prototype,'x');c.x===7&&d.get===g&&d.set===s&&g.name==='read'&&s.name==='write';
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test bytecode::parity_tests::getter_setter_decorators_preserve_pairs_private_brands_and_initializer_order ... FAILED
+
+failures:
+
+failures:
+    bytecode::parity_tests::getter_setter_decorators_preserve_pairs_private_brands_and_initializer_order
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 406 filtered out; finished in 0.07s
+
+error: test failed, to rerun pass `-p napi-vm-core --lib`

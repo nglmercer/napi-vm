@@ -2222,6 +2222,7 @@ impl<'a> Compiler<'a> {
                     }
                 }
                 ClassMember::Getter {
+                    decorators: _,
                     source_text: _,
                     name: member_name,
                     is_static: st,
@@ -2253,7 +2254,7 @@ impl<'a> Compiler<'a> {
                         },
                     ));
                     members.push(ClassMemberTemplate {
-                        decorators: Vec::new(),
+                        decorators: member_decorators,
                         auto_accessor_storage: None,
                         kind: ClassMemberKind::Getter,
                         is_static: *st,
@@ -2262,6 +2263,7 @@ impl<'a> Compiler<'a> {
                     });
                 }
                 ClassMember::Setter {
+                    decorators: _,
                     source_text: _,
                     name: member_name,
                     param,
@@ -2294,7 +2296,7 @@ impl<'a> Compiler<'a> {
                         },
                     ));
                     members.push(ClassMemberTemplate {
-                        decorators: Vec::new(),
+                        decorators: member_decorators,
                         auto_accessor_storage: None,
                         kind: ClassMemberKind::Setter,
                         is_static: *st,

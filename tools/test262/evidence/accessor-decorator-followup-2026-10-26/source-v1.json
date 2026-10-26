@@ -1,0 +1,7 @@
+{
+  "source_commit": "bd723f7d784d20ef9c35aeac7b2676c8abce4070",
+  "source_status": "uncommitted snapshot",
+  "source_diff_sha256": "9bcd94297ac8d28dd68e8d07076b162851d3451f8e50ab1f0ca9d93b5ef2ce28",
+  "engine_built": false,
+  "regression": "Canonical primary-getter classification lost its companion setter in descriptor reflection"
+}

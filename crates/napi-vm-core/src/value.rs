@@ -230,6 +230,8 @@ pub struct ObjectMeta {
     pub has_accessors: bool,
     /// Explicit data descriptors override the legacy callable-name encoding.
     pub(crate) data_property_keys: std::collections::HashSet<String>,
+    /// Canonical accessor slot kinds, independent of callable names or types.
+    pub(crate) accessor_kinds: std::collections::HashMap<String, &'static str>,
     pub(crate) legacy_call_accessors: bool,
     /// Accessor slots with neither a callable getter nor a callable setter.
     pub(crate) empty_accessors: Vec<String>,
@@ -365,12 +367,23 @@ impl ObjectMeta {
         (self.has_accessors || self.legacy_call_accessors && matches!(key, "caller" | "arguments"))
             && !self.is_explicit_data(key)
     }
+    pub(crate) fn explicit_accessor_kind(&self, key: &str) -> Option<&'static str> {
+        self.accessor_kinds.get(key).copied()
+    }
+    pub(crate) fn set_explicit_accessor_kind(&mut self, key: &str, kind: Option<&'static str>) {
+        if let Some(kind) = kind {
+            self.accessor_kinds.insert(key.to_owned(), kind);
+        } else {
+            self.accessor_kinds.remove(key);
+        }
+    }
     pub(crate) fn is_explicit_data(&self, key: &str) -> bool {
         self.data_property_keys.contains(key)
     }
     pub(crate) fn set_explicit_data(&mut self, key: &str, data: bool) {
         if data {
             self.data_property_keys.insert(key.to_owned());
+            self.accessor_kinds.remove(key);
         } else {
             self.data_property_keys.remove(key);
         }
@@ -425,6 +438,7 @@ impl ObjectMeta {
     }
 
     pub fn forget(&mut self, key: &str) {
+        self.accessor_kinds.remove(key);
         self.set_explicit_data(key, false);
         self.set_empty_accessor(key, false);
         self.attrs.retain(|(k, _)| k != key);
@@ -619,6 +633,21 @@ impl ArrayCell {
                     .data_property_keys
                     .retain(|key| array_index(key).is_none_or(|index| index < length));
             }
+            if old_length - length < metadata.accessor_kinds.len() {
+                for index in length..old_length {
+                    metadata.accessor_kinds.remove(&index.to_string());
+                }
+            } else {
+                metadata
+                    .accessor_kinds
+                    .retain(|key, _| array_index(key).is_none_or(|index| index < length));
+            }
+            metadata
+                .empty_accessors
+                .retain(|key| array_index(key).is_none_or(|index| index < length));
+            metadata
+                .attrs
+                .retain(|(key, _)| array_index(key).is_none_or(|index| index < length));
         }
         if length > MAX_ARRAY_LEN {
             *self.length_override.borrow_mut() = Some(length);

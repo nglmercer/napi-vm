@@ -294,7 +294,11 @@ impl Interpreter {
                 for (decorator, receiver) in record.decorators.iter().rev() {
                     let (context, state) = self.element_decorator_context(
                         scope,
-                        "method",
+                        match record.kind {
+                            ClassMethodKind::Method => "method",
+                            ClassMethodKind::Getter => "getter",
+                            ClassMethodKind::Setter => "setter",
+                        },
                         &record.key,
                         record.private,
                         is_static,
@@ -322,23 +326,41 @@ impl Interpreter {
         // an earlier overwritten method was decorated for its side effects.
         for record in records {
             if record.private {
-                if record.kind == ClassMethodKind::Method {
-                    let key = self.property_key(&record.key)?;
-                    let id = scope
-                        .borrow()
-                        .private_name(&key)
-                        .expect("declared private method");
-                    if record.is_static {
-                        let (_, element) = private_statics
-                            .iter_mut()
-                            .find(|(candidate, _)| *candidate == id)
-                            .expect("defined private method");
-                        *element = PrivateElement::Method(record.value.clone());
-                    } else {
-                        scope
-                            .borrow_mut()
-                            .replace_private_instance_method(id, record.value.clone());
+                let key = self.property_key(&record.key)?;
+                let id = scope
+                    .borrow()
+                    .private_name(&key)
+                    .expect("declared private member");
+                if record.is_static {
+                    let (_, element) = private_statics
+                        .iter_mut()
+                        .find(|(candidate, _)| *candidate == id)
+                        .expect("defined private member");
+                    match record.kind {
+                        ClassMethodKind::Method => {
+                            *element = PrivateElement::Method(record.value.clone())
+                        }
+                        ClassMethodKind::Getter | ClassMethodKind::Setter => {
+                            let PrivateElement::Accessor { get, set } = element else {
+                                unreachable!("private accessor kind");
+                            };
+                            if record.kind == ClassMethodKind::Getter {
+                                *get = Some(record.value.clone());
+                            } else {
+                                *set = Some(record.value.clone());
+                            }
+                        }
                     }
+                } else if record.kind == ClassMethodKind::Method {
+                    scope
+                        .borrow_mut()
+                        .replace_private_instance_method(id, record.value.clone());
+                } else {
+                    scope.borrow_mut().replace_private_instance_accessor(
+                        id,
+                        record.kind == ClassMethodKind::Setter,
+                        record.value.clone(),
+                    );
                 }
                 continue;
             }

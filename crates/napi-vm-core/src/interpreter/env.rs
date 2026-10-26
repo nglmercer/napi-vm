@@ -412,6 +412,30 @@ impl Environment {
         *element = PrivateElement::Method(value);
     }
 
+    pub(crate) fn replace_private_instance_accessor(
+        &mut self,
+        id: u64,
+        setter: bool,
+        value: Value,
+    ) {
+        let (_, element) = self
+            .private_instance_elements
+            .as_mut()
+            .expect("class private environment")
+            .iter_mut()
+            .find(|(candidate, _)| *candidate == id)
+            .expect("defined private accessor");
+        if let PrivateElement::Accessor { get, set } = element {
+            if setter {
+                *set = Some(value);
+            } else {
+                *get = Some(value);
+            }
+        } else {
+            unreachable!("private accessor kind");
+        }
+    }
+
     pub(crate) fn private_instance_elements(&self) -> Vec<(u64, PrivateElement)> {
         self.private_instance_elements.clone().unwrap_or_else(|| {
             self.parent.as_ref().map_or_else(Vec::new, |parent| {

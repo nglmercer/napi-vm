@@ -304,21 +304,17 @@ impl Parser {
                 self.check_parameters(&p, &defaults, &bd, true);
                 let body = Self::function_body(&p, defaults, bd);
                 if is_getter {
-                    if !member_decorators.is_empty() {
-                        self.record_error("getter decorators are not implemented".into());
-                    }
                     b.push(ClassMember::Getter {
+                        decorators: member_decorators,
                         source_text: self.source_since(member_start),
                         name: mn,
                         is_static: st,
                         body,
                     });
                 } else if is_setter {
-                    if !member_decorators.is_empty() {
-                        self.record_error("setter decorators are not implemented".into());
-                    }
                     let param = p.first().cloned().unwrap_or_default();
                     b.push(ClassMember::Setter {
+                        decorators: member_decorators,
                         source_text: self.source_since(member_start),
                         name: mn,
                         param,

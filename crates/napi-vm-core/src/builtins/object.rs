@@ -442,6 +442,13 @@ fn accessor_kind_for(target: &Value, key: &str, value: &Value) -> Option<&'stati
     if data {
         return None;
     }
+    let kind = match target {
+        Value::Array(array) => array.meta.borrow().explicit_accessor_kind(key),
+        _ => cell(target).and_then(|props| props.meta.borrow().explicit_accessor_kind(key)),
+    };
+    if kind.is_some() {
+        return kind;
+    }
 
     let empty = match target {
         Value::Array(array) => array.meta.borrow().is_empty_accessor(key),
@@ -474,10 +481,7 @@ fn accessor_kind_with_symbol(
 }
 
 fn is_callable(value: &Value) -> bool {
-    matches!(
-        value,
-        Value::Function(_) | Value::NativeFunction { .. } | Value::HostFunction { .. }
-    )
+    crate::interpreter::is_callable_value(value)
 }
 
 fn name_callable(value: &Value, name: &str) -> Option<Value> {
@@ -1522,6 +1526,7 @@ fn define_ordinary_property(target: &Value, key: &str, descriptor: &Value) -> Re
     // Converting an accessor back to data drops the setter companion slot.
     let mut drop_companion = false;
     let mut empty_accessor = false;
+    let mut primary_kind = None;
     if new_is_accessor {
         for accessor in [getter.as_ref(), setter.as_ref()].into_iter().flatten() {
             if !matches!(accessor, Value::Undefined) && !is_callable(accessor) {
@@ -1543,19 +1548,20 @@ fn define_ordinary_property(target: &Value, key: &str, descriptor: &Value) -> Re
         // inherits the current accessor.
         let getter = getter.unwrap_or_else(|| old_getter.unwrap_or(Value::Undefined));
         let setter = setter.unwrap_or_else(|| old_setter.unwrap_or(Value::Undefined));
-        let getter = getter
-            .is_truthy()
-            .then(|| name_callable(&getter, &format!("get {key}")))
-            .flatten();
-        let setter = setter
-            .is_truthy()
-            .then(|| name_callable(&setter, &format!("set {key}")))
-            .flatten();
+        let getter = (!matches!(getter, Value::Undefined)).then_some(getter);
+        let setter = (!matches!(setter, Value::Undefined)).then_some(setter);
         let has_getter = getter.is_some();
         if let Some(getter) = getter {
             values.push((key.to_string(), getter));
         }
         let has_setter = setter.is_some();
+        primary_kind = Some(if has_getter {
+            "get"
+        } else if has_setter {
+            "set"
+        } else {
+            "empty"
+        });
         if let Some(setter) = setter {
             // A setter lives in the same slot when there is no getter; with a
             // getter present it is stored under a companion slot the assign
@@ -1613,6 +1619,7 @@ fn define_ordinary_property(target: &Value, key: &str, descriptor: &Value) -> Re
     meta.set_attrs(key, attrs);
     meta.set_empty_accessor(key, empty_accessor);
     meta.set_explicit_data(key, !new_is_accessor);
+    meta.set_explicit_accessor_kind(key, primary_kind);
     if new_is_accessor && !(meta.legacy_call_accessors && matches!(key, "caller" | "arguments")) {
         meta.has_accessors = true;
     }
@@ -1735,6 +1742,8 @@ fn define_array_property(
     let index = crate::value::array_index(key);
     let old_accessor_kind = if array.meta.borrow().is_explicit_data(key) {
         None
+    } else if let Some(kind) = array.meta.borrow().explicit_accessor_kind(key) {
+        Some(kind)
     } else if array.meta.borrow().is_empty_accessor(key) {
         Some("empty")
     } else {
@@ -1792,6 +1801,7 @@ fn define_array_property(
     }
 
     let empty_accessor;
+    let mut primary_kind = None;
     if new_is_accessor {
         for accessor in [getter.as_ref(), setter.as_ref()].into_iter().flatten() {
             if !matches!(accessor, Value::Undefined) && !is_callable(accessor) {
@@ -1813,15 +1823,16 @@ fn define_array_property(
         // inherits the current accessor.
         let getter = getter.unwrap_or_else(|| old_getter.unwrap_or(Value::Undefined));
         let setter = setter.unwrap_or_else(|| old_setter.unwrap_or(Value::Undefined));
-        let getter = getter
-            .is_truthy()
-            .then(|| name_callable(&getter, &format!("get {key}")))
-            .flatten();
-        let setter = setter
-            .is_truthy()
-            .then(|| name_callable(&setter, &format!("set {key}")))
-            .flatten();
+        let getter = (!matches!(getter, Value::Undefined)).then_some(getter);
+        let setter = (!matches!(setter, Value::Undefined)).then_some(setter);
         empty_accessor = getter.is_none() && setter.is_none();
+        primary_kind = Some(if getter.is_some() {
+            "get"
+        } else if setter.is_some() {
+            "set"
+        } else {
+            "empty"
+        });
         let primary = getter
             .clone()
             .or_else(|| setter.clone())
@@ -1846,6 +1857,10 @@ fn define_array_property(
         .meta
         .borrow_mut()
         .set_explicit_data(key, !new_is_accessor);
+    array
+        .meta
+        .borrow_mut()
+        .set_explicit_accessor_kind(key, primary_kind);
     Ok(())
 }
 
@@ -2190,6 +2205,26 @@ fn descriptor_for(target: &Value, key: &str) -> Value {
     };
     let attrs =
         object_property_attributes(target, key).unwrap_or_else(|| c.meta.borrow().attrs_of(key));
+    if let Some(kind) = c.meta.borrow().explicit_accessor_kind(key) {
+        let getter = if kind == "get" {
+            value.clone()
+        } else {
+            Value::Undefined
+        };
+        let setter = if kind == "set" {
+            value.clone()
+        } else if kind == "get" {
+            own_slot(target, &format!("__setter:{key}__")).unwrap_or(Value::Undefined)
+        } else {
+            Value::Undefined
+        };
+        return Value::descriptor_record(vec![
+            ("get".into(), getter),
+            ("set".into(), setter),
+            ("enumerable".into(), Value::Bool(attrs.enumerable)),
+            ("configurable".into(), Value::Bool(attrs.configurable)),
+        ]);
+    }
     let mut fields = Vec::new();
     match c
         .meta
@@ -2245,6 +2280,8 @@ fn descriptor_for_array_value(
     }
     let kind = if array.meta.borrow().is_explicit_data(key) {
         None
+    } else if let Some(kind) = array.meta.borrow().explicit_accessor_kind(key) {
+        Some(kind)
     } else {
         accessor_kind_with_symbol(array.meta.borrow().symbol_key(key), key, &value)
     };
