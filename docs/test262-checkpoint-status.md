@@ -2,17 +2,21 @@
 
 ## Current measured state
 
-The full pinned run archived **2026-10-25** on clean source `39f6a97`
-passes **102,669 / 102,956 variants (99.7212%)**. It records 224 failures,
-63 timeouts, and zero skips, crashes, or harness errors. Against the previous
-completed full report it gains **691 passes with zero lost passes**.
+The latest complete pinned run archived **2026-10-25** on clean source `d942b04`
+passes **102,745 / 102,956 variants (99.7951%)**. It records 151 failures,
+60 timeouts, and zero skips, crashes, or harness errors. Against the previous
+completed full report it gains **76 passes with zero lost passes**.
 The corpus remains `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`; the run uses
 two workers, five-second deadlines, no feature exclusions, and worker SHA-256
-`7300cfef39470c226f0879ed40baf247a3cf4b0235e86c1397a7bcb061da4dfb`.
+`364ea4a28f71ebf488f5c1a7ff78849e3bba8f3efee1f173366436bec3762b3d`.
 It completed without resuming a checkpoint.
 
-All 287 non-passing variants and the complete report are archived in
-[full baseline evidence](../tools/test262/evidence/full-baseline-2026-10-25/).
+All 211 non-passing variants and the complete report are archived in
+[full refresh evidence](../tools/test262/evidence/full-refresh-2026-10-25/).
+The follow-up patch is newer than the measured source. It gains 18 passes with
+zero losses in a 212-variant residual-file comparison and passes native checks.
+The full score remains unchanged until the complete run on that candidate.
+See the [full-pass plan](test262-full-pass-plan.md) for the ordered work.
 The subsequent `d30e770` continuation passes 4,486 / 4,492 focused variants,
 gaining 35 passes with zero losses; these results remain outside the full score.
 The subsequent `f3d2d61` generator continuation passes 3,416 / 3,418 selected

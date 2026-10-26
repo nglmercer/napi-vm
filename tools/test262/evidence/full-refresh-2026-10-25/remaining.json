@@ -1,0 +1,1963 @@
+[
+  {
+    "test": "annexB/built-ins/RegExp/RegExp-leading-escape-BMP.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "annexB/built-ins/RegExp/RegExp-leading-escape-BMP.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "annexB/built-ins/RegExp/RegExp-trailing-escape-BMP.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "annexB/built-ins/RegExp/RegExp-trailing-escape-BMP.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/ArrayBuffer/prototype/sliceToImmutable/argument-coercion.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/ArrayBuffer/prototype/sliceToImmutable/argument-coercion.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/RegExp/S15.10.2.8_A3_T15.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: Maximum regular expression nesting exceeded"
+    }
+  },
+  {
+    "test": "built-ins/RegExp/S15.10.2.8_A3_T15.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: Maximum regular expression nesting exceeded"
+    }
+  },
+  {
+    "test": "built-ins/RegExp/S15.10.2.8_A3_T16.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: Maximum regular expression nesting exceeded"
+    }
+  },
+  {
+    "test": "built-ins/RegExp/S15.10.2.8_A3_T16.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: Maximum regular expression nesting exceeded"
+    }
+  },
+  {
+    "test": "built-ins/RegExp/character-class-escape-non-whitespace.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/RegExp/character-class-escape-non-whitespace.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/TypedArray/prototype/copyWithin/coerced-values-end-detached-prototype.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/TypedArray/prototype/copyWithin/coerced-values-end-detached-prototype.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/TypedArray/prototype/copyWithin/coerced-values-end-detached.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/TypedArray/prototype/copyWithin/coerced-values-end-detached.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/TypedArray/prototype/copyWithin/coerced-values-start-detached.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/TypedArray/prototype/copyWithin/coerced-values-start-detached.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/decodeURI/S15.1.3.1_A2.4_T1.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/decodeURI/S15.1.3.1_A2.4_T1.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/decodeURI/S15.1.3.1_A2.5_T1.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/decodeURI/S15.1.3.1_A2.5_T1.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/decodeURIComponent/S15.1.3.2_A2.4_T1.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/decodeURIComponent/S15.1.3.2_A2.4_T1.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/decodeURIComponent/S15.1.3.2_A2.5_T1.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/decodeURIComponent/S15.1.3.2_A2.5_T1.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/encodeURI/S15.1.3.3_A2.3_T1.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/encodeURI/S15.1.3.3_A2.3_T1.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/encodeURIComponent/S15.1.3.4_A2.3_T1.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/encodeURIComponent/S15.1.3.4_A2.3_T1.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "language/arguments-object/10.6-13-a-2.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "TypeError",
+      "message": "TypeError: null is not a function\n    at test2\n    at test1"
+    }
+  },
+  {
+    "test": "language/arguments-object/10.6-13-a-3.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "TypeError",
+      "message": "TypeError: null is not a function\n    at test2\n    at test1"
+    }
+  },
+  {
+    "test": "language/comments/S7.4_A5.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "language/comments/S7.4_A5.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "language/eval-code/direct/var-env-func-init-local-new-delete.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "binding may be deleted Expected a ReferenceError to be thrown but no exception was thrown at all"
+    }
+  },
+  {
+    "test": "language/eval-code/direct/var-env-var-init-local-new-delete.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected a ReferenceError to be thrown but no exception was thrown at all"
+    }
+  },
+  {
+    "test": "language/expressions/class/decorator/syntax/class-valid/decorator-member-expr-private-identifier.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: invalid statement in block at 46:13"
+    }
+  },
+  {
+    "test": "language/expressions/class/decorator/syntax/class-valid/decorator-member-expr-private-identifier.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: invalid statement in block at 47:13"
+    }
+  },
+  {
+    "test": "language/expressions/class/decorator/syntax/valid/decorator-call-expr-identifier-reference-yield.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 44:9"
+    }
+  },
+  {
+    "test": "language/expressions/class/decorator/syntax/valid/decorator-call-expr-identifier-reference.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 51:9"
+    }
+  },
+  {
+    "test": "language/expressions/class/decorator/syntax/valid/decorator-call-expr-identifier-reference.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 52:9"
+    }
+  },
+  {
+    "test": "language/expressions/class/decorator/syntax/valid/decorator-member-expr-decorator-member-expr.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 43:9"
+    }
+  },
+  {
+    "test": "language/expressions/class/decorator/syntax/valid/decorator-member-expr-decorator-member-expr.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 44:9"
+    }
+  },
+  {
+    "test": "language/expressions/class/decorator/syntax/valid/decorator-member-expr-identifier-reference-yield.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 33:9"
+    }
+  },
+  {
+    "test": "language/expressions/class/decorator/syntax/valid/decorator-member-expr-identifier-reference.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 40:9"
+    }
+  },
+  {
+    "test": "language/expressions/class/decorator/syntax/valid/decorator-member-expr-identifier-reference.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 41:9"
+    }
+  },
+  {
+    "test": "language/expressions/class/decorator/syntax/valid/decorator-parenthesized-expr-identifier-reference-yield.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 51:9"
+    }
+  },
+  {
+    "test": "language/expressions/class/decorator/syntax/valid/decorator-parenthesized-expr-identifier-reference.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 53:9"
+    }
+  },
+  {
+    "test": "language/expressions/class/decorator/syntax/valid/decorator-parenthesized-expr-identifier-reference.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 54:9"
+    }
+  },
+  {
+    "test": "language/expressions/class/elements/syntax/valid/grammar-field-accessor.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: expected semicolon or line terminator at 18:12"
+    }
+  },
+  {
+    "test": "language/expressions/class/elements/syntax/valid/grammar-field-accessor.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: expected semicolon or line terminator at 19:12"
+    }
+  },
+  {
+    "test": "language/expressions/super/prop-expr-getsuperbase-before-topropertykey-getvalue.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"bad\"\u00bb, \u00ab\"ok\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "language/expressions/super/prop-expr-getsuperbase-before-topropertykey-getvalue.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"bad\"\u00bb, \u00ab\"ok\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "language/expressions/super/prop-expr-getsuperbase-before-topropertykey-putvalue-compound-assign.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab0\u00bb, \u00ab2\u00bb) to be true"
+    }
+  },
+  {
+    "test": "language/expressions/super/prop-expr-getsuperbase-before-topropertykey-putvalue-compound-assign.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab0\u00bb, \u00ab2\u00bb) to be true"
+    }
+  },
+  {
+    "test": "language/expressions/super/prop-expr-getsuperbase-before-topropertykey-putvalue-increment.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab0\u00bb, \u00ab2\u00bb) to be true"
+    }
+  },
+  {
+    "test": "language/expressions/super/prop-expr-getsuperbase-before-topropertykey-putvalue-increment.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab0\u00bb, \u00ab2\u00bb) to be true"
+    }
+  },
+  {
+    "test": "language/literals/regexp/S7.8.5_A1.1_T2.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "language/literals/regexp/S7.8.5_A1.1_T2.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "language/literals/regexp/S7.8.5_A1.4_T2.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "language/literals/regexp/S7.8.5_A1.4_T2.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "language/literals/regexp/S7.8.5_A2.1_T2.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "language/literals/regexp/S7.8.5_A2.1_T2.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "language/literals/regexp/S7.8.5_A2.4_T2.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "language/literals/regexp/S7.8.5_A2.4_T2.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/class-valid/decorator-member-expr-private-identifier.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: invalid statement in block at 47:5"
+    }
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/class-valid/decorator-member-expr-private-identifier.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: invalid statement in block at 48:5"
+    }
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/valid/class-element-decorator-call-expr-identifier-reference.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 57:3"
+    }
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/valid/class-element-decorator-call-expr-identifier-reference.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 58:3"
+    }
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/valid/class-element-decorator-member-expr-decorator-member-expr.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 49:3"
+    }
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/valid/class-element-decorator-member-expr-decorator-member-expr.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 50:3"
+    }
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/valid/class-element-decorator-member-expr-identifier-reference.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 46:3"
+    }
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/valid/class-element-decorator-member-expr-identifier-reference.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 47:3"
+    }
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/valid/class-element-decorator-parenthesized-expr-identifier-reference.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 59:3"
+    }
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/valid/class-element-decorator-parenthesized-expr-identifier-reference.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 60:3"
+    }
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/valid/decorator-call-expr-identifier-reference-yield.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 45:1"
+    }
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/valid/decorator-call-expr-identifier-reference.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 52:1"
+    }
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/valid/decorator-call-expr-identifier-reference.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 53:1"
+    }
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/valid/decorator-member-expr-decorator-member-expr.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 44:1"
+    }
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/valid/decorator-member-expr-decorator-member-expr.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 45:1"
+    }
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/valid/decorator-member-expr-identifier-reference-yield.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 34:1"
+    }
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/valid/decorator-member-expr-identifier-reference.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 41:1"
+    }
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/valid/decorator-member-expr-identifier-reference.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 42:1"
+    }
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/valid/decorator-parenthesized-expr-identifier-reference-yield.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 52:1"
+    }
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/valid/decorator-parenthesized-expr-identifier-reference.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 54:1"
+    }
+  },
+  {
+    "test": "language/statements/class/decorator/syntax/valid/decorator-parenthesized-expr-identifier-reference.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: unexpected token `@` at 55:1"
+    }
+  },
+  {
+    "test": "language/statements/class/elements/syntax/valid/grammar-field-accessor.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: expected semicolon or line terminator at 18:12"
+    }
+  },
+  {
+    "test": "language/statements/class/elements/syntax/valid/grammar-field-accessor.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: expected semicolon or line terminator at 19:12"
+    }
+  },
+  {
+    "test": "language/statements/function/S13.2.1_A1_T1.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "RangeError: Maximum parse depth exceeded"
+    }
+  },
+  {
+    "test": "language/statements/function/S13.2.1_A1_T1.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "RangeError: Maximum parse depth exceeded"
+    }
+  },
+  {
+    "test": "staging/built-ins/Reflect/preventExtensions/preventExtensions-variable-length-typed-arrays.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "TypeError",
+      "message": "TypeError: Cannot prevent extensions on a variable-length typed array"
+    }
+  },
+  {
+    "test": "staging/built-ins/Reflect/preventExtensions/preventExtensions-variable-length-typed-arrays.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "TypeError",
+      "message": "TypeError: Cannot prevent extensions on a variable-length typed array"
+    }
+  },
+  {
+    "test": "staging/decorators/private-auto-accessor.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: expected semicolon or line terminator at 12:14"
+    }
+  },
+  {
+    "test": "staging/decorators/private-auto-accessor.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: expected semicolon or line terminator at 13:14"
+    }
+  },
+  {
+    "test": "staging/decorators/public-auto-accessor.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: expected semicolon or line terminator at 14:14"
+    }
+  },
+  {
+    "test": "staging/decorators/public-auto-accessor.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "parse",
+      "error_type": "SyntaxError",
+      "message": "SyntaxError: expected semicolon or line terminator at 15:14"
+    }
+  },
+  {
+    "test": "staging/sm/Array/to-length.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected a RangeError to be thrown but no exception was thrown at all"
+    }
+  },
+  {
+    "test": "staging/sm/Array/to-length.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected a RangeError to be thrown but no exception was thrown at all"
+    }
+  },
+  {
+    "test": "staging/sm/Array/toSpliced-dense.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Array/toSpliced-dense.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-1-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-1-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-2-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-2-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-3-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-3-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-4-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-4-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-5-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-5-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-6-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-6-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-7-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-7-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-8-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-8-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/non-iso.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab857845150000\u00bb, \u00ab860339950000\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Date/non-iso.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab857845150000\u00bb, \u00ab860339950000\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Date/two-digit-years.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab-62135683200000\u00bb, \u00ab-61962883200000\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Date/two-digit-years.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab-62135683200000\u00bb, \u00ab-61962883200000\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Function/configurable-length.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab0\u00bb, \u00abundefined\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Function/function-name-binding.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"\"\u00bb, \u00ab\"param1\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Function/function-name-binding.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"\"\u00bb, \u00ab\"param1\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Function/function-name-computed-01.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"\"\u00bb, \u00ab\"arrowFunc\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Function/function-name-computed-01.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"\"\u00bb, \u00ab\"arrowFunc\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Function/function-name-computed-02.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"\"\u00bb, \u00ab\"5\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Function/function-name-computed-02.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"\"\u00bb, \u00ab\"5\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Function/function-name-for.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"\"\u00bb, \u00ab\"forInHead\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/JSON/parse-mega-huge-array.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "RangeError",
+      "message": "RangeError: Maximum array length exceeded"
+    }
+  },
+  {
+    "test": "staging/sm/JSON/parse-mega-huge-array.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "RangeError",
+      "message": "RangeError: Maximum array length exceeded"
+    }
+  },
+  {
+    "test": "staging/sm/RegExp/constructor-ordering-2.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/RegExp/constructor-ordering-2.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/RegExp/escape.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"\\\\\\\\n\"\u00bb, \u00ab\"\\\\n\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/RegExp/escape.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"\\\\\\\\n\"\u00bb, \u00ab\"\\\\n\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/RegExp/unicode-braced.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "RangeError",
+      "message": "RangeError: Maximum string length exceeded"
+    }
+  },
+  {
+    "test": "staging/sm/RegExp/unicode-braced.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "RangeError",
+      "message": "RangeError: Maximum string length exceeded"
+    }
+  },
+  {
+    "test": "staging/sm/RegExp/unicode-class-braced.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "RangeError",
+      "message": "RangeError: Maximum string length exceeded"
+    }
+  },
+  {
+    "test": "staging/sm/RegExp/unicode-class-braced.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "RangeError",
+      "message": "RangeError: Maximum string length exceeded"
+    }
+  },
+  {
+    "test": "staging/sm/Set/difference.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Set/difference.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Set/symmetric-difference.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab3\u00bb, \u00ab1\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Set/symmetric-difference.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab3\u00bb, \u00ab1\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Set/union.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab3\u00bb, \u00ab1\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/Set/union.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab3\u00bb, \u00ab1\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/String/unicode-braced.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "RangeError",
+      "message": "RangeError: Maximum string length exceeded"
+    }
+  },
+  {
+    "test": "staging/sm/String/unicode-braced.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "RangeError",
+      "message": "RangeError: Maximum string length exceeded"
+    }
+  },
+  {
+    "test": "staging/sm/TypedArray/element-setting-converts-using-ToNumber.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/TypedArray/element-setting-converts-using-ToNumber.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/TypedArray/set-same-buffer-different-source-target-types.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/TypedArray/set-same-buffer-different-source-target-types.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/TypedArray/sort-negative-nan.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "TypeError",
+      "message": "TypeError: Cannot read properties of undefined (reading 'name')"
+    }
+  },
+  {
+    "test": "staging/sm/TypedArray/sort-negative-nan.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "TypeError",
+      "message": "TypeError: Cannot read properties of undefined (reading 'name')"
+    }
+  },
+  {
+    "test": "staging/sm/TypedArray/sort_large_countingsort.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/TypedArray/sort_large_countingsort.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/TypedArray/toString.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "ReferenceError",
+      "message": "ReferenceError: Float16Array is not defined"
+    }
+  },
+  {
+    "test": "staging/sm/TypedArray/toString.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "ReferenceError",
+      "message": "ReferenceError: Float16Array is not defined"
+    }
+  },
+  {
+    "test": "staging/sm/async-functions/async-property-name-error.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Function:({async async: 0}) Expected a SyntaxError to be thrown but no exception was thrown at all"
+    }
+  },
+  {
+    "test": "staging/sm/async-functions/async-property-name-error.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Function:({async async: 0}) Expected a SyntaxError to be thrown but no exception was thrown at all"
+    }
+  },
+  {
+    "test": "staging/sm/class/fields-static-class-name-binding-eval.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "ReferenceError",
+      "message": "ReferenceError: C is not defined\n    at field"
+    }
+  },
+  {
+    "test": "staging/sm/class/fields-static-class-name-binding-eval.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "ReferenceError",
+      "message": "ReferenceError: C is not defined\n    at field"
+    }
+  },
+  {
+    "test": "staging/sm/class/methDefnGen.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected a SyntaxError to be thrown but no exception was thrown at all"
+    }
+  },
+  {
+    "test": "staging/sm/class/methDefnGen.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected a SyntaxError to be thrown but no exception was thrown at all"
+    }
+  },
+  {
+    "test": "staging/sm/class/strictExecution.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected a TypeError to be thrown but no exception was thrown at all"
+    }
+  },
+  {
+    "test": "staging/sm/class/superPropProxies.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/class/superPropProxies.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/eval/exhaustive-fun-normalcaller-direct-normalcode.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/expressions/destructuring-array-default-call.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "ReferenceError",
+      "message": "ReferenceError: func is not defined\n    at test_one\n    at test"
+    }
+  },
+  {
+    "test": "staging/sm/expressions/destructuring-array-default-call.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "ReferenceError",
+      "message": "ReferenceError: func is not defined\n    at test_one\n    at test"
+    }
+  },
+  {
+    "test": "staging/sm/expressions/destructuring-array-default-class.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "ReferenceError",
+      "message": "ReferenceError: C is not defined\n    at test_one\n    at test"
+    }
+  },
+  {
+    "test": "staging/sm/expressions/destructuring-array-default-class.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "ReferenceError",
+      "message": "ReferenceError: C is not defined\n    at test_one\n    at test"
+    }
+  },
+  {
+    "test": "staging/sm/expressions/destructuring-array-default-function-nested.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "ReferenceError",
+      "message": "ReferenceError: C is not defined\n    at test_one\n    at test"
+    }
+  },
+  {
+    "test": "staging/sm/expressions/destructuring-array-default-function-nested.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "ReferenceError",
+      "message": "ReferenceError: C is not defined\n    at test_one\n    at test"
+    }
+  },
+  {
+    "test": "staging/sm/expressions/destructuring-array-default-function.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "ReferenceError",
+      "message": "ReferenceError: C is not defined\n    at test_one\n    at test"
+    }
+  },
+  {
+    "test": "staging/sm/expressions/destructuring-array-default-function.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "ReferenceError",
+      "message": "ReferenceError: C is not defined\n    at test_one\n    at test"
+    }
+  },
+  {
+    "test": "staging/sm/expressions/destructuring-array-default-simple.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "ReferenceError",
+      "message": "ReferenceError: C is not defined\n    at test_one\n    at test"
+    }
+  },
+  {
+    "test": "staging/sm/expressions/destructuring-array-default-simple.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "ReferenceError",
+      "message": "ReferenceError: C is not defined\n    at test_one\n    at test"
+    }
+  },
+  {
+    "test": "staging/sm/expressions/exponentiation-unparenthesised-unary.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "AsyncFunction:await a ** 0 Expected a SyntaxError to be thrown but no exception was thrown at all"
+    }
+  },
+  {
+    "test": "staging/sm/expressions/exponentiation-unparenthesised-unary.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "AsyncFunction:await a ** 0 Expected a SyntaxError to be thrown but no exception was thrown at all"
+    }
+  },
+  {
+    "test": "staging/sm/expressions/nested-delete-name-in-evalcode.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/expressions/short-circuit-compound-assignment-anon-fns.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"a\"\u00bb, \u00ab\"\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/expressions/short-circuit-compound-assignment-anon-fns.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"a\"\u00bb, \u00ab\"\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/extensions/arguments-property-access-in-function.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/extensions/dataview.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "RangeError",
+      "message": "RangeError: Invalid array buffer length\n    at test"
+    }
+  },
+  {
+    "test": "staging/sm/extensions/dataview.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "RangeError",
+      "message": "RangeError: Invalid array buffer length\n    at test"
+    }
+  },
+  {
+    "test": "staging/sm/extensions/function-caller-skips-eval-frames.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00abnull\u00bb, \u00abfunction nest() { return eval(\"innermost();\"); }\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/extensions/function-properties.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "TypeError",
+      "message": "TypeError: Cannot read properties of null (reading 'length')\n    at foo"
+    }
+  },
+  {
+    "test": "staging/sm/extensions/nested-delete-name-in-evalcode.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/extensions/quote-string-for-nul-character.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "cookie Expected a RangeError to be thrown but no exception was thrown at all"
+    }
+  },
+  {
+    "test": "staging/sm/extensions/quote-string-for-nul-character.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "cookie Expected a RangeError to be thrown but no exception was thrown at all"
+    }
+  },
+  {
+    "test": "staging/sm/lexical-environment/block-scoped-functions-annex-b-arguments.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"object\"\u00bb, \u00ab\"function\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/lexical-environment/block-scoped-functions-annex-b-eval.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"outer-geval-gwith-gfalsefalseq\"\u00bb, \u00ab\"outer-geval-gwith-gtruefalseq\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/lexical-environment/block-scoped-functions-annex-b-label.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "TypeError",
+      "message": "TypeError: undefined is not a function\n    at expectSloppyPass"
+    }
+  },
+  {
+    "test": "staging/sm/lexical-environment/block-scoped-functions-deprecated-redecl.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab3\u00bb, \u00ab4\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/object/toPrimitive.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected a TypeError to be thrown but no exception was thrown at all"
+    }
+  },
+  {
+    "test": "staging/sm/regress/regress-577648-1.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "1 Expected SameValue(\u00abtrue\u00bb, \u00abfalse\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/regress/regress-577648-2.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": " Expected SameValue(\u00abtrue\u00bb, \u00abfalse\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/regress/regress-584355.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": " Expected SameValue(\u00ab\"function f () { ff (); }\"\u00bb, \u00ab\"null\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/regress/regress-584355.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": " Expected SameValue(\u00ab\"function f () { ff (); }\"\u00bb, \u00ab\"null\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/regress/regress-586482-1.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "ok Expected SameValue(\u00abtrue\u00bb, \u00abfalse\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/regress/regress-586482-2.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "ok Expected SameValue(\u00abtrue\u00bb, \u00abfalse\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/regress/regress-586482-3.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "ok Expected SameValue(\u00abtrue\u00bb, \u00abfalse\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/regress/regress-586482-4.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "ok Expected SameValue(\u00abfunction() { this.f(); }\u00bb, \u00abnull\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/regress/regress-602621.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "function sub-statement must override arguments Expected SameValue(\u00ab\"function\"\u00bb, \u00ab\"object\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/strict/15.5.5.1.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/strict/15.5.5.1.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/strict/15.5.5.2.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/strict/15.5.5.2.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/strict/primitive-this-getter.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00abundefined\u00bb, \u00ab\"get\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/sm/strict/primitive-this-getter.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00abundefined\u00bb, \u00ab\"get\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/source-phase-imports/module-source-prototype-chain.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "The [[Prototype]] of the [[ModuleSource]] object's [[Prototype]] must be %AbstractModuleSource%.prototype Expected SameValue(\u00ab[object Object]\u00bb, \u00ab[object Object]\u00bb) to be true"
+    }
+  },
+  {
+    "test": "staging/source-phase-imports/module-source-prototype-chain.js",
+    "variant": "strict",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "The [[Prototype]] of the [[ModuleSource]] object's [[Prototype]] must be %AbstractModuleSource%.prototype Expected SameValue(\u00ab[object Object]\u00bb, \u00ab[object Object]\u00bb) to be true"
+    }
+  }
+]

@@ -1,0 +1,29 @@
+{
+  "domain": "ECMAScript",
+  "suite": "Test262",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "source_commit": "1a06e5508e236a97a1b83742cb7680e66d0cc143",
+  "engine_sha256": "b607aaf8547f6df2ad6f3ce9996cc76931024d8a52a6d57e6a4a0f204ff7d612",
+  "selected_files": 121,
+  "total": 212,
+  "baseline_counts": {
+    "pass": 1,
+    "fail": 151,
+    "skip": 0,
+    "timeout": 60,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "counts": {
+    "pass": 19,
+    "fail": 133,
+    "skip": 0,
+    "timeout": 60,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 18,
+  "lost_passes": 0,
+  "scope": "Residual-file focused comparison; does not update the complete-corpus score.",
+  "validation": "All listed native, worker, Clippy, format, and diff checks passed."
+}

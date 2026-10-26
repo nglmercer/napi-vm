@@ -6,7 +6,29 @@ skips, timeouts, crashes, failures, or harness errors. Measurements use two
 workers and five-second per-variant deadlines. Focused reports do not update
 the full score.
 
-## Completed baseline
+## Latest full refresh
+
+Clean source `d942b04` passes **102,745 / 102,956 (99.7951%)** in the completed
+2026-10-25 full run. There are **151 failures and 60 timeouts**, with zero
+skips, crashes, or harness errors. Against the previous complete full report,
+the comparison records **76 new passes and zero lost passes**.
+
+The pinned corpus is `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`; the run used
+two workers, five-second deadlines, no exclusions, and no resumed outcomes.
+Worker SHA-256 is
+`364ea4a28f71ebf488f5c1a7ff78849e3bba8f3efee1f173366436bec3762b3d`.
+[Archived evidence](../tools/test262/evidence/full-refresh-2026-10-25/)
+contains every result, the comparison, triage, source/configuration identity,
+and the exact 211 remaining variants.
+
+Those variants comprise 44 parse failures, 107 runtime failures, and 60
+timeouts. The largest runtime cluster is 89 `staging/sm` failures. Parse
+failures are mostly class decorators/elements and auto-accessors. The largest
+timeout groups are staging/SpiderMonkey (24), URI decoding (8), TypedArray (6),
+and RegExp/literal matching (10). See the
+[ordered plan](test262-full-pass-plan.md) for the next steps.
+
+## Previous full baseline
 
 Clean source `39f6a97` passes **102,669 / 102,956 (99.7212%)** in the completed
 2026-10-25 full run. There are **224 failures and 63 timeouts**, with zero
@@ -80,15 +102,16 @@ all-target Clippy with warnings denied. The comparison uses the same pinned
 corpus, two workers, five-second deadline, and selected variant identities.
 [Archived evidence](../tools/test262/evidence/generator-result-2026-10-25/)
 includes both full focused reports, every transition, exact source/worker
-identities, implementation patch, and validation logs. The full score remains
-the completed 102,669-pass baseline until a new full run completes.
+identities, implementation patch, and validation logs. At the time of this
+focused measurement, the full score was 102,669; the later `d942b04` full
+refresh is recorded above.
 
 ## Function source continuation
 
 Clean source `d942b04` passes **1,006 / 1,020** selected Function and related
 variants, up from 990: **16 new passes and zero lost passes**. Fourteen semantic
-failures remain in that selection, with no timeouts or other outcomes. The full
-score remains the completed 102,669-pass baseline pending a fresh full run.
+failures remain in that selection, with no timeouts or other outcomes. The
+later `d942b04` full refresh is recorded above.
 
 Functions, arrows, methods, accessors, classes, eval, and dynamic Function
 constructors retain shared original UTF-16 source ranges through AST and bytecode
@@ -112,18 +135,30 @@ tests pass. Formatting and core all-target Clippy with warnings denied pass.
 contains all comparisons, exact source/worker identities, implementation patch,
 and validation logs.
 
+## Function binding and parser continuation
+
+The follow-up patch was compared on **212 variants** from the latest residual
+file inventory, gaining **18 passes and losing zero** against the matching
+projection of the full refresh. Gains cover function name inference, async
+property names, exponentiation grammar, anonymous function names in logical
+assignment, method definitions, and primitive getter receivers. The full score
+remains the completed **102,745 / 102,956** run until a clean full run finishes.
+
+The patch also passes the 373 core tests, ten focused regressions, neighboring
+integration suites, 23 worker tests, all-target Clippy with warnings denied,
+and formatting. [Focused evidence](../tools/test262/evidence/function-binding-followup-2026-10-25/)
+retains the report, no-loss comparison, source identity, and validation logs.
+
 ## Remaining gates
 
-1. Preserve the verified continuation and use the archived baseline and focused
-   transitions to drive the remaining work. Keep every measured loss visible.
-2. Close the remaining semantic cases, including decorator/auto-accessor syntax,
-   source text and function behavior, scope semantics,
-   and RegExp cases listed in the inventory.
-3. Profile and fix all remaining timeout workloads, including exhaustive Date,
-   URI and RegExp loops, TypedArray copying/sorting, and large buffer fixtures.
-4. Run the complete corpus on a clean committed candidate under the same gate,
-   archive its outcomes and source/worker identities, and verify every variant
-   passes before claiming completion.
+1. Commit the focused no-loss follow-up and run the complete corpus on it.
+   Triage the resulting inventory before selecting the next implementation.
+2. Implement decorator/auto-accessor parsing and class runtime semantics, then
+   close `staging/sm`, scope/eval, super ordering, RegExp, and other residual
+   semantics using focused regressions and neighboring groups.
+3. Profile and remove all 60 timeouts under the same five-second limit.
+4. Run the complete corpus on a clean committed candidate and require 102,956
+   passes with zero failures, timeouts, skips, crashes, or harness errors.
 
 Full AST/bytecode differential and wasm32 execution are additional coverage
 gates; the standalone worker's full score does not establish those results.

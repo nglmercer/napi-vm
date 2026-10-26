@@ -44,34 +44,20 @@ report still contains all selected outcomes and records the restored file count.
 
 ## Current full result
 
-The full pinned run archived **2026-10-25** on clean source `39f6a97` passes
-**102,669 / 102,956 variants (99.7212%)**, with 224 failures, 63 timeouts,
-and zero skips, crashes, or harness errors. It gains **691 passes with zero
-lost passes** against the previous complete full run. Configuration is two
-workers and five-second deadlines, with no exclusions or resumed outcomes.
-The corpus is `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81` and worker SHA-256
-is `7300cfef39470c226f0879ed40baf247a3cf4b0235e86c1397a7bcb061da4dfb`.
+The latest complete pinned run archived **2026-10-25** on clean source `d942b04`
+passes **102,745 / 102,956 variants (99.7951%)**, with 151 failures, 60
+timeouts, and zero skips, crashes, or harness errors. It gains **76 passes with
+zero lost passes** against the previous complete full report. Configuration is
+two workers and five-second deadlines, with no exclusions or resumed outcomes.
+The corpus is `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`; worker SHA-256 is
+`364ea4a28f71ebf488f5c1a7ff78849e3bba8f3efee1f173366436bec3762b3d`.
 
-[Evidence](evidence/full-baseline-2026-10-25/) includes every outcome, the
-comparison, source identity, build log, and all 287 remaining variants.
-The [full-pass campaign](../../docs/test262-full-pass-progress.md) tracks the
-target of 102,956 passes. The subsequent clean `d30e770` continuation passes
-4,486 / 4,492 focused variants, gaining 35 passes with zero losses. Its
-[evidence](evidence/runtime-regexp-2026-10-25/) remains separate from this full score.
-The subsequent clean `f3d2d61` generator continuation passes 3,416 / 3,418 selected
-variants, gaining 18 passes with zero losses. Its two failures require generator
-source text; it records no timeouts or other non-passing outcomes.
-[Generator evidence](evidence/generator-result-2026-10-25/) includes both focused
-reports, exact identities, transitions, and native validation. This result also
-does not update the full score.
-
-The subsequent clean `d942b04` source-text continuation passes 1,006 / 1,020
-selected variants, gaining 16 passes with zero losses. It preserves exact UTF-16
-function/class source through both execution paths and reads corpus CR/CRLF bytes
-without newline translation. Fourteen semantic failures remain in the selection.
-[Source evidence](evidence/function-source-2026-10-25/) includes the initial
-regressions and their resolution, all final outcomes, and validation logs. The
-full score remains unchanged pending the next complete run.
+[Evidence](evidence/full-refresh-2026-10-25/) includes every outcome, the
+comparison, source identity, build log, triage, and all 211 remaining variants.
+The [full-pass plan](../../docs/test262-full-pass-plan.md) tracks the final
+gate. A follow-up patch gains 18 passes with zero losses in a 212-variant
+residual-file comparison; the full score remains unchanged pending a complete
+run on that candidate.
 
 ## Historical measurements
 

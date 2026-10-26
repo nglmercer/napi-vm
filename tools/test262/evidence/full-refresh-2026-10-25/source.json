@@ -1,0 +1,30 @@
+{
+  "source_commit": "d942b04e245f6124d5a349a78810dfebef0b9005",
+  "source_status": "",
+  "engine_sha256": "364ea4a28f71ebf488f5c1a7ff78849e3bba8f3efee1f173366436bec3762b3d",
+  "baseline_worker_source_commit": "f3d2d6121249968f3da58282748e57071318f6d1",
+  "baseline_engine_sha256": "d338c7efb4ab9da86c947b74dd8fbcbe70cc34e5bfb307f1dfe3696bd77f9622",
+  "command": [
+    "python3",
+    "tools/test262/run.py",
+    ".napi-vm/test262",
+    "--engine",
+    "target/release/napi-vm-test262",
+    "--revision",
+    "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "--jobs",
+    "2",
+    "--timeout",
+    "5",
+    "--checkpoint",
+    "artifacts/test262/full-source-d942b04-2026-10-25.checkpoint.jsonl",
+    "--output",
+    "artifacts/test262/full-source-d942b04-2026-10-25.json"
+  ],
+  "rust": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "runner_change": "Preserve original CR/CRLF source bytes when reading corpus and harness files.",
+  "execution_commit": "2b2b7281689465c2440b369c3e5936beb96db01d",
+  "execution_status": "clean",
+  "build_identity_evidence": "tools/test262/evidence/function-source-2026-10-25/source.json",
+  "source_verification": "No engine or runner changes between build source commit and execution commit; source tree clean at launch."
+}

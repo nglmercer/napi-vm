@@ -1,0 +1,551 @@
+$ cargo test --locked --profile ci -p napi-vm-core --lib --test grammar_contexts --test class_home_keys --test function_proxy_metadata --test bound_function_chains --test template_object_cache --test template_object_integrity --test tagged_template_construction --test string_semantic_gaps --test array_to_string_invocation --test function_binding_semantics
+
+   Compiling napi-vm-core v0.1.5 (/home/meme/Documentos/Default Project/node-vm/crates/napi-vm-core)
+    Finished `ci` profile [unoptimized] target(s) in 24.34s
+     Running unittests src/lib.rs (target/ci/deps/napi_vm_core-e65490ac4d628f32)
+
+running 373 tests
+test bigint::binary64_rounding_tests::sticky_bits_and_overflow_boundaries_round_correctly ... ok
+test bigint::tests::bitwise_uses_twos_complement ... ok
+test bigint::tests::as_n_bit_wraps ... ok
+test bigint::tests::radix_prefixes_parse ... ok
+test bigint::tests::division_truncates_towards_zero ... ok
+test bigint::tests::pow_squares_and_multiplies ... ok
+test bigint::tests::arithmetic_beyond_f64 ... ok
+test bigint::tests::shifts_floor_negatives ... ok
+test bigint::tests::decimal_round_trips ... ok
+test builtins::date::tests::epoch_is_zero ... ok
+test builtins::date::tests::known_dates ... ok
+test builtins::date::tests::parse_date_only ... ok
+test builtins::date::tests::parse_with_time_and_z ... ok
+test builtins::date::tests::parse_millis ... ok
+test builtins::date::tests::parse_with_offset ... ok
+test builtins::json::tests::reindent_accepts_string_indent ... ok
+test builtins::json::tests::reindent_keeps_empty_containers_on_one_line ... ok
+test builtins::json::tests::reindent_ignores_structure_inside_strings ... ok
+test builtins::json::tests::reindent_nests_objects_and_arrays ... ok
+test bytecode::compiler::tests::constructor_spread_and_iterator_snapshots_compile_without_fallback ... ok
+test bytecode::compiler::tests::class_super_writes_compile_to_receiver_operations_without_method_fallback ... ok
+test bytecode::compiler::tests::fibonacci_disassembly ... ok
+test bytecode::compiler::tests::module_templates_preserve_utf16_requests_for_link_time_validation ... ok
+test bytecode::compiler::tests::function_level_captures_compile ... ok
+test bytecode::compiler::tests::nested_functions_carry_arrow_and_constructor_flags ... ok
+test bytecode::compiler::tests::recursive_and_self_referencing_functions_compile ... ok
+test bytecode::compiler::tests::block_captures_box_into_pushed_scopes ... ok
+test bytecode::compiler::tests::unsupported_constructs_decline ... ok
+test bytecode::compiler::tests::stage_one_programs_compile ... ok
+test bigint::binary64_rounding_tests::integer_casts_round_once_and_symmetrically ... ok
+test builtins::collections::lifecycle_tests::final_owner_collection_releases_cached_intrinsic_pins ... ok
+test bytecode::parity_tests::class_member_attributes_and_field_names_share_semantics ... ok
+test bytecode::parity_tests::arrow_super_uses_lexical_receiver ... ok
+test bytecode::parity_tests::arrays ... ok
+test builtins::typedarray::tests::atomics_shared_buffer_fixture_matches_node_and_bun ... ok
+test bytecode::parity_tests::abstract_iterator_and_intrinsic_accessors_share_execution_tiers ... ok
+test builtins::typedarray::tests::atomics_wait_async_and_notify_match_node_and_bun ... ok
+test bytecode::parity_tests::catch_identifier_bindings_remain_lexical_and_mutable_in_both_tiers ... ok
+test bytecode::parity_tests::bigint_and_regex_literals ... ok
+test bytecode::parity_tests::call_update_targets_throw_before_numeric_coercion_and_parentheses_keep_references ... ok
+test bytecode::parity_tests::class_property_keys_preserve_symbols_and_observable_conversion_in_both_tiers ... ok
+test bytecode::parity_tests::declined_units_stay_on_ast ... ok
+test bytecode::parity_tests::class_private_methods_accessors_and_static_order_share_semantics ... ok
+test bytecode::parity_tests::dictionary_growth_preserves_property_reads_and_key_order_in_both_tiers ... ok
+test bytecode::parity_tests::control_flow ... ok
+test bytecode::parity_tests::constructors ... ok
+test bytecode::parity_tests::closures ... ok
+test bytecode::parity_tests::empty_lexical_iteration_patterns_own_and_unwind_runtime_scopes ... ok
+test bytecode::parity_tests::arithmetic_and_strings ... ok
+test bytecode::parity_tests::destructuring_assignment ... ok
+test bytecode::parity_tests::global_callable_data_and_update_reference_order_match_both_tiers ... ok
+test bytecode::parity_tests::compound_members_convert_property_keys_once_in_both_tiers ... ok
+test bytecode::parity_tests::iteration_assignment_forms_retain_fallback_and_declaration_tier_parity ... ok
+test bytecode::parity_tests::fallback_functions_inside_bytecode_units ... ok
+test bytecode::parity_tests::legacy_regexp_state_and_descriptors_match_in_both_tiers ... ok
+test bytecode::parity_tests::call_references_optional_receivers_and_argument_order_share_semantics ... ok
+test bytecode::parity_tests::captures ... ok
+test bytecode::parity_tests::native_buffer_growth_uses_the_same_semantics_in_both_tiers ... ok
+test bytecode::parity_tests::functions_calls_and_this ... ok
+test bytecode::parity_tests::classes ... ok
+test bytecode::parity_tests::json_stringification_uses_shared_semantics_in_both_execution_tiers ... ok
+test bytecode::parity_tests::lexical_iteration_tdz_and_capture ... ok
+test bytecode::parity_tests::literal_metadata_keeps_primitive_and_object_tier_parity ... ok
+test bytecode::parity_tests::named_expression_bindings_are_lexical_and_immutable_in_both_tiers ... ok
+test bytecode::parity_tests::for_in_loops ... ok
+test bytecode::parity_tests::null_receiver_checks_and_immutable_prototypes_share_internal_operations ... ok
+test bytecode::parity_tests::labeled_statements ... ok
+test bytecode::parity_tests::public_hash_properties_preserve_private_field_tier_parity ... ok
+test bytecode::parity_tests::proxy_private_field_stamping_uses_shared_brand_storage_in_both_tiers ... ok
+test bytecode::parity_tests::parenthesized_references_keep_existing_tier_parity ... ok
+test bytecode::parity_tests::raw_tagged_templates_and_export_mutation_remain_equivalent ... ok
+test bytecode::parity_tests::private_field_brand_checks_use_lexical_slots_in_both_tiers ... ok
+test bytecode::parity_tests::realm_intrinsic_arguments_and_proxy_abrupt_completions_share_tier_semantics ... ok
+test bytecode::parity_tests::property_update_fast_paths_preserve_observable_operations ... ok
+test bytecode::parity_tests::realm_global_records_use_shared_declaration_and_property_operations ... ok
+test bytecode::parity_tests::super_destructuring_tags_and_delete_keep_tier_parity ... ok
+test bytecode::parity_tests::shared_proxy_deletion_and_atomic_hints_match_both_tiers ... ok
+test bytecode::parity_tests::modules ... ok
+test bytecode::parity_tests::for_of_loops ... ok
+test bytecode::parity_tests::super_reads_follow_home_object_prototypes_in_both_tiers ... ok
+test bytecode::parity_tests::destructuring_declarations ... ok
+test bytecode::parity_tests::object_literal_prototypes_and_computed_keys_share_semantics ... ok
+test bytecode::verify::tests::elisions_are_only_valid_in_array_templates_without_spread_flags ... ok
+test bytecode::verify::tests::load_const_rejects_non_scalar_constants ... ok
+test bytecode::verify::tests::private_brand_instruction_rejects_invalid_operands ... ok
+test bytecode::verify::tests::receiver_operations_reject_every_out_of_range_register ... ok
+test bytecode::verify::tests::spread_operations_reject_invalid_registers_and_templates ... ok
+test bytecode::verify::tests::template_rejects_quasi_arity_mismatch ... ok
+test bytecode::vm::tests::ic_goes_megamorphic_and_stays_correct ... ok
+test bytecode::vm::tests::ic_never_caches_accessors ... ok
+test bytecode::parity_tests::utf16_module_requests_reach_shared_loader_validation_in_both_tiers ... ok
+test bytecode::parity_tests::typed_array_static_inheritance_uses_the_same_native_helpers_in_both_tiers ... ok
+test bytecode::vm::tests::ic_survives_shape_change ... ok
+test convert::tests::from_json_depth_boundary_works_on_a_small_thread_stack ... ok
+test convert::tests::from_json_rejects_excessive_depth ... ok
+test bytecode::vm::tests::program_stats_aggregate ... ok
+test bytecode::vm::tests::prepared_assignment_writes_invalidate_loop_read_caches ... ok
+test bytecode::parity_tests::trailing_jumps_land_on_end_of_code ... ok
+test convert::tests::json_round_trip_preserves_shape_and_numbers ... ok
+test convert::tests::to_json_matches_stringify_edge_values ... ok
+test format::number_rendering_tests::integral_results_keep_previous_decimal_rendering ... ok
+test convert::tests::to_json_matches_stringify_bigint_behavior ... ok
+test convert::tests::to_json_runs_getters_and_to_json ... ok
+test convert::tests::to_json_rejects_cycles_like_stringify ... ok
+test heap::tests::closure_cycle_reclaimed ... ok
+test bytecode::parity_tests::super_references_writes_calls_and_object_home_objects_share_semantics ... ok
+test heap::tests::host_pin_survives_collection ... ok
+test bytecode::parity_tests::tagged_templates ... ok
+test heap::tests::object_cycle_reclaimed ... ok
+test host::tests::wake_notifier_is_thread_safe ... ok
+test host::tests::wake_slot_fires_registered_notifier ... ok
+test host::wake_tests::cancellation_wakes_a_waiter_at_the_condvar_sleep_boundary ... ok
+test host::wake_tests::notifications_coalesce_but_latched_wakeup_is_not_lost ... ok
+test heap::tests::collect_refused_while_executing ... ok
+test heap::tests::env_cleared_while_held_by_promise ... ok
+test heap::tests::pure_promise_cycle_reclaimed ... ok
+test interpreter::commonjs::tests::filesystem_loader_refuses_paths_outside_configured_roots ... ok
+test heap::tests::reachable_objects_survive ... ok
+test host::wake_tests::racing_producer_preserves_every_event ... ok
+test heap::tests::suspended_generator_refuses ... ok
+test interpreter::async_fn::tests::completed_task_retains_its_result_across_collection ... ok
+test interpreter::commonjs::tests::filesystem_loader_resolves_exports_and_requires_native_addon_allowlisting ... ok
+test interpreter::commonjs::tests::node_api_prebuild_lookup_honors_prebuilds_only ... ok
+test interpreter::commonjs::tests::node_api_prebuild_lookup_uses_exec_path_neighbor_as_fallback ... ok
+test interpreter::commonjs::tests::native_addon_publishes_initial_exports_and_retries_after_initialization_failure ... ok
+test interpreter::commonjs::tests::node_api_prebuild_selection_uses_node_gyp_tag_precedence ... ok
+test interpreter::commonjs::tests::node_gyp_build_package_prebuild_override_is_canonical_and_root_checked ... ok
+test interpreter::commonjs::tests::node_api_prebuild_resolution_filters_incompatible_tags_and_aliases_package ... ok
+test interpreter::commonjs::tests::node_gyp_build_runtime_builtin_exposes_tag_and_tuple_helpers ... ok
+test interpreter::commonjs::tests::node_module_create_require_rejects_invalid_parents ... ok
+test interpreter::commonjs::tests::node_module_create_require_resolves_from_esm_and_shares_commonjs_cache ... ok
+test interpreter::commonjs::tests::filesystem_loader_resolves_package_self_references_only_when_exported ... ok
+test interpreter::commonjs::tests::require_executes_and_caches_commonjs_source ... ok
+test interpreter::commonjs::tests::require_executes_functions_and_handles_circular_partial_exports ... ok
+test interpreter::commonjs::tests::require_is_disabled_until_the_host_configures_a_loader ... ok
+test bytecode::parity_tests::spreads ... ok
+test interpreter::commonjs::tests::require_loader_and_cache_are_shared_with_async_function_realms ... ok
+test interpreter::commonjs::tests::require_resolve_uses_the_configured_loader_without_evaluating_modules ... ok
+test interpreter::jobs::scheduler_tests::cancellation_releases_roots_immediately ... ok
+test interpreter::commonjs::tests::require_parses_json_as_guest_values ... ok
+test interpreter::jobs::scheduler_tests::hybrid_promotes_once_traces_roots_and_resets_when_empty ... ok
+test interpreter::jobs::scheduler_tests::timer_ids_wrap_without_collisions_or_reordering ... ok
+test interpreter::jobs::scheduler_tests::timers_normalize_and_keep_fifo_ties ... ok
+test interpreter::jobs::scheduler_tests::wrapped_ids_skip_multiple_live_small_queue_entries ... ok
+test interpreter::native_addon::tests::shared_policy_configures_each_available_backend ... ok
+test interpreter::native_addon_binary::tests::native_addon_binary_preflight_checks_format_and_architecture ... ok
+test interpreter::env::global_quota_tests::guest_global_growth_is_bounded_and_updates_and_deletes_preserve_quota ... ok
+test interpreter::jobs::scheduler_tests::empty_storage_is_reused_and_large_index_retention_is_capped ... ok
+test interpreter::node_addon::tests::immutable_snapshot_slots_preserve_mirrors_and_mutable_slots_refresh ... ok
+test interpreter::node_addon::tests::node_addon_configuration_rejects_entry_outside_roots_before_startup ... ok
+test interpreter::commonjs::tests::filesystem_loader_resolves_package_import_maps ... ok
+test interpreter::node_addon::tests::node_addon_sidecar_enforces_allowlist_and_digest_on_direct_loads ... ok
+test interpreter::realm::tests::abandoning_a_suspended_stack_restores_the_host_allocation_context ... ok
+test bytecode::parity_tests::switch_statements ... ok
+test bytecode::parity_tests::variables_and_assignment ... ok
+test interpreter::resolve::boxed_primitive_prototype_tests::boxed_primitives_use_their_constructor_prototypes ... ok
+test interpreter::node_addon::tests::sidecar_retained_guest_graphs_survive_collection ... ok
+test interpreter::resolve::with_binding_reference_tests::bytecode_calls_resolve_with_receivers_once ... ok
+test interpreter::node_addon::tests::snapshots_resolve_persistent_roots_before_decoding_shared_children ... ok
+test interpreter::scheduler::lifecycle_tests::batched_deadline_polling_has_the_same_bound ... ok
+test interpreter::scheduler::lifecycle_tests::batched_polling_preserves_exact_fuel_and_bounds_zero_cost_instructions ... ok
+test interpreter::scheduler::lifecycle_tests::completed_execution_retires_deadline_without_idle_reactivation ... ok
+test interpreter::resolve::string_iterator_tests::next_requires_own_internal_slots_even_after_exhaustion ... ok
+test interpreter::tests::promise_species_chains_preserve_pending_host_work ... ok
+test interpreter::tests::sparse_arrays_preserve_holes_across_common_methods ... ok
+test interpreter::scheduler::lifecycle_tests::timers_checkpoints_and_suspended_bodies_keep_the_original_deadline ... ok
+test bytecode::parity_tests::optional_chaining ... ok
+test interpreter::tests::built_in_error_subclasses_inherit_from_error ... ok
+test interpreter::tests::test_arrays ... ok
+test interpreter::resolve::boxed_primitive_prototype_tests::object_prototype_methods_match_node_and_bun ... ok
+test interpreter::tests::test_closures ... ok
+test interpreter::commonjs::tests::filesystem_loader_resolves_wildcard_exports_with_node_pattern_precedence ... ok
+test interpreter::tests::test_do_while ... ok
+test interpreter::tests::test_continue_in_loops ... ok
+test interpreter::tests::test_for_of ... ok
+test interpreter::tests::test_break_in_loops ... ok
+test interpreter::resolve::boxed_primitive_prototype_tests::primitive_constructor_fixture_matches_node_and_bun ... ok
+test interpreter::tests::test_compound_assign ... ok
+test interpreter::tests::test_increment ... ok
+test interpreter::tests::test_for_in ... ok
+test interpreter::tests::test_arithmetic ... ok
+test interpreter::tests::test_functions ... ok
+test interpreter::tests::test_comparison ... ok
+test interpreter::tests::test_nested_functions ... ok
+test interpreter::commonjs::tests::require_resolve_native_path_matches_node_and_bun ... ok
+test interpreter::tests::test_math_constants ... ok
+test interpreter::tests::test_loops ... ok
+test interpreter::tests::test_logical ... ok
+test interpreter::tests::test_strings ... ok
+test interpreter::tests::test_objects ... ok
+test jit::tests::cold_until_threshold_then_compiles_once ... ok
+test jit::tests::decline_asks_once ... ok
+test jit::tests::guard_failure_deopts_then_discards ... ok
+test interpreter::tests::test_switch ... ok
+test jit::tests::loop_iters_trip_threshold ... ok
+test jit::tests::no_backend_reports_hot ... ok
+test jit::tests::shape_guard_checks_params ... ok
+test lang::actions::tests::a_diagnostic_outside_the_range_is_skipped ... ok
+test lang::actions::tests::a_mismatched_pair_offers_no_guess ... ok
+test lang::actions::tests::a_stray_closer_offers_removal ... ok
+test lang::actions::tests::an_unclosed_brace_offers_its_closer ... ok
+test lang::actions::tests::an_unclosed_paren_offers_its_closer ... ok
+test lang::actions::tests::badly_indented_source_offers_a_format ... ok
+test lang::actions::tests::well_formatted_source_offers_nothing ... ok
+test lang::document::tests::hover_never_panics_on_a_member_without_a_receiver ... ok
+test lang::document::tests::hover_never_panics_on_non_ascii_cursor_offset ... ok
+test lang::document::tests::hovers_host_function_metadata_and_documentation ... ok
+test lang::document::tests::infers_exported_class_factory ... ok
+test lang::document::tests::infers_literal_variable ... ok
+test lang::document::tests::infers_promise_callback_and_property ... ok
+test lang::document::tests::infers_string_prototype_return_types ... ok
+test lang::document::tests::infers_the_real_store_module_factory ... ok
+test lang::document::tests::injects_native_date_types_from_catalog ... ok
+test lang::document::tests::preserves_class_instance_type_through_factory ... ok
+test lang::document::tests::propagates_types_across_imported_modules ... ok
+test lang::format_source::tests::a_block_comment_keeps_its_own_layout ... ok
+test lang::format_source::tests::a_brace_in_a_string_does_not_indent ... ok
+test lang::format_source::tests::a_closing_line_lines_up_with_its_opener ... ok
+test lang::format_source::tests::a_multi_line_template_is_left_alone ... ok
+test lang::format_source::tests::a_template_interpolation_does_not_unbalance_the_scan ... ok
+test lang::format_source::tests::blank_lines_stay_blank ... ok
+test lang::format_source::tests::comments_survive ... ok
+test lang::format_source::tests::nested_blocks_are_indented ... ok
+test lang::format_source::tests::newlines_are_never_moved ... ok
+test lang::format_source::tests::over_indentation_is_removed ... ok
+test lang::format_source::tests::tabs_are_available ... ok
+test lang::format_source::tests::trailing_whitespace_is_trimmed ... ok
+test lang::metadata::tests::accepts_legacy_string_shapes_inside_objects ... ok
+test lang::metadata::tests::bounds_global_count ... ok
+test interpreter::tests::test_ternary ... ok
+test lang::metadata::tests::parses_recursive_function_metadata ... ok
+test lang::metadata::tests::rejects_malformed_and_oversized_shapes ... ok
+test interpreter::tests::test_try_catch ... ok
+test lang::navigation::tests::an_argument_that_already_names_the_parameter_is_not_hinted ... ok
+test lang::navigation::tests::definition_points_at_the_declaration ... ok
+test lang::navigation::tests::document_symbols_list_declarations ... ok
+test lang::navigation::tests::inlay_hints_name_positional_arguments ... ok
+test lang::navigation::tests::references_include_the_declaration ... ok
+test lang::metadata::tests::legacy_string_shapes_share_the_structured_depth_limit ... ok
+test lang::navigation::tests::rename_refuses_a_non_identifier ... ok
+test lang::navigation::tests::references_respect_scope ... ok
+test lang::navigation::tests::signature_help_outside_a_call_is_none ... ok
+test lang::navigation::tests::signature_help_reports_the_active_parameter ... ok
+test lang::semantic::tests::a_call_target_is_a_function ... ok
+test lang::semantic::tests::a_capitalized_name_is_a_class ... ok
+test lang::semantic::tests::a_regex_literal_is_not_division ... ok
+test lang::semantic::tests::keywords_strings_and_numbers_are_classified ... ok
+test lang::semantic::tests::a_member_name_is_a_property ... ok
+test lang::service::tests::document_lifecycle_rebuilds_analysis ... ok
+test lang::semantic::tests::encoding_uses_deltas ... ok
+test lang::service::tests::generic_global_precedence_is_local_then_runtime_then_manifest ... ok
+test lang::service::tests::live_host_function_outranks_a_manifest_generic_global ... ok
+test lang::service::tests::generic_globals_support_nested_completion_hover_signatures_and_docs ... ok
+test lang::service::tests::registered_modules_feed_import_inference ... ok
+test lang::service::tests::runtime_host_function_replaces_the_manifest_declaration ... ok
+test lang::service::tests::runtime_generic_global_outranks_a_runtime_host_function ... ok
+test lang::service::tests::host_metadata_rebuilds_open_documents ... ok
+test interpreter::tests::top_level_await_reports_a_promise_with_no_pending_work ... ok
+test lang::service::tests::runtime_json_shape_feeds_handler_completion ... ok
+test lang::tests::diagnostics_balanced_ok ... ok
+test lang::tests::diagnostics_template_balances ... ok
+test lang::tests::diagnostics_unbalanced ... ok
+test lang::tests::ident_offers_module_names ... ok
+test lang::tests::exposed_function_metadata_is_available_to_completion ... ok
+test lang::tests::ident_offers_exposed_functions ... ok
+test lang::tests::ident_offers_globals ... ok
+test jit::tests::hot_function_requests_compile_through_vm ... ok
+test lang::tests::ident_offers_scope_decls ... ok
+test lang::tests::legacy_type_strings_are_depth_bounded ... ok
+test lang::tests::ipc_is_absent_without_metadata ... ok
+test lang::tests::member_builtin_math ... ok
+test lang::tests::member_array_var ... ok
+test lang::tests::member_array_literal ... ok
+test lang::tests::member_generic_global ... ok
+test lang::tests::member_global_alias_includes_exposed_host_functions ... ok
+test lang::tests::member_global_alias_includes_generic_global ... ok
+test lang::tests::member_string_literal ... ok
+test lang::tests::member_object_literal_keys ... ok
+test interpreter::tests::test_recursion ... ok
+test lang::tests::symbols_top_level ... ok
+test lang::tests::unknown_legacy_type_names_degrade_instead_of_failing ... ok
+test lang::tests::member_playground_namespace_exports ... ok
+test lang::tests::member_namespace_import_exports ... ok
+test lexer::tests::non_identifiers_are_rejected ... ok
+test lexer::tests::no_keyword_is_a_binding_identifier ... ok
+test lexer::tests::ordinary_names_are_binding_identifiers ... ok
+test lexer::tests::test_arrow ... ok
+test lexer::tests::reserved_word_list_is_exhaustive ... ok
+test lexer::tests::test_identifiers ... ok
+test lexer::tests::test_keywords ... ok
+test lexer::tests::test_compound_assignment ... ok
+test lexer::tests::test_operators ... ok
+test lexer::tests::test_punctuation ... ok
+test lexer::tests::test_spread ... ok
+test lexer::tests::test_comments ... ok
+test lexer::tests::test_string_escapes ... ok
+test lang::tests::unknown_local_binding_still_shadows_builtin_members ... ok
+test lexer::tests::contextual_words_remain_valid_bindings ... ok
+test lexer::tests::test_numbers ... ok
+test lexer::tests::test_strings ... ok
+test lang::tests::ident_playground_prefix ... ok
+test parser::cache::tests::exact_contents_resolve_forced_hash_collisions ... ok
+test parser::cache::tests::distinct_sources_parse_independently ... ok
+test parser::cache::tests::failed_parses_are_not_cached ... ok
+test parser::cache::tests::prepared_errors_match_eval_source ... ok
+test parser::cache::tests::repeated_compiles_share_one_parse ... ok
+test parser::cache::tests::prepared_program_executes_repeatedly_with_one_parse ... ok
+test parser::index::tests::a_parameter_is_a_declaration_in_the_body_scope ... ok
+test parser::index::tests::a_reference_resolves_to_its_declaration ... ok
+test parser::index::tests::a_declaration_is_recorded_with_its_position ... ok
+test parser::index::tests::an_inner_declaration_shadows_an_outer_one ... ok
+test parser::index::tests::the_outline_lists_declarations ... ok
+test parser::tests::test_arrow_fn ... ok
+test parser::tests::test_binary_precedence ... ok
+test parser::tests::test_class_decl ... ok
+test parser::tests::test_class_members_named_like_modifiers ... ok
+test parser::tests::test_computed_member ... ok
+test parser::tests::test_class_accessors_still_parse ... ok
+test parser::tests::test_export_default_class_declaration ... ok
+test parser::tests::test_export_default_function_declaration ... ok
+test parser::index::tests::sibling_scopes_do_not_share_a_binding ... ok
+test parser::tests::test_export_default ... ok
+test parser::tests::test_for_loop ... ok
+test parser::tests::test_for_of ... ok
+test parser::tests::test_for_in ... ok
+test parser::tests::test_import ... ok
+test parser::tests::test_fn_decl ... ok
+test parser::cache::tests::eviction_preserves_recent_entries_and_bounds_bytes ... ok
+test parser::tests::test_if_else ... ok
+test parser::tests::test_new_expr ... ok
+test parser::tests::test_try_catch ... ok
+test parser::tests::test_switch ... ok
+test parser::tests::test_var_decl ... ok
+test parser::tests::test_while_loop ... ok
+test parser::cache::tests::hot_hits_keep_recency_storage_bounded ... ok
+test parser::tests::test_member_access ... ok
+test parser::cache::tests::depth_failure_detail_survives_the_cache_boundary ... ok
+test parser::tests::test_ternary ... ok
+test regex::modifier_tests::vsets_nesting_intersection_and_difference ... ok
+test regex::modifier_tests::vsets_rejects_mixed_operators_and_ranges ... ok
+test regex::modifier_tests::vsets_string_literals_and_keycap_sequences ... ok
+test regex::modifier_tests::whitespace_classes_use_ecmascript_whitespace ... ok
+test regex::modifier_tests::scoped_flags_restore_on_exit_and_backtracking ... ok
+test runtime::tests::missing_spec_file_errors ... ok
+test interpreter::tests::test_variables ... ok
+test regex::modifier_tests::unicode_17_properties_and_simple_case_equivalence ... ok
+test interpreter::commonjs::tests::filesystem_loader_uses_export_array_fallbacks_only_for_invalid_targets ... ok
+test runtime::tests::loop_budget_applies ... ok
+test runtime::tests::prepared_program_stats ... ok
+test runtime::tests::spec_file_round_trips ... ok
+test runtime::tests::spec_is_importable_after_build ... ok
+test interpreter::tests::test_typeof ... ok
+test shape::tests::shared_dictionary_growth_detaches_without_changing_the_other_layout ... ok
+test runtime::tests::runtime_stats_snapshot ... ok
+test regex::modifier_tests::vsets_indexed_string_repeat_matches_long_runs ... ok
+test shape::tests::unique_dictionary_growth_preserves_storage_and_invalidates_caches ... ok
+test value::array_index_tests::canonical_indices_parse ... ok
+test value::array_index_tests::non_canonical_names_are_ordinary_properties ... ok
+test value::array_index_tests::string_helpers_match_char_semantics ... ok
+test shape::tests::bypass_mutation_heals ... ok
+test value::shared_array_buffer_tests::shared_backing_is_aligned_stable_and_clones_share_bytes ... ok
+test shape::tests::add_transition_matches_literal ... ok
+test regex::modifier_tests::scalar_class_repeat_preserves_bounds_backtracking_and_unicode ... ok
+test shape::tests::single_read_builds_nothing ... ok
+test shape::tests::delete_canonicalizes ... ok
+test shape::tests::attributes_do_not_fork_shapes ... ok
+test shape::tests::shared_layout_shared_shape ... ok
+test bytecode::parity_tests::try_catch_finally ... ok
+test value::weak_registry_drop_tests::weak_registrations_do_not_disable_iterative_teardown ... ok
+test bytecode::parity_tests::objects ... ok
+test regex::modifier_tests::unicode_properties_include_lone_surrogates_where_required ... ok
+test value::drop_tests::deeply_nested_values_drop_without_overflowing_the_stack ... ok
+test interpreter::node_addon::tests::loads_and_invokes_a_real_node_api_addon ... ok
+
+test result: ok. 373 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 28.60s
+
+     Running tests/array_to_string_invocation.rs (target/ci/deps/array_to_string_invocation-67af9d87b9b7503f)
+
+running 5 tests
+test array_string_fallback_uses_the_intrinsic_even_when_globals_are_replaced ... ok
+test array_string_uses_join_getters_boxed_receivers_and_all_callables ... ok
+test array_string_propagates_getters_and_rejects_null_before_property_access ... ok
+test removed_modern_to_string_tags_fall_back_to_object ... ok
+test fallback_proxy_brands_only_forward_array_and_callable_internal_slots ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/bound_function_chains.rs (target/ci/deps/bound_function_chains-d3b79702052e3258)
+
+running 4 tests
+test intermediate_bound_has_instance_hooks_remain_observable ... ok
+test bound_chains_preserve_receiver_arguments_and_metadata_order ... ok
+test nested_bound_new_target_is_replaced_at_each_immediate_target ... ok
+test deep_bound_chains_call_and_construct_without_host_recursion ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.05s
+
+     Running tests/class_home_keys.rs (target/ci/deps/class_home_keys-9ef91d6bc7536af1)
+
+running 11 tests
+test class_keys_convert_once_with_string_hint_in_definition_order ... ok
+test computed_constructor_members_and_static_eval_keep_correct_contexts ... ok
+test class_member_descriptors_replacement_and_anonymous_field_names ... ok
+test fields_define_symbols_through_proxy_and_reject_denied_definitions ... ok
+test super_destructuring_tags_and_delete_use_the_same_reference_rules ... ok
+test super_calls_capture_the_target_and_receiver_before_arguments ... ok
+test escaped_home_objects_and_symbol_methods_keep_foreign_realms_alive ... ok
+test super_writes_use_receiver_and_preserve_the_captured_reference ... ok
+test home_objects_follow_mutated_prototypes_without_following_receivers ... ok
+test symbols_keep_identity_in_class_methods_accessors_and_fields ... ok
+test class_heritage_validates_constructors_and_observable_prototypes ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+     Running tests/function_binding_semantics.rs (target/ci/deps/function_binding_semantics-6ea1c7d12eb6e85c)
+
+running 10 tests
+test parenthesized_arrow_values_can_still_be_called_and_indexed ... ok
+test deleting_inherited_function_properties_does_not_resurrect_defaults ... ok
+test host_callbacks_also_respect_deleted_function_prototype_properties ... ok
+test parenthesized_logical_assignment_targets_do_not_infer_names ... ok
+test computed_fields_after_block_arrows_remain_separate_fields ... ok
+test method_modifiers_cannot_introduce_data_properties ... ok
+test default_parameters_infer_names_only_for_anonymous_definitions ... ok
+test exponentiation_requires_parentheses_around_await_on_the_left ... ok
+test annex_b_for_in_initializers_have_inferred_names_even_without_iterations ... ok
+test primitive_references_preserve_receivers_through_proxy_prototypes ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/function_proxy_metadata.rs (target/ci/deps/function_proxy_metadata-46fa3e5fd8a1115d)
+
+running 3 tests
+test proxy_constructor_inherits_function_methods_without_public_prototype ... ok
+test proxy_binding_preserves_construction_and_requires_new ... ok
+test function_constructors_have_ordered_own_metadata ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/grammar_contexts.rs (target/ci/deps/grammar_contexts-17e2f741ebbdb095)
+
+running 59 tests
+test classic_for_heads_share_lexical_declaration_conflicts ... ok
+test annex_b_function_statement_positions_preserve_strict_and_block_boundaries ... ok
+test assignment_rest_comma_and_lexical_loop_bindings_are_early_errors ... ok
+test catch_patterns_validate_bound_names_and_declaration_conflicts ... ok
+test async_generator_and_parameter_contexts_reject_invalid_source ... ok
+test annex_b_call_targets_exclude_logical_assignments_and_tagged_templates ... ok
+test aggregate_binding_defaults_and_numeric_property_names_share_literal_semantics ... ok
+test comment_termination_and_line_breaks_are_lexical_semantics ... ok
+test const_initializers_numeric_boundaries_and_spread_positions_are_early_errors ... ok
+test declarations_imports_exports_and_catch_conflicts ... ok
+test callable_lexical_goals_distinguish_contextual_names_from_operands ... ok
+test closing_statement_delimiters_allow_regexp_literals ... ok
+test exponentiation_and_coalescing_respect_parentheses ... ok
+test contextual_identifiers_and_nested_functions_remain_valid ... ok
+test default_import_bindings_use_the_common_contextual_identifier_grammar ... ok
+test full_corpus_grammar_regressions_have_explicit_boundaries ... ok
+test imports_require_from_as_and_specifier_separators ... ok
+test annex_b_comments_follow_the_lexical_goal_and_function_parameter_goal ... ok
+test iteration_heads_keep_declaration_and_assignment_grammar_distinct ... ok
+test dynamic_function_parse_errors_precede_new_target_prototype_access ... ok
+test import_options_and_arbitrary_module_export_names_are_validated ... ok
+test labelled_and_static_blocks_preserve_statement_lexical_goals ... ok
+test keyword_property_names_and_contextual_shorthand_use_distinct_grammar ... ok
+test lexical_declarations_require_statement_list_positions ... ok
+test line_terminators_and_parameter_delimiters_are_grammar_boundaries ... ok
+test module_declarations_and_resources_require_their_grammar_positions ... ok
+test module_specifier_strings_preserve_utf16_but_export_names_require_unicode ... ok
+test arrows_share_function_rest_pattern_grammar ... ok
+test for_in_assignment_heads_are_retained_and_validated ... ok
+test no_in_loop_heads_restore_in_for_nested_grammar_productions ... ok
+test computed_object_methods_keep_method_context_and_accessor_metadata ... ok
+test parameter_defaults_and_pattern_bound_names_cannot_disappear_during_recovery ... ok
+test keyword_member_names_and_template_line_endings_follow_lexical_grammar ... ok
+test private_identifiers_are_contiguous_tokens_and_heritage_is_not_assignment_grammar ... ok
+test class_initializer_direct_eval_retains_arguments_restrictions ... ok
+test property_names_and_list_separators_cannot_be_recovered_as_bindings ... ok
+test private_names_and_class_element_early_errors ... ok
+test regexp_literals_validate_grammar_before_execution ... ok
+test contextual_let_and_static_are_complete_expressions_in_sloppy_code ... ok
+test resource_and_import_call_grammar_rejects_invalid_statement_positions ... ok
+test catch_pattern_initialization_observes_tdz_and_restores_scope_on_abrupt_completion ... ok
+test super_and_new_target_follow_lexical_function_boundaries ... ok
+test quoted_hash_properties_do_not_declare_private_names ... ok
+test token_internal_line_continuations_do_not_trigger_asi ... ok
+test newer_syntax_retains_metadata_and_resource_scope_semantics ... ok
+test object_cover_defaults_and_duplicate_prototype_setters ... ok
+test undefined_is_a_shadowable_identifier ... ok
+test legacy_literal_metadata_obeys_strict_scopes_and_property_names ... ok
+test sloppy_eval_var_conflicts_distinguish_identifier_and_pattern_catch_bindings ... ok
+test parenthesized_references_and_optional_chain_boundaries ... ok
+test using_iteration_heads_preserve_contextual_identifier_grammar ... ok
+test templates_and_async_declarations_preserve_lexical_goals ... ok
+test iteration_assignment_targets_update_bindings_and_close_on_failure ... ok
+test unicode_identifier_names_preserve_escape_and_keyword_boundaries ... ok
+test sloppy_call_assignment_targets_evaluate_before_reference_error ... ok
+test named_function_expressions_and_dynamic_function_kinds_keep_their_own_context ... ok
+test invalid_template_escapes_are_allowed_only_for_tags ... ok
+test direct_eval_inherits_private_and_super_context_but_ordinary_functions_do_not ... ok
+test with_syntax_uses_object_records_and_restores_lexical_scope ... ok
+
+test result: ok. 59 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+
+     Running tests/string_semantic_gaps.rs (target/ci/deps/string_semantic_gaps-7364a8a562424d24)
+
+running 6 tests
+test starts_with_has_standard_native_metadata ... ok
+test legacy_hex_escapes_restore_partial_digits_and_allow_identity ... ok
+test raw_boxes_both_template_and_raw_before_getters ... ok
+test raw_observes_logical_length_and_abrupt_getters ... ok
+test raw_length_uses_number_hint_and_rejects_symbol_and_bigint ... ok
+test unicode_hex_escapes_remain_strict_and_decode_valid_pairs ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/tagged_template_construction.rs (target/ci/deps/tagged_template_construction-356855d939415a2e)
+
+running 4 tests
+test tag_application_precedes_constructor_invocation ... ok
+test tagged_constructor_member_access_and_tag_receivers_follow_member_grammar ... ok
+test repeated_tags_are_evaluated_before_new ... ok
+test cache_hits_still_evaluate_tag_getters_and_substitutions ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/template_object_cache.rs (target/ci/deps/template_object_cache-ac3f51a8b9e34fc6)
+
+running 5 tests
+test cache_retains_template_identity_across_cycle_collection ... ok
+test sites_reuse_across_calls_and_factory_functions_but_distinct_sites_do_not ... ok
+test each_eval_has_distinct_sites_but_reuses_sites_within_one_eval ... ok
+test prepared_site_objects_are_separate_in_each_realm ... ok
+test function_constructor_parse_sites_are_distinct ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/template_object_integrity.rs (target/ci/deps/template_object_integrity-af2623d806fa03e4)
+
+running 2 tests
+test cooked_and_raw_arrays_are_frozen_with_standard_raw_descriptor ... ok
+test construction_uses_intrinsics_even_if_guest_freeze_is_replaced ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
