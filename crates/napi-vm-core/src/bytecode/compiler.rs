@@ -2040,6 +2040,7 @@ impl<'a> Compiler<'a> {
         ))?;
         self.emit(Instr::ClassPrivateEnvironment { names });
 
+        let mut field_decorators = Vec::new();
         let mut members = Vec::new();
         let mut blocks = Vec::new();
         let mut ctor_computed_keys = Vec::new();
@@ -2120,12 +2121,26 @@ impl<'a> Compiler<'a> {
                     });
                 }
                 ClassMember::Field {
+                    decorators: _,
                     name: field_name,
                     is_static: st,
                     auto_accessor,
                     init,
                 } => {
                     let template = self.compile_member_name(field_name)?;
+                    if !member_decorators.is_empty() {
+                        field_decorators.push(super::constants::ClassFieldDecoratorTemplate {
+                            name: template.clone(),
+                            is_static: *st,
+                            index: if *st {
+                                blocks.len()
+                            } else {
+                                instance_fields.len()
+                            },
+                            decorators: member_decorators,
+                        });
+                    }
+
                     if *auto_accessor {
                         self.check_static_method_key(&template, *st)?;
                         let storage = crate::parser::auto_accessor_storage(member_index);
@@ -2355,6 +2370,7 @@ impl<'a> Compiler<'a> {
         ));
 
         let tmpl = self.push_const(Constant::ClassTemplate(ClassTemplate {
+            field_decorators,
             has_method_decorators,
             decorators: decorator_registers,
             source_text: source_text.cloned(),

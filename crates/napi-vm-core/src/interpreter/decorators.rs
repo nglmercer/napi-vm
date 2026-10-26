@@ -3,6 +3,8 @@ use super::{BindKind, Env, Interpreter};
 use crate::error::VmErr;
 use crate::value::{PrivateElement, Value};
 
+pub(crate) const INSTANCE_FIELD_INITIALIZERS: &str = "\0decorator-instance-field-initializers";
+
 pub(crate) const INSTANCE_METHOD_INITIALIZERS: &str = "\0decorator-instance-method-initializers";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -18,6 +20,14 @@ pub(crate) struct ClassMethodDefinition {
     pub private: bool,
     pub is_static: bool,
     pub value: Value,
+    pub decorators: Vec<(Value, Value)>,
+}
+
+pub(crate) struct ClassFieldDefinition {
+    pub key: Value,
+    pub private: bool,
+    pub is_static: bool,
+    pub index: usize,
     pub decorators: Vec<(Value, Value)>,
 }
 
@@ -72,7 +82,190 @@ fn access_get(vm: &mut Interpreter, state: Value, args: Vec<Value>) -> Result<Va
     )
 }
 
+fn access_set(vm: &mut Interpreter, state: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let receiver = access_receiver(&args)?;
+    let value = args.get(1).cloned().unwrap_or(Value::Undefined);
+    if let Some(id) = private_id(&state) {
+        match receiver.private_element(id)? {
+            PrivateElement::Field(_) => receiver.set_private_field(id, value)?,
+            PrivateElement::Accessor {
+                set: Some(setter), ..
+            } => {
+                vm.call_this(&setter, receiver, vec![value])?;
+            }
+            _ => {
+                return Err(VmErr::Msg(
+                    "TypeError: private element is not writable".into(),
+                ));
+            }
+        }
+    } else {
+        let key = state.get_prop("key").expect("internal property key");
+        if !vm.set_member_with_receiver(&receiver, &key, value, &receiver)? {
+            return Err(VmErr::Msg(
+                "TypeError: decorator access cannot set property".into(),
+            ));
+        }
+    }
+    Ok(Value::Undefined)
+}
+
 impl Interpreter {
+    fn element_decorator_context(
+        &self,
+        scope: &Env,
+        kind: &str,
+        key: &Value,
+        private: bool,
+        is_static: bool,
+        initializers: &Value,
+    ) -> Result<(Value, Value), VmErr> {
+        let access_state = Value::object(vec![("key".into(), key.clone())]);
+        if private {
+            let key = self.property_key(key)?;
+            let id = scope
+                .borrow()
+                .private_name(&key)
+                .expect("declared private element");
+            access_state.set_prop("privateId".into(), Value::String(id.to_string().into()))?;
+        }
+        let mut access = Vec::new();
+        if kind != "setter" {
+            access.push((
+                "get".into(),
+                crate::builtins::bound_native_method("", 1, access_get, None, access_state.clone()),
+            ));
+        }
+        if matches!(kind, "field" | "accessor" | "setter") {
+            access.push((
+                "set".into(),
+                crate::builtins::bound_native_method("", 2, access_set, None, access_state.clone()),
+            ));
+        }
+        access.push((
+            "has".into(),
+            crate::builtins::bound_native_method("has", 1, access_has, None, access_state),
+        ));
+        let state = Value::object(vec![
+            ("active".into(), Value::Bool(true)),
+            ("initializers".into(), initializers.clone()),
+        ]);
+        let context = Value::object(vec![
+            ("kind".into(), Value::String(kind.into())),
+            ("access".into(), Value::object(access)),
+            ("static".into(), Value::Bool(is_static)),
+            ("private".into(), Value::Bool(private)),
+            ("name".into(), key.clone()),
+            (
+                "addInitializer".into(),
+                crate::builtins::bound_native_method(
+                    "addInitializer",
+                    1,
+                    super::eval::decorator_add_initializer,
+                    None,
+                    state.clone(),
+                ),
+            ),
+        ]);
+        Ok((context, state))
+    }
+
+    pub(crate) fn decorate_class_fields(
+        &mut self,
+        scope: &Env,
+        records: &[ClassFieldDefinition],
+    ) -> Result<Vec<(usize, Value)>, VmErr> {
+        if records.is_empty() {
+            return Ok(Vec::new());
+        }
+        let instance_states = Value::array(vec![]);
+        let mut static_states = Vec::new();
+        for is_static in [true, false] {
+            for record in records
+                .iter()
+                .filter(|record| record.is_static == is_static)
+            {
+                let transforms = Value::array(vec![]);
+                let extras = Value::array(vec![]);
+                for (decorator, receiver) in record.decorators.iter().rev() {
+                    let (context, active) = self.element_decorator_context(
+                        scope,
+                        "field",
+                        &record.key,
+                        record.private,
+                        is_static,
+                        &extras,
+                    )?;
+                    let result = self.call_this(
+                        decorator,
+                        receiver.clone(),
+                        vec![Value::Undefined, context],
+                    );
+                    active.set_prop("active".into(), Value::Bool(false))?;
+                    let transform = result?;
+                    if super::is_callable_value(&transform) {
+                        let list = transforms.as_array().expect("internal transform list");
+                        list.store_index(list.array_length(), transform);
+                    } else if !matches!(transform, Value::Undefined) {
+                        return Err(VmErr::Msg(
+                            "TypeError: field decorator must return a callable or undefined".into(),
+                        ));
+                    }
+                }
+                let state = Value::object(vec![
+                    ("transforms".into(), transforms),
+                    ("extras".into(), extras),
+                ]);
+                if is_static {
+                    static_states.push((record.index, state));
+                } else {
+                    instance_states
+                        .as_array()
+                        .expect("internal field states")
+                        .store_index(record.index, state);
+                }
+            }
+        }
+        scope.borrow_mut().declare(
+            INSTANCE_FIELD_INITIALIZERS,
+            instance_states,
+            BindKind::Const,
+            true,
+        );
+        Ok(static_states)
+    }
+
+    pub(crate) fn apply_field_initializers(
+        &mut self,
+        state: &Value,
+        receiver: &Value,
+        mut value: Value,
+    ) -> Result<Value, VmErr> {
+        let transforms = state
+            .get_prop("transforms")
+            .and_then(|value| value.as_array())
+            .expect("internal transform list");
+        for index in (0..transforms.array_length()).rev() {
+            self.check_execution_interrupt()?;
+            let function = transforms.index_value(index).expect("dense transform list");
+            value = self.call_this(&function, receiver.clone(), vec![value])?;
+        }
+        Ok(value)
+    }
+
+    pub(crate) fn run_field_extra_initializers(
+        &mut self,
+        state: &Value,
+        receiver: &Value,
+    ) -> Result<(), VmErr> {
+        self.run_method_initializers(
+            &state
+                .get_prop("extras")
+                .expect("internal extra initializer list"),
+            receiver,
+        )
+    }
+
     pub(crate) fn decorate_class_methods(
         &mut self,
         class: &Value,
@@ -98,60 +291,15 @@ impl Interpreter {
                 } else {
                     &instance_initializers
                 };
-                let access_state = Value::object(vec![("key".into(), record.key.clone())]);
-                if record.private {
-                    let key = self.property_key(&record.key)?;
-                    let id = scope
-                        .borrow()
-                        .private_name(&key)
-                        .expect("declared private method");
-                    access_state
-                        .set_prop("privateId".into(), Value::String(id.to_string().into()))?;
-                }
                 for (decorator, receiver) in record.decorators.iter().rev() {
-                    let state = Value::object(vec![
-                        ("active".into(), Value::Bool(true)),
-                        ("initializers".into(), initializers.clone()),
-                    ]);
-                    let access = Value::object(vec![
-                        (
-                            "has".into(),
-                            crate::builtins::bound_native_method(
-                                "has",
-                                1,
-                                access_has,
-                                None,
-                                access_state.clone(),
-                            ),
-                        ),
-                        (
-                            "get".into(),
-                            crate::builtins::bound_native_method(
-                                "",
-                                1,
-                                access_get,
-                                None,
-                                access_state.clone(),
-                            ),
-                        ),
-                    ]);
-                    let context = Value::object(vec![
-                        ("kind".into(), Value::String("method".into())),
-                        ("name".into(), record.key.clone()),
-                        ("static".into(), Value::Bool(is_static)),
-                        ("private".into(), Value::Bool(record.private)),
-                        ("access".into(), access),
-                        (
-                            "addInitializer".into(),
-                            crate::builtins::bound_native_method(
-                                "addInitializer",
-                                1,
-                                super::eval::decorator_add_initializer,
-                                None,
-                                state.clone(),
-                            ),
-                        ),
-                    ]);
+                    let (context, state) = self.element_decorator_context(
+                        scope,
+                        "method",
+                        &record.key,
+                        record.private,
+                        is_static,
+                        initializers,
+                    )?;
                     let result = self.call_this(
                         decorator,
                         receiver.clone(),

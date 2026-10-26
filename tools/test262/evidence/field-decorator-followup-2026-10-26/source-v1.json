@@ -1,0 +1,7 @@
+{
+  "source_commit": "fc2514bb0d3e2ddbc0c9ec66e240c4a170dc2f71",
+  "source_status": "uncommitted snapshot",
+  "source_diff_sha256": "50365fc73a4415b3fa0c8a524ef42341897c21454d99364b649ffd4b3c18e967",
+  "engine_built": false,
+  "regression_exit_code": 101
+}

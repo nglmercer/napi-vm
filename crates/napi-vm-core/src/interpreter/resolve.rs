@@ -1033,6 +1033,14 @@ impl Interpreter {
                 }
             }
         }
+        if let Value::Array(array) = o
+            && !array.meta.borrow().data_property_keys.is_empty()
+        {
+            let slot = self.property_key(p)?;
+            if array.meta.borrow().is_explicit_data(&slot) {
+                return Ok(v);
+            }
+        }
         let is_getter = name_matches("get ")?;
         let is_setter_only = !is_getter && name_matches("set ")?;
         if is_getter {
@@ -1170,6 +1178,12 @@ impl Interpreter {
             }
         }
         let v = self.prop_str(o, key)?;
+        if let Value::Array(array) = o
+            && array.meta.borrow().is_explicit_data(key)
+        {
+            return Ok(v);
+        }
+
         // The global object record stores variable values as data. Callable
         // names are not sufficient to turn an ordinary binding into a getter.
         if let Some(cell) = o.property_cell()

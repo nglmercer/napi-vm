@@ -607,6 +607,19 @@ impl ArrayCell {
         for key in removed {
             self.meta.borrow_mut().forget(&key);
         }
+        if length < old_length {
+            let mut metadata = self.meta.borrow_mut();
+            if old_length - length < metadata.data_property_keys.len() {
+                // Repeated pop() must remove one marker, not scan every key.
+                for index in length..old_length {
+                    metadata.data_property_keys.remove(&index.to_string());
+                }
+            } else {
+                metadata
+                    .data_property_keys
+                    .retain(|key| array_index(key).is_none_or(|index| index < length));
+            }
+        }
         if length > MAX_ARRAY_LEN {
             *self.length_override.borrow_mut() = Some(length);
             return;

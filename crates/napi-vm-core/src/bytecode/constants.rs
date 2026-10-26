@@ -109,10 +109,19 @@ pub enum ClassStaticTemplate {
     Block(u16),
 }
 
+#[derive(Debug, Clone)]
+pub struct ClassFieldDecoratorTemplate {
+    pub name: ClassNameTemplate,
+    pub is_static: bool,
+    pub index: usize,
+    pub decorators: Vec<(Reg, Option<Reg>)>,
+}
+
 /// A class definition template. Function-constant slots start as `u16::MAX`
 /// placeholders the deferred pass overwrites once each method compiles.
 #[derive(Debug, Clone)]
 pub struct ClassTemplate {
+    pub field_decorators: Vec<ClassFieldDecoratorTemplate>,
     pub has_method_decorators: bool,
     pub decorators: Vec<(Reg, Option<Reg>)>,
     pub source_text: Option<crate::parser::SourceTextRef>,

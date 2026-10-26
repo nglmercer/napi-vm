@@ -1,0 +1,15 @@
+{
+  "source_commit": "fc2514bb0d3e2ddbc0c9ec66e240c4a170dc2f71",
+  "source_status": "uncommitted snapshot",
+  "source_diff_sha256": "abb497fbd8003f22566a4f82d313bb8f650b8df1bb9a7ca3d39054d969732a63",
+  "engine_sha256": "7d881d2b6d00a5c6a34f4e31d3ef5822342d647aea45125a87aa08b0989c0faa",
+  "checks": {
+    "core_library_tests": 405,
+    "worker_tests": 5,
+    "clippy": "all targets, warnings denied; passed",
+    "root_all_target_check": "passed",
+    "format": "passed",
+    "diff_whitespace": "passed"
+  },
+  "revalidated_after_measurements": true
+}

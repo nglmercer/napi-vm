@@ -73,6 +73,7 @@ pub(super) fn decorator_add_initializer(
 #[derive(Debug, Clone)]
 pub(crate) enum ClassStaticElement {
     Field {
+        decoration: Option<Value>,
         name: Value,
         private: bool,
         init: Expr,
@@ -84,6 +85,7 @@ pub(crate) enum ClassStaticElement {
 /// the constructor plus gathered prototype/static members, with static
 /// blocks to run once the class value exists.
 pub(crate) struct ClassAssembly {
+    pub field_definitions: Vec<super::ClassFieldDefinition>,
     pub method_definitions: Vec<super::ClassMethodDefinition>,
     pub decorators: Vec<(Value, Value)>,
     pub source_text: Option<crate::parser::SourceTextRef>,
@@ -569,6 +571,7 @@ impl Interpreter {
     /// each tier; everything from the prototype object on is shared.
     pub(crate) fn assemble_class(&mut self, asm: ClassAssembly) -> Result<Value, VmErr> {
         let ClassAssembly {
+            field_definitions,
             mut method_definitions,
             decorators,
             source_text,
@@ -583,7 +586,7 @@ impl Interpreter {
             mut statics,
             mut static_attrs,
             static_has_accessors,
-            static_elements,
+            mut static_elements,
             private_scope,
             instance_home,
             static_home,
@@ -741,6 +744,17 @@ impl Interpreter {
             &mut private_statics,
         )?;
 
+        let field_states = self.decorate_class_fields(&private_scope, &field_definitions)?;
+        for (index, state) in field_states {
+            let Some(ClassStaticElement::Field { decoration, .. }) = static_elements.get_mut(index)
+            else {
+                return Err(VmErr::Msg(
+                    "InternalError: invalid decorated static field index".into(),
+                ));
+            };
+            *decoration = Some(state);
+        }
+
         for (id, element) in private_statics {
             class_val.initialize_private_element(id, element)?;
         }
@@ -807,6 +821,7 @@ impl Interpreter {
                 match element {
                     ClassStaticElement::Block(block) => self.run_program_body(&block).map(|_| ()),
                     ClassStaticElement::Field {
+                        decoration,
                         name,
                         private,
                         init,
@@ -816,7 +831,12 @@ impl Interpreter {
                         } else {
                             self.evaluate_class_field(&init, &name)?
                         };
-                        if private {
+                        let value = if let Some(state) = &decoration {
+                            self.apply_field_initializers(state, &class_val, value)?
+                        } else {
+                            value
+                        };
+                        let stored = if private {
                             let id = self
                                 .global
                                 .borrow()
@@ -840,7 +860,12 @@ impl Interpreter {
                                 ));
                             }
                             Ok(())
+                        };
+                        stored?;
+                        if let Some(state) = &decoration {
+                            self.run_field_extra_initializers(state, &class_val)?;
                         }
+                        Ok(())
                     }
                 }
             })();
@@ -945,6 +970,7 @@ impl Interpreter {
         let mut static_elements = Vec::new();
         let has_method_decorators = body.iter().any(|member| !member.decorators().is_empty());
         let mut method_definitions = Vec::new();
+        let mut field_definitions = Vec::new();
 
         for (member_index, member) in body.iter().enumerate() {
             let saved = std::mem::replace(&mut self.global, member_scope.clone());
@@ -1058,12 +1084,27 @@ impl Interpreter {
                     static_elements.push(ClassStaticElement::Block(Rc::new(body.clone())));
                 }
                 ClassMember::Field {
+                    decorators: _,
                     name,
                     is_static: st,
                     auto_accessor,
                     init,
                 } => {
                     let fname = self.class_member_name(&member_scope, name)?;
+                    if !member_decorators.is_empty() {
+                        field_definitions.push(super::ClassFieldDefinition {
+                            key: fname.clone(),
+                            private: matches!(name, MemberName::Private(_)),
+                            is_static: *st,
+                            index: if *st {
+                                static_elements.len()
+                            } else {
+                                instance_fields.len()
+                            },
+                            decorators: member_decorators,
+                        });
+                    }
+
                     if *auto_accessor {
                         let storage = crate::parser::auto_accessor_storage(member_index);
                         member_scope.borrow_mut().declare(
@@ -1166,6 +1207,7 @@ impl Interpreter {
                         }
                         if *st {
                             static_elements.push(ClassStaticElement::Field {
+                                decoration: None,
                                 name: Value::String(crate::JsString::from_key(&storage)),
                                 private: true,
                                 init: init.clone().unwrap_or(Expr::Undefined),
@@ -1182,6 +1224,7 @@ impl Interpreter {
 
                     if *st {
                         static_elements.push(ClassStaticElement::Field {
+                            decoration: None,
                             name: fname,
                             private: matches!(name, MemberName::Private(_)),
                             init: init.clone().unwrap_or(Expr::Undefined),
@@ -1452,6 +1495,7 @@ impl Interpreter {
         }));
 
         self.assemble_class(ClassAssembly {
+            field_definitions,
             method_definitions,
             decorators: evaluated_decorators,
             source_text: source_text.cloned(),

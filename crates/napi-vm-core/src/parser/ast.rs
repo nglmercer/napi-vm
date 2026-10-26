@@ -36,7 +36,7 @@ impl Statement {
 impl ClassMember {
     pub(crate) fn decorators(&self) -> &[Expr] {
         match self {
-            Self::Method { decorators, .. } => decorators,
+            Self::Method { decorators, .. } | Self::Field { decorators, .. } => decorators,
             _ => &[],
         }
     }
@@ -589,6 +589,7 @@ pub enum ClassMember {
         is_generator: bool,
     },
     Field {
+        decorators: Vec<Expr>,
         name: MemberName,
         is_static: bool,
         auto_accessor: bool,

@@ -2131,3 +2131,66 @@ fn explicit_data_descriptors_keep_getter_named_functions_as_data() {
         );
     }
 }
+
+#[test]
+fn field_decorators_transform_values_and_run_extras_after_storage() {
+    for source in [
+        "var log='';function d(n){log+='e'+n;return function(v,c){if(v!==undefined||c.kind!=='field')throw 42;log+='d'+n;c.addInitializer(function(){log+='x'+n;if(!c.access.has(this))throw 43;});return function(v){log+='i'+n;return n==='a'?v+1:v*2;};};}class C{@d('a') @d('b') x=(log+='r',3);y=(log+='y',this.x);}var c=new C();log==='eaebdbdariaibxbxay'&&c.x===8&&c.y===8;",
+        "var access;function d(v,c){access=c.access;return function(v){return v+1;};}class C{@d #x=2;get(){return this.#x;}}var c=new C();access.set(c,5);var errors=0;try{access.get({});}catch(e){if(e instanceof TypeError)errors++;}try{access.set(new Proxy(c,{}),1);}catch(e){if(e instanceof TypeError)errors++;}c.get()===5&&access.has(c)&&!access.has({})&&!access.has(new Proxy(c,{}))&&errors===2;",
+        "var access;function d(v,c){access=c.access;if(!c.private||!c.static||c.name!=='#x')throw 42;c.addInitializer(function(){this.y=access.get(this);});return function(v){return v+2;};}class C{@d static #x=3;static z=this.y;}access.get(C)===5&&C.y===5&&C.z===5;",
+        "var symbol=Symbol('x'),calls=0;var key={toString(){calls++;return 'x';}};function d(v,c){return function(v){return v+1;};}class C{@d [key]=1;@d [symbol]=2;}var a=new C(),b=new C();calls===1&&a.x===2&&b.x===2&&a[symbol]===3;",
+        "var log='';function d(n){return function(v,c){log+='d'+n;return function(v){log+='i'+n;return v+1;};};}class C{@d('a') x=1;@d('b') x=3;}var c=new C();log==='dadbiaib'&&c.x===4;",
+        "function d(v,c){return function(v){return v===undefined?4:v;};}class C{a=1;@d x;b=2;accessor z=3;}new C().x===4;",
+        "var access;var s=Symbol('x');function d(v,c){if(c.name!==s||c.private||c.static)throw 42;access=c.access;}class C{@d [s]=2;}var c=new C();access.set(c,5);access.get(c)===5&&access.has(c)&&!access.has({});",
+        "var count=0;function d(v,c){c.addInitializer(function(){count++;});}class C{@d x=1;make(){return class D{x=2;};}}var c=new C();var D=c.make();new D();count===1;",
+        "var log='';function d(v,c){c.addInitializer(function(){log+='x';});return function(v){log+='i';return v+1;};}class C{@d x=(log+='b',1);}class D extends C{@d y=(log+='d',2);}var o=new D();log==='bixdix'&&o.x===2&&o.y===3;",
+        "var log='';function d(v,c){return function(v){return v+1;};}function cls(C){return class extends C{};}@cls class C{@d static x=2;static y=this.x;}C.x===3&&C.y===3&&!Object.hasOwn(Object.getPrototypeOf(C),'x');",
+        "var name;function d(v,c){return function(v){name=v.name;return function(){};};}class C{@d x=function(){};}var c=new C();name==='x'&&c.x.name==='';",
+        "var saved;function d(v,c){saved=c.addInitializer;throw 42;}var caught;try{var C=class{@d x;};}catch(e){caught=e;}var ok=false;try{saved(function(){});}catch(e){ok=e instanceof TypeError;}caught===42&&ok;",
+        "function d(){return 1;}var ok=false;try{var C=class{@d x;};}catch(e){ok=e instanceof TypeError;}ok;",
+        "var log='';function d(v,c){c.addInitializer(function(){log+='x';});return function(v){throw 42;};}class C{@d x=(log+='r',1);y=(log+='y',2);}var caught;try{new C();}catch(e){caught=e;}caught===42&&log==='r';",
+        "var log='';function d(v,c){log+=c.static?'s':'i';}class C{@d a;@d static b;}log==='si';",
+        "var saved,log='';function d(v,c){c.addInitializer(function(){saved=this;log+='x';throw 42;});return function(v){return v+1;};}class C{@d x=2;y=(log+='y',1);}var caught;try{new C();}catch(e){caught=e;}caught===42&&saved.x===3&&!Object.hasOwn(saved,'y')&&log==='x';",
+        "var log='';function d(v,c){c.addInitializer(function(){log+='x';});return function(v){log+='i';return v;};}class C{@d x=(()=>{log+='r';throw 42;})();}var caught;try{new C();}catch(e){caught=e;}caught===42&&log==='r';",
+        "var before,after;function d(v,c){c.addInitializer(function(){after=c.access.has(this);});return function(v){before=c.access.has(this);return v;};}class C{@d #x=1;}new C();before===false&&after===true;",
+        "function make(d){class C{@(arguments[0]) x=1;}return new C().x;}make(function(){return function(v){return v+1;};})===2;",
+        "var f=Object.getOwnPropertyDescriptor({get x(){return 7;}},'x').get;function d(v,c){c.addInitializer(function(){Object.defineProperty(this,'other',{get(){return 1;}});});return function(){return f;};}class C extends Array{@d x=1;}var c=new C();c.x===f&&c.x()===7&&Object.getOwnPropertyDescriptor(c,'x').value===f;",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn element_decorator_context_creation_order_matches_its_visible_shape() {
+    for source in [
+        "var keys,accessKeys;function d(v,c){keys=Object.keys(c).join(',');accessKeys=Object.keys(c.access).join(',');}class C{@d x;}keys==='kind,access,static,private,name,addInitializer'&&accessKeys==='get,set,has';",
+        "var keys,accessKeys;function d(v,c){keys=Object.keys(c).join(',');accessKeys=Object.keys(c.access).join(',');}class C{@d m(){}}keys==='kind,access,static,private,name,addInitializer'&&accessKeys==='get,has';",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn array_data_descriptor_tags_survive_writes_and_clear_on_deletion_or_truncation() {
+    for source in [
+        "var f=Object.getOwnPropertyDescriptor({get x(){return 7;}},'x').get;var a=[];Object.defineProperty(a,'x',{value:f,writable:true,configurable:true});Object.defineProperty(a,'other',{get(){return 1;}});var old=a.x;var desc=Object.getOwnPropertyDescriptor(a,'x');a.x=4;old===f&&desc.value===f&&a.x===4;",
+        "var f=Object.getOwnPropertyDescriptor({get x(){return 7;}},'x').get;var a=[];Object.defineProperty(a,'x',{value:f,writable:true,configurable:true});delete a.x;Object.defineProperty(a,'x',{get(){return 3;},configurable:true});a.x===3;",
+        "class Source{get 0(){return 7;}}var f=Object.getOwnPropertyDescriptor(Source.prototype,'0').get;var a=[];Object.defineProperty(a,'0',{value:f,writable:true,configurable:true});var popped=a.pop();Object.defineProperty(a,'0',{get(){return 4;},configurable:true});popped===f&&a.length===1&&a[0]===4;",
+        "class Source{get 0(){return 7;}}var f=Object.getOwnPropertyDescriptor(Source.prototype,'0').get;var a=[];Object.defineProperty(a,'0',{value:f,writable:true,configurable:true});var before=a['0'];a.length=0;Object.defineProperty(a,'0',{get(){return 4;},configurable:true});before===f&&a[0]===4;",
+        "var s=Symbol('x');class Source{get [s](){return 7;}}var f=Object.getOwnPropertyDescriptor(Source.prototype,s).get;var a=[];Object.defineProperty(a,s,{value:f,writable:true,configurable:true});a[s]===f&&a[s]()===7&&Object.getOwnPropertyDescriptor(a,s).value===f;",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}

@@ -1733,7 +1733,9 @@ fn define_array_property(
     }
 
     let index = crate::value::array_index(key);
-    let old_accessor_kind = if array.meta.borrow().is_empty_accessor(key) {
+    let old_accessor_kind = if array.meta.borrow().is_explicit_data(key) {
+        None
+    } else if array.meta.borrow().is_empty_accessor(key) {
         Some("empty")
     } else {
         old_value
@@ -1840,6 +1842,10 @@ fn define_array_property(
         .meta
         .borrow_mut()
         .set_empty_accessor(key, empty_accessor);
+    array
+        .meta
+        .borrow_mut()
+        .set_explicit_data(key, !new_is_accessor);
     Ok(())
 }
 
@@ -2237,7 +2243,12 @@ fn descriptor_for_array_value(
             ("configurable".into(), Value::Bool(attrs.configurable)),
         ]);
     }
-    match accessor_kind_with_symbol(array.meta.borrow().symbol_key(key), key, &value) {
+    let kind = if array.meta.borrow().is_explicit_data(key) {
+        None
+    } else {
+        accessor_kind_with_symbol(array.meta.borrow().symbol_key(key), key, &value)
+    };
+    match kind {
         Some("get") => Value::descriptor_record(vec![
             ("get".to_string(), value),
             (

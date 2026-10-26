@@ -931,6 +931,17 @@ impl Checker<'_> {
             self.check_reg(address, *reg)?;
         }
         self.check_func_const(address, template.ctor_func)?;
+        for field in &template.field_decorators {
+            if let ClassNameTemplate::Computed(reg) = field.name {
+                self.check_reg(address, reg)?;
+            }
+            for (value, receiver) in &field.decorators {
+                self.check_reg(address, *value)?;
+                if let Some(receiver) = receiver {
+                    self.check_reg(address, *receiver)?;
+                }
+            }
+        }
         for member in &template.members {
             for (value, receiver) in &member.decorators {
                 self.check_reg(address, *value)?;

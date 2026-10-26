@@ -7,7 +7,7 @@ pub(crate) mod annex;
 pub mod commonjs;
 mod decorators;
 mod env;
-pub(crate) use decorators::{ClassMethodDefinition, ClassMethodKind};
+pub(crate) use decorators::{ClassFieldDefinition, ClassMethodDefinition, ClassMethodKind};
 mod eval;
 pub(crate) mod for_in;
 pub mod jobs;
@@ -2187,6 +2187,10 @@ impl Interpreter {
             )
         };
         let definitions = defining.borrow().private_instance_elements();
+        let field_initializers = defining
+            .borrow()
+            .class_internal_binding(decorators::INSTANCE_FIELD_INITIALIZERS)
+            .and_then(|value| value.as_array());
         let method_initializers = defining
             .borrow()
             .class_internal_binding(decorators::INSTANCE_METHOD_INITIALIZERS);
@@ -2213,7 +2217,7 @@ impl Interpreter {
             if let Some(initializers) = method_initializers {
                 self.run_method_initializers(&initializers, &receiver)?;
             }
-            for field in fields.iter() {
+            for (field_index, field) in fields.iter().enumerate() {
                 self.execution.check()?;
                 let Statement::Expr(Expr::Assignment { target, value, .. }) = field else {
                     return Err(VmErr::Msg("Invalid instance field initializer".into()));
@@ -2231,8 +2235,24 @@ impl Interpreter {
                 } else {
                     self.evaluate_private_class_field(value, &name)?
                 };
-                if !computed && let Some(id) = self.global.borrow().private_name(&key) {
+                let decoration = field_initializers
+                    .as_ref()
+                    .and_then(|states| states.index_value(field_index));
+                let value = if let Some(state) = &decoration {
+                    self.apply_field_initializers(state, &receiver, value)?
+                } else {
+                    value
+                };
+                let private_id = if !computed {
+                    self.global.borrow().private_name(&key)
+                } else {
+                    None
+                };
+                if let Some(id) = private_id {
                     receiver.initialize_private_field(id, value)?;
+                    if let Some(state) = &decoration {
+                        self.run_field_extra_initializers(state, &receiver)?;
+                    }
                     continue;
                 }
                 let descriptor = Value::descriptor_record(vec![
@@ -2243,6 +2263,9 @@ impl Interpreter {
                 ]);
                 if !self.define_own_property(&receiver, &name, &descriptor)? {
                     return Err(VmErr::Msg("TypeError: Cannot define instance field".into()));
+                }
+                if let Some(state) = &decoration {
+                    self.run_field_extra_initializers(state, &receiver)?;
                 }
             }
             Ok(())

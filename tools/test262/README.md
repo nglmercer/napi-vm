@@ -71,20 +71,14 @@ The [preceding full run](evidence/full-runtime-followup-2026-10-26/) is
 preserved. See the [full-pass plan](../../docs/test262-full-pass-plan.md)
 for the remaining causes and unchanged acceptance criteria.
 
-The [class-decorator working-tree follow-up](evidence/class-decorator-followup-2026-10-26/)
-passes 16,874 of 16,882 class variants: 26 gains and zero losses since the
-[auto-accessor follow-up](evidence/auto-accessor-followup-2026-10-26/), or 34
-gains and zero losses against the exact full-report projection. The eight
-remaining class failures require element decorators. All 399 core tests,
-five worker tests, the standard timing slice, and static checks pass.
-The full score above is unchanged.
-
-The [method-decorator foundation](evidence/method-decorator-followup-2026-10-26/)
-adds method replacement, private/public context access, and initializer tests.
-Its 26,479-variant broad selection has zero losses and the same eight
-field-dependent failures; it adds no further pinned gains yet. All 402 core
-tests, five worker tests, six separate worker probes, and timing/static checks
-pass. The latest full score remains unchanged.
+The [field-decorator follow-up](evidence/field-decorator-followup-2026-10-26/)
+passes **32,596 / 32,596** focused variants: eight gains since the method stage,
+or 42 gains with zero losses against the latest complete-report projection.
+All pinned parse residuals are clear in that selection. All 405 core tests,
+five worker tests, static checks, and the standard timing slice pass. Rejected
+array-data and pop-performance candidates remain archived. Getter/setter and
+auto-accessor decorators still need implementation. The latest full score is
+unchanged until another complete run confirms these gains.
 
 ## Historical measurements
 

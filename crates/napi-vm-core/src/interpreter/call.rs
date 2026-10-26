@@ -110,6 +110,9 @@ fn array_property_setter(
     key: &str,
     current: Option<&Value>,
 ) -> Option<Value> {
+    if array.meta.borrow().is_explicit_data(key) {
+        return None;
+    }
     if let Some(current) = current.filter(|value| is_setter_value(value)) {
         return Some(current.clone());
     }
@@ -1138,6 +1141,7 @@ impl Interpreter {
                     });
                     items.forget_symbol_key(&property);
                 }
+                items.meta.borrow_mut().set_explicit_data(&property, false);
                 Ok(Value::Bool(true))
             }
             Value::String(string) => {

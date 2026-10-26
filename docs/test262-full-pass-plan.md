@@ -34,45 +34,35 @@ and whitespace checks. Rejected descriptor and getter-alias candidates and
 all measured timing losses remain in the
 [activation evidence](../tools/test262/evidence/function-activation-followup-2026-10-26/).
 
-## Decorator working-tree follow-up
+## Decorator follow-up
 
-Auto-accessors clear eight variants. Class decorators clear another 26.
-The same 16,882-variant class selection now passes **16,874**, with **34 gains
-and zero losses** against the latest full-report projection (26 gains and
-zero losses against the preceding auto-accessor worker). The eight remaining
-class variants require element decorators. The six-variant timing slice
-passes. All 399 core tests, five worker tests, Clippy, root checking,
-formatting, and whitespace checks pass.
+Auto-accessors clear eight variants, class decorators 26, and regular field
+decorators another eight. The broad **32,596-variant** selection now passes
+in full: **42 gains with zero losses** against the latest full-report
+projection, or eight gains with zero losses in the 26,479-variant method-stage
+projection. All previously nonpassing parse variants are clear in this focused
+selection. These are focused gains; the complete score above is unchanged.
 
-[Class decorator evidence](../tools/test262/evidence/class-decorator-followup-2026-10-26/)
-retains reports, both comparisons, exact source, and the residual class list.
-The [auto-accessor evidence](../tools/test262/evidence/auto-accessor-followup-2026-10-26/)
-also preserves the rejected naming-collision candidate. These focused gains
-do not replace the complete score above.
-
-## Method-decorator foundation
-
-Method replacement, private/public context access, and initializer ordering
-now pass direct AST/bytecode tests and six worker smoke probes. A broad
-26,479-variant selection has **zero lost passes**, retaining the prior 34
-focused gains and the same eight field-dependent failures. It adds no new
-pinned passes yet. All 402 core tests, five worker tests, static checks, and
-the timing slice pass. [Method evidence](../tools/test262/evidence/method-decorator-followup-2026-10-26/)
-retains the rejected getter-name alias candidate and its data-descriptor fix.
+All 405 core tests, five worker tests, static checks, and the standard timing
+slice pass. [Field evidence](../tools/test262/evidence/field-decorator-followup-2026-10-26/)
+retains rejected array-field and pop-performance candidates plus corrected
+comparisons. The 30,000-element pop diagnostic now finishes in about 1.62
+seconds instead of timing out at five seconds. Context property creation
+order is tested for methods and fields. Prior
+[method](../tools/test262/evidence/method-decorator-followup-2026-10-26/),
+[class](../tools/test262/evidence/class-decorator-followup-2026-10-26/), and
+[auto-accessor](../tools/test262/evidence/auto-accessor-followup-2026-10-26/)
+evidence remains preserved.
 
 ## Ordered execution
 
-1. **Implement element decorators and confirm the syntax gains in a full run.**
-   Eight auto-accessor and 26 class-decorator variants are now clear in focused
-   validation. The eight remaining class variants need element grammar,
-   interleaved expression/key evaluation, method/getter/setter/field/accessor
-   replacement validation, public/private context access operations, and
-   per-element and extra initializer ordering. Method decoration is now in
-   place. Finish field transforms/extras, getter/setter and auto-accessor
-   decoration, context creation order, and arbitrary callable accessor identity.
-   Preserve the class-decorator
-   replacement, binding, and static-initialization behavior already tested.
-   Run valid and negative syntax plus complete class selections after changes.
+1. **Finish accessor decoration and confirm the 42 syntax gains in a full run.**
+   Class, method, and regular field decorators have focused coverage. Implement
+   getter/setter and auto-accessor decorators, preserving arbitrary callable
+   accessor identity, private brands, source-order overrides, and per-element
+   initializers. Reuse the tested context creation and initializer lifecycle.
+   Preserve class replacement/binding/static initialization semantics. Run
+   valid/negative syntax and the broad class/array/Object/reflection selections.
    Do not merely accept and discard decorators.
 
 2. **Close the other runtime causes.** Four Annex B declaration variants need

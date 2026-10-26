@@ -347,10 +347,11 @@ impl Parser {
                     None
                 };
                 self.semi();
-                if !member_decorators.is_empty() {
-                    self.record_error("field decorators are not implemented".into());
+                if auto_accessor && !member_decorators.is_empty() {
+                    self.record_error("auto-accessor decorators are not implemented".into());
                 }
                 b.push(ClassMember::Field {
+                    decorators: member_decorators,
                     name: mn,
                     is_static: st,
                     auto_accessor,

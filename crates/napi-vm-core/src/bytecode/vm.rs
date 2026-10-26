@@ -1886,6 +1886,7 @@ fn build_class_from_template(
                     }
                 };
                 static_elements.push(crate::interpreter::ClassStaticElement::Field {
+                    decoration: None,
                     name: key,
                     private,
                     init: init.clone(),
@@ -1894,6 +1895,35 @@ fn build_class_from_template(
         }
     }
     let class_val = interp.assemble_class(ClassAssembly {
+        field_definitions: template
+            .field_decorators
+            .iter()
+            .map(|field| crate::interpreter::ClassFieldDefinition {
+                key: match &field.name {
+                    ClassNameTemplate::Static(name) | ClassNameTemplate::Private(name) => {
+                        Value::String(crate::JsString::from_key(name))
+                    }
+                    ClassNameTemplate::Computed(reg) => {
+                        frame.registers[*reg as usize].clone_for_execution()
+                    }
+                },
+                private: matches!(field.name, ClassNameTemplate::Private(_)),
+                is_static: field.is_static,
+                index: field.index,
+                decorators: field
+                    .decorators
+                    .iter()
+                    .map(|(value, receiver)| {
+                        (
+                            frame.registers[*value as usize].clone_for_execution(),
+                            receiver
+                                .map(|reg| frame.registers[reg as usize].clone_for_execution())
+                                .unwrap_or(Value::Undefined),
+                        )
+                    })
+                    .collect(),
+            })
+            .collect(),
         method_definitions,
         decorators: template
             .decorators
