@@ -942,7 +942,26 @@ impl Checker<'_> {
                 }
             }
         }
-        for member in &template.members {
+        for (index, member) in template.members.iter().enumerate() {
+            if let Some(field_index) = member.auto_decorator_field {
+                let field = template.field_decorators.get(field_index);
+                let setter = template.members.get(index + 1);
+                if !template.has_method_decorators
+                    || member.kind != super::constants::ClassMemberKind::Getter
+                    || member.auto_accessor_storage.is_none()
+                    || !field.is_some_and(|field| field.is_static == member.is_static)
+                    || !setter.is_some_and(|setter| {
+                        setter.kind == super::constants::ClassMemberKind::Setter
+                            && setter.is_static == member.is_static
+                            && setter.auto_decorator_field.is_none()
+                    })
+                {
+                    return Err(VerifyError::ConstantTypeMismatch {
+                        address,
+                        expected: "valid auto-accessor decorator pair",
+                    });
+                }
+            }
             for (value, receiver) in &member.decorators {
                 self.check_reg(address, *value)?;
                 if let Some(receiver) = receiver {

@@ -83,6 +83,7 @@ pub enum ClassNameTemplate {
 /// under `__class key {i}__`, in order) appear here.
 #[derive(Debug, Clone)]
 pub struct ClassMemberTemplate {
+    pub auto_decorator_field: Option<usize>,
     pub decorators: Vec<(Reg, Option<Reg>)>,
     /// Backing storage whose initializer uses this member's public/private name.
     pub auto_accessor_storage: Option<String>,

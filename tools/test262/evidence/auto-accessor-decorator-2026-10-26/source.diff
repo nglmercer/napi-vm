@@ -1,0 +1,369 @@
+diff --git a/crates/napi-vm-core/src/bytecode/compiler.rs b/crates/napi-vm-core/src/bytecode/compiler.rs
+index 8420c53..bbf3100 100644
+--- a/crates/napi-vm-core/src/bytecode/compiler.rs
++++ b/crates/napi-vm-core/src/bytecode/compiler.rs
+@@ -2112,6 +2112,7 @@ impl<'a> Compiler<'a> {
+                         },
+                     ));
+                     members.push(ClassMemberTemplate {
++                        auto_decorator_field: None,
+                         decorators: member_decorators,
+                         auto_accessor_storage: None,
+                         kind: ClassMemberKind::Method,
+@@ -2128,6 +2129,8 @@ impl<'a> Compiler<'a> {
+                     init,
+                 } => {
+                     let template = self.compile_member_name(field_name)?;
++                    let auto_decorator_field = (!member_decorators.is_empty() && *auto_accessor)
++                        .then_some(field_decorators.len());
+                     if !member_decorators.is_empty() {
+                         field_decorators.push(super::constants::ClassFieldDecoratorTemplate {
+                             name: template.clone(),
+@@ -2176,6 +2179,11 @@ impl<'a> Compiler<'a> {
+                                 },
+                             ));
+                             members.push(ClassMemberTemplate {
++                                auto_decorator_field: if setter {
++                                    None
++                                } else {
++                                    auto_decorator_field
++                                },
+                                 decorators: Vec::new(),
+                                 auto_accessor_storage: (!setter).then(|| storage.clone()),
+                                 kind: if setter {
+@@ -2254,6 +2262,7 @@ impl<'a> Compiler<'a> {
+                         },
+                     ));
+                     members.push(ClassMemberTemplate {
++                        auto_decorator_field: None,
+                         decorators: member_decorators,
+                         auto_accessor_storage: None,
+                         kind: ClassMemberKind::Getter,
+@@ -2296,6 +2305,7 @@ impl<'a> Compiler<'a> {
+                         },
+                     ));
+                     members.push(ClassMemberTemplate {
++                        auto_decorator_field: None,
+                         decorators: member_decorators,
+                         auto_accessor_storage: None,
+                         kind: ClassMemberKind::Setter,
+diff --git a/crates/napi-vm-core/src/bytecode/constants.rs b/crates/napi-vm-core/src/bytecode/constants.rs
+index 3281a24..127255f 100644
+--- a/crates/napi-vm-core/src/bytecode/constants.rs
++++ b/crates/napi-vm-core/src/bytecode/constants.rs
+@@ -83,6 +83,7 @@ pub enum ClassNameTemplate {
+ /// under `__class key {i}__`, in order) appear here.
+ #[derive(Debug, Clone)]
+ pub struct ClassMemberTemplate {
++    pub auto_decorator_field: Option<usize>,
+     pub decorators: Vec<(Reg, Option<Reg>)>,
+     /// Backing storage whose initializer uses this member's public/private name.
+     pub auto_accessor_storage: Option<String>,
+diff --git a/crates/napi-vm-core/src/bytecode/parity_tests.rs b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+index eb2fabc..4b1ace8 100644
+--- a/crates/napi-vm-core/src/bytecode/parity_tests.rs
++++ b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+@@ -2259,3 +2259,24 @@ fn inherited_explicit_accessors_keep_exotic_receivers_and_shadowing() {
+         );
+     }
+ }
++
++#[test]
++fn auto_accessor_decorators_apply_pairs_transforms_and_extra_initializers() {
++    for source in [
++        "var log='';function a(v,c){log+='a';c.addInitializer(function(){log+='A';});return {init(x){log+='i';return x+1;},get(){return v.get.call(this)+10;},set(x){v.set.call(this,x+2);}};}function b(v,c){log+='b';c.addInitializer(function(){log+='B';});return {init(x){log+='j';return x*2;}};}class C{@a @b accessor x=(log+='f',3);y=(log+='y',0);}var c=new C();var before=c.x;c.x=4;log==='bafijBAy'&&before===18&&c.x===16;",
++        "var access;function d(v,c){if(c.kind!=='accessor'||!c.private||c.name!=='#x')throw 1;access=c.access;return {get(){return v.get.call(this)+1;},set(n){v.set.call(this,n+2);},init(n){return n*2;}};}class C{@d accessor #x=3;}var c=new C();var before=access.get(c);access.set(c,4);var bad=false;try{access.get({});}catch(e){bad=e instanceof TypeError;}before===7&&access.get(c)===7&&access.has(c)&&!access.has({})&&bad;",
++        "var log='';function cls(C){log+='c';}function d(v,c){log+='d';c.addInitializer(function(){log+='e';});return {init(n){log+='i';return n+1;}};}@cls class C{@d static accessor x=(log+='f',4);static y=(log+='y',0);}C.x===5&&log==='dcfiey';",
++        "var s=Symbol('x'),seen;function d(v,c){seen=c;return {get:new Proxy(v.get,{}),set:new Proxy(v.set,{})};}class C{@d accessor [s]=7;}var c=new C();c[s]=8;seen.name===s&&seen.access.get(c)===8&&seen.access.has(c);",
++        "var log='';function d(v,c){return {get get(){log+='g';return undefined;},get set(){log+='s';return undefined;},get init(){log+='i';return undefined;}};}class C{@d accessor x=3;}new C().x===3&&log==='gsi';",
++        "var n=0;for(var result of [null,1,{get:1},{set:null},{init:false}]){try{let r=result;class C{@(function(){return r;}) accessor x=1;}}catch(e){if(e instanceof TypeError)n++;}}n===5;",
++        "var saved;function d(v,c){saved=c.addInitializer;}class C{@d accessor x=3;}var ok=false;try{saved(function(){});}catch(e){ok=e instanceof TypeError;}ok;",
++        "var log='';function m(v,c){log+='m';}function a(v,c){log+='a';}function f(v,c){log+='f';}class C{@f x=1;@a accessor y=2;@m m(){}}log==='amf';",
++        "function d(v,c){return {get(){return 9;}};}class C{@d accessor x=1;x(){return 2;}}new C().x()===2;",
++    ] {
++        check(source, true);
++        assert!(
++            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
++            "{source}"
++        );
++    }
++}
+diff --git a/crates/napi-vm-core/src/bytecode/verify.rs b/crates/napi-vm-core/src/bytecode/verify.rs
+index bec4c76..791959f 100644
+--- a/crates/napi-vm-core/src/bytecode/verify.rs
++++ b/crates/napi-vm-core/src/bytecode/verify.rs
+@@ -942,7 +942,26 @@ impl Checker<'_> {
+                 }
+             }
+         }
+-        for member in &template.members {
++        for (index, member) in template.members.iter().enumerate() {
++            if let Some(field_index) = member.auto_decorator_field {
++                let field = template.field_decorators.get(field_index);
++                let setter = template.members.get(index + 1);
++                if !template.has_method_decorators
++                    || member.kind != super::constants::ClassMemberKind::Getter
++                    || member.auto_accessor_storage.is_none()
++                    || !field.is_some_and(|field| field.is_static == member.is_static)
++                    || !setter.is_some_and(|setter| {
++                        setter.kind == super::constants::ClassMemberKind::Setter
++                            && setter.is_static == member.is_static
++                            && setter.auto_decorator_field.is_none()
++                    })
++                {
++                    return Err(VerifyError::ConstantTypeMismatch {
++                        address,
++                        expected: "valid auto-accessor decorator pair",
++                    });
++                }
++            }
+             for (value, receiver) in &member.decorators {
+                 self.check_reg(address, *value)?;
+                 if let Some(receiver) = receiver {
+diff --git a/crates/napi-vm-core/src/bytecode/vm.rs b/crates/napi-vm-core/src/bytecode/vm.rs
+index d0eecc8..3bf989a 100644
+--- a/crates/napi-vm-core/src/bytecode/vm.rs
++++ b/crates/napi-vm-core/src/bytecode/vm.rs
+@@ -1733,6 +1733,7 @@ fn build_class_from_template(
+                 let fn_val = class_function(interp, frame, func, closure.clone(), display(""))?;
+                 if template.has_method_decorators {
+                     method_definitions.push(crate::interpreter::ClassMethodDefinition {
++                        auto_decorator_field: member.auto_decorator_field,
+                         kind: crate::interpreter::ClassMethodKind::Method,
+                         key: property.clone(),
+                         private: matches!(member.name, ClassNameTemplate::Private(_)),
+@@ -1789,6 +1790,7 @@ fn build_class_from_template(
+                 let fn_val = class_function(interp, frame, func, closure, display(prefix))?;
+                 if template.has_method_decorators {
+                     method_definitions.push(crate::interpreter::ClassMethodDefinition {
++                        auto_decorator_field: member.auto_decorator_field,
+                         kind: if member.kind == ClassMemberKind::Getter {
+                             crate::interpreter::ClassMethodKind::Getter
+                         } else {
+@@ -1903,6 +1905,7 @@ fn build_class_from_template(
+             .field_decorators
+             .iter()
+             .map(|field| crate::interpreter::ClassFieldDefinition {
++                state: None,
+                 key: match &field.name {
+                     ClassNameTemplate::Static(name) | ClassNameTemplate::Private(name) => {
+                         Value::String(crate::JsString::from_key(name))
+diff --git a/crates/napi-vm-core/src/interpreter/decorators.rs b/crates/napi-vm-core/src/interpreter/decorators.rs
+index 2ee1e5f..fca54bb 100644
+--- a/crates/napi-vm-core/src/interpreter/decorators.rs
++++ b/crates/napi-vm-core/src/interpreter/decorators.rs
+@@ -15,6 +15,7 @@ pub(crate) enum ClassMethodKind {
+ }
+ 
+ pub(crate) struct ClassMethodDefinition {
++    pub auto_decorator_field: Option<usize>,
+     pub kind: ClassMethodKind,
+     pub key: Value,
+     pub private: bool,
+@@ -24,6 +25,7 @@ pub(crate) struct ClassMethodDefinition {
+ }
+ 
+ pub(crate) struct ClassFieldDefinition {
++    pub state: Option<Value>,
+     pub key: Value,
+     pub private: bool,
+     pub is_static: bool,
+@@ -187,7 +189,12 @@ impl Interpreter {
+             {
+                 let transforms = Value::array(vec![]);
+                 let extras = Value::array(vec![]);
+-                for (decorator, receiver) in record.decorators.iter().rev() {
++                for (decorator, receiver) in record
++                    .decorators
++                    .iter()
++                    .filter(|_| record.state.is_none())
++                    .rev()
++                {
+                     let (context, active) = self.element_decorator_context(
+                         scope,
+                         "field",
+@@ -212,10 +219,12 @@ impl Interpreter {
+                         ));
+                     }
+                 }
+-                let state = Value::object(vec![
+-                    ("transforms".into(), transforms),
+-                    ("extras".into(), extras),
+-                ]);
++                let state = record.state.clone().unwrap_or_else(|| {
++                    Value::object(vec![
++                        ("transforms".into(), transforms),
++                        ("extras".into(), extras),
++                    ])
++                });
+                 if is_static {
+                     static_states.push((record.index, state));
+                 } else {
+@@ -271,6 +280,7 @@ impl Interpreter {
+         class: &Value,
+         scope: &Env,
+         records: &mut [ClassMethodDefinition],
++        fields: &mut [ClassFieldDefinition],
+         private_statics: &mut [(u64, PrivateElement)],
+     ) -> Result<Option<Value>, VmErr> {
+         if records.is_empty() {
+@@ -279,10 +289,71 @@ impl Interpreter {
+         let static_initializers = Value::array(vec![]);
+         let instance_initializers = Value::array(vec![]);
+         for is_static in [true, false] {
+-            for record in records
+-                .iter_mut()
+-                .filter(|record| record.is_static == is_static)
+-            {
++            for index in 0..records.len() {
++                if records[index].is_static != is_static {
++                    continue;
++                }
++                if let Some(field_index) = records[index].auto_decorator_field {
++                    let (left, right) = records.split_at_mut(index + 1);
++                    let getter = &mut left[index];
++                    let setter = &mut right[0];
++                    let field = &mut fields[field_index];
++                    let transforms = Value::array(vec![]);
++                    let extras = Value::array(vec![]);
++                    for (decorator, receiver) in field.decorators.iter().rev() {
++                        let (context, active) = self.element_decorator_context(
++                            scope,
++                            "accessor",
++                            &field.key,
++                            field.private,
++                            is_static,
++                            &extras,
++                        )?;
++                        let pair = Value::object(vec![
++                            ("get".into(), getter.value.clone()),
++                            ("set".into(), setter.value.clone()),
++                        ]);
++                        let result =
++                            self.call_this(decorator, receiver.clone(), vec![pair, context]);
++                        active.set_prop("active".into(), Value::Bool(false))?;
++                        let replacement = result?;
++                        if matches!(replacement, Value::Undefined) {
++                            continue;
++                        }
++                        if !super::call::is_js_object(&replacement) {
++                            return Err(VmErr::Msg(
++                                "TypeError: accessor decorator must return an object or undefined"
++                                    .into(),
++                            ));
++                        }
++                        for name in ["get", "set", "init"] {
++                            let value = self.get_prop_value_str(&replacement, name)?;
++                            if matches!(value, Value::Undefined) {
++                                continue;
++                            }
++                            if !super::is_callable_value(&value) {
++                                return Err(VmErr::Msg(format!(
++                                    "TypeError: accessor decorator {name} must be callable"
++                                )));
++                            }
++                            match name {
++                                "get" => getter.value = value,
++                                "set" => setter.value = value,
++                                _ => {
++                                    let list =
++                                        transforms.as_array().expect("internal transform list");
++                                    list.store_index(list.array_length(), value);
++                                }
++                            }
++                        }
++                    }
++                    field.state = Some(Value::object(vec![
++                        ("transforms".into(), transforms),
++                        ("extras".into(), extras),
++                    ]));
++                    continue;
++                }
++                let record = &mut records[index];
+                 if record.decorators.is_empty() {
+                     continue;
+                 }
+diff --git a/crates/napi-vm-core/src/interpreter/eval.rs b/crates/napi-vm-core/src/interpreter/eval.rs
+index 55429c8..b449efc 100644
+--- a/crates/napi-vm-core/src/interpreter/eval.rs
++++ b/crates/napi-vm-core/src/interpreter/eval.rs
+@@ -571,7 +571,7 @@ impl Interpreter {
+     /// each tier; everything from the prototype object on is shared.
+     pub(crate) fn assemble_class(&mut self, asm: ClassAssembly) -> Result<Value, VmErr> {
+         let ClassAssembly {
+-            field_definitions,
++            mut field_definitions,
+             mut method_definitions,
+             decorators,
+             source_text,
+@@ -741,6 +741,7 @@ impl Interpreter {
+             &class_val,
+             &private_scope,
+             &mut method_definitions,
++            &mut field_definitions,
+             &mut private_statics,
+         )?;
+ 
+@@ -1043,6 +1044,7 @@ impl Interpreter {
+                     let fn_val = fn_val.with_function_source(member.source_text());
+                     if has_method_decorators && (*st || !is_ctor_name) {
+                         method_definitions.push(super::ClassMethodDefinition {
++                            auto_decorator_field: None,
+                             kind: super::ClassMethodKind::Method,
+                             key: key.clone(),
+                             private: matches!(name, MemberName::Private(_)),
+@@ -1091,8 +1093,11 @@ impl Interpreter {
+                     init,
+                 } => {
+                     let fname = self.class_member_name(&member_scope, name)?;
++                    let auto_decorator_field = (!member_decorators.is_empty() && *auto_accessor)
++                        .then_some(field_definitions.len());
+                     if !member_decorators.is_empty() {
+                         field_definitions.push(super::ClassFieldDefinition {
++                            state: None,
+                             key: fname.clone(),
+                             private: matches!(name, MemberName::Private(_)),
+                             is_static: *st,
+@@ -1165,6 +1170,12 @@ impl Interpreter {
+                                 (super::ClassMethodKind::Setter, setter.clone()),
+                             ] {
+                                 method_definitions.push(super::ClassMethodDefinition {
++                                    auto_decorator_field: if kind == super::ClassMethodKind::Getter
++                                    {
++                                        auto_decorator_field
++                                    } else {
++                                        None
++                                    },
+                                     kind,
+                                     key: fname.clone(),
+                                     private: matches!(name, MemberName::Private(_)),
+@@ -1293,6 +1304,7 @@ impl Interpreter {
+                     let getter_fn = getter_fn.with_function_source(member.source_text());
+                     if has_method_decorators {
+                         method_definitions.push(super::ClassMethodDefinition {
++                            auto_decorator_field: None,
+                             kind: super::ClassMethodKind::Getter,
+                             key: key.clone(),
+                             private: matches!(name, MemberName::Private(_)),
+@@ -1378,6 +1390,7 @@ impl Interpreter {
+                     let setter_fn = setter_fn.with_function_source(member.source_text());
+                     if has_method_decorators {
+                         method_definitions.push(super::ClassMethodDefinition {
++                            auto_decorator_field: None,
+                             kind: super::ClassMethodKind::Setter,
+                             key: key.clone(),
+                             private: matches!(name, MemberName::Private(_)),
+diff --git a/crates/napi-vm-core/src/parser/compound.rs b/crates/napi-vm-core/src/parser/compound.rs
+index 3509825..71c01dc 100644
+--- a/crates/napi-vm-core/src/parser/compound.rs
++++ b/crates/napi-vm-core/src/parser/compound.rs
+@@ -343,9 +343,6 @@ impl Parser {
+                     None
+                 };
+                 self.semi();
+-                if auto_accessor && !member_decorators.is_empty() {
+-                    self.record_error("auto-accessor decorators are not implemented".into());
+-                }
+                 b.push(ClassMember::Field {
+                     decorators: member_decorators,
+                     name: mn,

@@ -62,16 +62,20 @@ reads/writes, caches, Node serialization, and exotic prototype inheritance.
 Rejected core and broad candidates are archived. Auto-accessor decoration
 remains next; this stage does not alter the complete score.
 
+The [auto-accessor decorator follow-up](../tools/test262/evidence/auto-accessor-decorator-2026-10-26/)
+retains **32,596 / 32,596** focused passes with zero losses, plus the six-case
+timing slice and 409 core tests. It applies paired replacements and per-element
+initializers in both tiers. These are focused results; the complete score is
+unchanged until a new full run.
+
 ## Ordered execution
 
-1. **Finish accessor decoration and confirm the 42 syntax gains in a full run.**
-   Class, method, getter/setter, and regular field decorators have focused coverage. Implement
-   auto-accessor decorators, preserving arbitrary callable
-   accessor identity, private brands, source-order overrides, and per-element
-   initializers. Reuse the tested context creation and initializer lifecycle.
-   Preserve class replacement/binding/static initialization semantics. Run
-   valid/negative syntax and the broad class/array/Object/reflection selections.
-   Do not merely accept and discard decorators.
+1. **Confirm decorator gains in a full run.** Class, method, getter/setter,
+   field, and auto-accessor decorators now have focused coverage, including
+   arbitrary callable identities, private brands, source-order overrides, and
+   per-element initializers. Confirm the 42 syntax gains on the full corpus;
+   investigate any remaining conformance gaps and preserve replacement,
+   binding, and static initialization semantics.
 
 2. **Close the other runtime causes.** Four Annex B declaration variants need
    argument-shadowing, labeled declarations, and redeclaration ordering. Four

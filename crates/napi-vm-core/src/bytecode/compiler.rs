@@ -2112,6 +2112,7 @@ impl<'a> Compiler<'a> {
                         },
                     ));
                     members.push(ClassMemberTemplate {
+                        auto_decorator_field: None,
                         decorators: member_decorators,
                         auto_accessor_storage: None,
                         kind: ClassMemberKind::Method,
@@ -2128,6 +2129,8 @@ impl<'a> Compiler<'a> {
                     init,
                 } => {
                     let template = self.compile_member_name(field_name)?;
+                    let auto_decorator_field = (!member_decorators.is_empty() && *auto_accessor)
+                        .then_some(field_decorators.len());
                     if !member_decorators.is_empty() {
                         field_decorators.push(super::constants::ClassFieldDecoratorTemplate {
                             name: template.clone(),
@@ -2176,6 +2179,11 @@ impl<'a> Compiler<'a> {
                                 },
                             ));
                             members.push(ClassMemberTemplate {
+                                auto_decorator_field: if setter {
+                                    None
+                                } else {
+                                    auto_decorator_field
+                                },
                                 decorators: Vec::new(),
                                 auto_accessor_storage: (!setter).then(|| storage.clone()),
                                 kind: if setter {
@@ -2254,6 +2262,7 @@ impl<'a> Compiler<'a> {
                         },
                     ));
                     members.push(ClassMemberTemplate {
+                        auto_decorator_field: None,
                         decorators: member_decorators,
                         auto_accessor_storage: None,
                         kind: ClassMemberKind::Getter,
@@ -2296,6 +2305,7 @@ impl<'a> Compiler<'a> {
                         },
                     ));
                     members.push(ClassMemberTemplate {
+                        auto_decorator_field: None,
                         decorators: member_decorators,
                         auto_accessor_storage: None,
                         kind: ClassMemberKind::Setter,

@@ -81,7 +81,8 @@ array-data and pop-performance candidates remain archived. The subsequent
 retains **32,596 / 32,596** passes with zero losses, all **408 core tests**,
 five worker tests, and static checks. Accessor identities, cache/Node bridge
 reads, and inherited exotic reads are covered; rejected candidates are retained.
-Auto-accessor decorators still need implementation. The latest full score is
+The [auto-accessor decorator follow-up](evidence/auto-accessor-decorator-2026-10-26/)
+also retains **32,596 / 32,596** focused passes and passes **409 core tests**. The latest full score is
 unchanged until another complete run confirms these gains.
 
 ## Historical measurements

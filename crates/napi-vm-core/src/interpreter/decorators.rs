@@ -15,6 +15,7 @@ pub(crate) enum ClassMethodKind {
 }
 
 pub(crate) struct ClassMethodDefinition {
+    pub auto_decorator_field: Option<usize>,
     pub kind: ClassMethodKind,
     pub key: Value,
     pub private: bool,
@@ -24,6 +25,7 @@ pub(crate) struct ClassMethodDefinition {
 }
 
 pub(crate) struct ClassFieldDefinition {
+    pub state: Option<Value>,
     pub key: Value,
     pub private: bool,
     pub is_static: bool,
@@ -187,7 +189,12 @@ impl Interpreter {
             {
                 let transforms = Value::array(vec![]);
                 let extras = Value::array(vec![]);
-                for (decorator, receiver) in record.decorators.iter().rev() {
+                for (decorator, receiver) in record
+                    .decorators
+                    .iter()
+                    .filter(|_| record.state.is_none())
+                    .rev()
+                {
                     let (context, active) = self.element_decorator_context(
                         scope,
                         "field",
@@ -212,10 +219,12 @@ impl Interpreter {
                         ));
                     }
                 }
-                let state = Value::object(vec![
-                    ("transforms".into(), transforms),
-                    ("extras".into(), extras),
-                ]);
+                let state = record.state.clone().unwrap_or_else(|| {
+                    Value::object(vec![
+                        ("transforms".into(), transforms),
+                        ("extras".into(), extras),
+                    ])
+                });
                 if is_static {
                     static_states.push((record.index, state));
                 } else {
@@ -271,6 +280,7 @@ impl Interpreter {
         class: &Value,
         scope: &Env,
         records: &mut [ClassMethodDefinition],
+        fields: &mut [ClassFieldDefinition],
         private_statics: &mut [(u64, PrivateElement)],
     ) -> Result<Option<Value>, VmErr> {
         if records.is_empty() {
@@ -279,10 +289,71 @@ impl Interpreter {
         let static_initializers = Value::array(vec![]);
         let instance_initializers = Value::array(vec![]);
         for is_static in [true, false] {
-            for record in records
-                .iter_mut()
-                .filter(|record| record.is_static == is_static)
-            {
+            for index in 0..records.len() {
+                if records[index].is_static != is_static {
+                    continue;
+                }
+                if let Some(field_index) = records[index].auto_decorator_field {
+                    let (left, right) = records.split_at_mut(index + 1);
+                    let getter = &mut left[index];
+                    let setter = &mut right[0];
+                    let field = &mut fields[field_index];
+                    let transforms = Value::array(vec![]);
+                    let extras = Value::array(vec![]);
+                    for (decorator, receiver) in field.decorators.iter().rev() {
+                        let (context, active) = self.element_decorator_context(
+                            scope,
+                            "accessor",
+                            &field.key,
+                            field.private,
+                            is_static,
+                            &extras,
+                        )?;
+                        let pair = Value::object(vec![
+                            ("get".into(), getter.value.clone()),
+                            ("set".into(), setter.value.clone()),
+                        ]);
+                        let result =
+                            self.call_this(decorator, receiver.clone(), vec![pair, context]);
+                        active.set_prop("active".into(), Value::Bool(false))?;
+                        let replacement = result?;
+                        if matches!(replacement, Value::Undefined) {
+                            continue;
+                        }
+                        if !super::call::is_js_object(&replacement) {
+                            return Err(VmErr::Msg(
+                                "TypeError: accessor decorator must return an object or undefined"
+                                    .into(),
+                            ));
+                        }
+                        for name in ["get", "set", "init"] {
+                            let value = self.get_prop_value_str(&replacement, name)?;
+                            if matches!(value, Value::Undefined) {
+                                continue;
+                            }
+                            if !super::is_callable_value(&value) {
+                                return Err(VmErr::Msg(format!(
+                                    "TypeError: accessor decorator {name} must be callable"
+                                )));
+                            }
+                            match name {
+                                "get" => getter.value = value,
+                                "set" => setter.value = value,
+                                _ => {
+                                    let list =
+                                        transforms.as_array().expect("internal transform list");
+                                    list.store_index(list.array_length(), value);
+                                }
+                            }
+                        }
+                    }
+                    field.state = Some(Value::object(vec![
+                        ("transforms".into(), transforms),
+                        ("extras".into(), extras),
+                    ]));
+                    continue;
+                }
+                let record = &mut records[index];
                 if record.decorators.is_empty() {
                     continue;
                 }

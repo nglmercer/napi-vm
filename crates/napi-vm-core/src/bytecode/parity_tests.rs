@@ -2259,3 +2259,24 @@ fn inherited_explicit_accessors_keep_exotic_receivers_and_shadowing() {
         );
     }
 }
+
+#[test]
+fn auto_accessor_decorators_apply_pairs_transforms_and_extra_initializers() {
+    for source in [
+        "var log='';function a(v,c){log+='a';c.addInitializer(function(){log+='A';});return {init(x){log+='i';return x+1;},get(){return v.get.call(this)+10;},set(x){v.set.call(this,x+2);}};}function b(v,c){log+='b';c.addInitializer(function(){log+='B';});return {init(x){log+='j';return x*2;}};}class C{@a @b accessor x=(log+='f',3);y=(log+='y',0);}var c=new C();var before=c.x;c.x=4;log==='bafijBAy'&&before===18&&c.x===16;",
+        "var access;function d(v,c){if(c.kind!=='accessor'||!c.private||c.name!=='#x')throw 1;access=c.access;return {get(){return v.get.call(this)+1;},set(n){v.set.call(this,n+2);},init(n){return n*2;}};}class C{@d accessor #x=3;}var c=new C();var before=access.get(c);access.set(c,4);var bad=false;try{access.get({});}catch(e){bad=e instanceof TypeError;}before===7&&access.get(c)===7&&access.has(c)&&!access.has({})&&bad;",
+        "var log='';function cls(C){log+='c';}function d(v,c){log+='d';c.addInitializer(function(){log+='e';});return {init(n){log+='i';return n+1;}};}@cls class C{@d static accessor x=(log+='f',4);static y=(log+='y',0);}C.x===5&&log==='dcfiey';",
+        "var s=Symbol('x'),seen;function d(v,c){seen=c;return {get:new Proxy(v.get,{}),set:new Proxy(v.set,{})};}class C{@d accessor [s]=7;}var c=new C();c[s]=8;seen.name===s&&seen.access.get(c)===8&&seen.access.has(c);",
+        "var log='';function d(v,c){return {get get(){log+='g';return undefined;},get set(){log+='s';return undefined;},get init(){log+='i';return undefined;}};}class C{@d accessor x=3;}new C().x===3&&log==='gsi';",
+        "var n=0;for(var result of [null,1,{get:1},{set:null},{init:false}]){try{let r=result;class C{@(function(){return r;}) accessor x=1;}}catch(e){if(e instanceof TypeError)n++;}}n===5;",
+        "var saved;function d(v,c){saved=c.addInitializer;}class C{@d accessor x=3;}var ok=false;try{saved(function(){});}catch(e){ok=e instanceof TypeError;}ok;",
+        "var log='';function m(v,c){log+='m';}function a(v,c){log+='a';}function f(v,c){log+='f';}class C{@f x=1;@a accessor y=2;@m m(){}}log==='amf';",
+        "function d(v,c){return {get(){return 9;}};}class C{@d accessor x=1;x(){return 2;}}new C().x()===2;",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}

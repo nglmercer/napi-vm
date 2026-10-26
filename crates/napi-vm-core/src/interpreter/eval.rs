@@ -571,7 +571,7 @@ impl Interpreter {
     /// each tier; everything from the prototype object on is shared.
     pub(crate) fn assemble_class(&mut self, asm: ClassAssembly) -> Result<Value, VmErr> {
         let ClassAssembly {
-            field_definitions,
+            mut field_definitions,
             mut method_definitions,
             decorators,
             source_text,
@@ -741,6 +741,7 @@ impl Interpreter {
             &class_val,
             &private_scope,
             &mut method_definitions,
+            &mut field_definitions,
             &mut private_statics,
         )?;
 
@@ -1043,6 +1044,7 @@ impl Interpreter {
                     let fn_val = fn_val.with_function_source(member.source_text());
                     if has_method_decorators && (*st || !is_ctor_name) {
                         method_definitions.push(super::ClassMethodDefinition {
+                            auto_decorator_field: None,
                             kind: super::ClassMethodKind::Method,
                             key: key.clone(),
                             private: matches!(name, MemberName::Private(_)),
@@ -1091,8 +1093,11 @@ impl Interpreter {
                     init,
                 } => {
                     let fname = self.class_member_name(&member_scope, name)?;
+                    let auto_decorator_field = (!member_decorators.is_empty() && *auto_accessor)
+                        .then_some(field_definitions.len());
                     if !member_decorators.is_empty() {
                         field_definitions.push(super::ClassFieldDefinition {
+                            state: None,
                             key: fname.clone(),
                             private: matches!(name, MemberName::Private(_)),
                             is_static: *st,
@@ -1165,6 +1170,12 @@ impl Interpreter {
                                 (super::ClassMethodKind::Setter, setter.clone()),
                             ] {
                                 method_definitions.push(super::ClassMethodDefinition {
+                                    auto_decorator_field: if kind == super::ClassMethodKind::Getter
+                                    {
+                                        auto_decorator_field
+                                    } else {
+                                        None
+                                    },
                                     kind,
                                     key: fname.clone(),
                                     private: matches!(name, MemberName::Private(_)),
@@ -1293,6 +1304,7 @@ impl Interpreter {
                     let getter_fn = getter_fn.with_function_source(member.source_text());
                     if has_method_decorators {
                         method_definitions.push(super::ClassMethodDefinition {
+                            auto_decorator_field: None,
                             kind: super::ClassMethodKind::Getter,
                             key: key.clone(),
                             private: matches!(name, MemberName::Private(_)),
@@ -1378,6 +1390,7 @@ impl Interpreter {
                     let setter_fn = setter_fn.with_function_source(member.source_text());
                     if has_method_decorators {
                         method_definitions.push(super::ClassMethodDefinition {
+                            auto_decorator_field: None,
                             kind: super::ClassMethodKind::Setter,
                             key: key.clone(),
                             private: matches!(name, MemberName::Private(_)),

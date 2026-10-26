@@ -1733,6 +1733,7 @@ fn build_class_from_template(
                 let fn_val = class_function(interp, frame, func, closure.clone(), display(""))?;
                 if template.has_method_decorators {
                     method_definitions.push(crate::interpreter::ClassMethodDefinition {
+                        auto_decorator_field: member.auto_decorator_field,
                         kind: crate::interpreter::ClassMethodKind::Method,
                         key: property.clone(),
                         private: matches!(member.name, ClassNameTemplate::Private(_)),
@@ -1789,6 +1790,7 @@ fn build_class_from_template(
                 let fn_val = class_function(interp, frame, func, closure, display(prefix))?;
                 if template.has_method_decorators {
                     method_definitions.push(crate::interpreter::ClassMethodDefinition {
+                        auto_decorator_field: member.auto_decorator_field,
                         kind: if member.kind == ClassMemberKind::Getter {
                             crate::interpreter::ClassMethodKind::Getter
                         } else {
@@ -1903,6 +1905,7 @@ fn build_class_from_template(
             .field_decorators
             .iter()
             .map(|field| crate::interpreter::ClassFieldDefinition {
+                state: None,
                 key: match &field.name {
                     ClassNameTemplate::Static(name) | ClassNameTemplate::Private(name) => {
                         Value::String(crate::JsString::from_key(name))
