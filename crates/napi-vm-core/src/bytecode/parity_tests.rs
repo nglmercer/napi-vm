@@ -2280,3 +2280,50 @@ fn auto_accessor_decorators_apply_pairs_transforms_and_extra_initializers() {
         );
     }
 }
+
+#[test]
+fn template_interpolation_converts_in_order_and_rejects_symbols() {
+    for source in [
+        "let sym=Symbol('x');let ok=false;try{`${sym}`;}catch(e){ok=e instanceof TypeError;}ok;",
+        "let log='';let a={};a[Symbol.toPrimitive]=function(hint){log+='a'+hint;return 'A';};let b=()=>{log+='b';return 'B';};let s=`${a}${b()}`;s==='AB'&&log==='astringb';",
+        "let log='';let a={};a[Symbol.toPrimitive]=function(){log+='a';return Symbol();};try{`${a}${(log+='b')}`;}catch(e){if(!(e instanceof TypeError))throw e;}log==='a';",
+        "let sym=Symbol('ok');delete Symbol.prototype[Symbol.toPrimitive];`${Object(sym)}`==='Symbol(ok)';",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn array_from_uses_full_to_length_before_constructing() {
+    for source in [
+        "let ok=false;try{Array.from({length:Infinity});}catch(e){ok=e instanceof RangeError;}ok;",
+        "let got;function C(n){got=n;throw 42;}let ok=false;try{Array.from.call(C,{length:Infinity});}catch(e){ok=e===42;}ok&&got===Number.MAX_SAFE_INTEGER;",
+        "let got;function C(n){got=n;}let x=Array.from.call(C,{length:3,0:'a',2:'c'});got===3&&x.length===3&&x[0]==='a'&&x[1]===undefined&&x[2]==='c';",
+        "let called=false;function C(n){called=true;throw 42;}let ok=false;try{Array.from.call(C,{get length(){throw 13;}});}catch(e){ok=e===13;}ok&&!called;",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn date_default_conversion_honors_removed_or_replaced_to_primitive() {
+    for source in [
+        "let d=new Date(0);let a=0+d;delete Date.prototype[Symbol.toPrimitive];let b=0+d;typeof a==='string'&&b===0;",
+        "let d=new Date(5);Object.defineProperty(Date.prototype,Symbol.toPrimitive,{value:undefined,configurable:true});0+d===5;",
+        "let d=new Date(5);Object.defineProperty(Date.prototype,Symbol.toPrimitive,{value:function(hint){return hint;},configurable:true});0+d==='0default';",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}

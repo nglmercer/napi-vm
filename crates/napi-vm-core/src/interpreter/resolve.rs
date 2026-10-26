@@ -680,7 +680,7 @@ impl Interpreter {
             ));
         }
 
-        let order = if hint == "string" || (hint == "default" && matches!(value, Value::Date(_))) {
+        let order = if hint == "string" {
             ["toString", "valueOf"]
         } else {
             ["valueOf", "toString"]
@@ -757,7 +757,7 @@ impl Interpreter {
             }
             result.push_str(q);
             if i < values.len() {
-                let rendered = self.display_string(&values[i])?;
+                let rendered = self.ecmascript_to_string(&values[i])?;
                 if result.len().saturating_add(rendered.len()) > crate::value::MAX_STRING_LEN {
                     return Err(crate::value::limit_err("Maximum string length exceeded"));
                 }

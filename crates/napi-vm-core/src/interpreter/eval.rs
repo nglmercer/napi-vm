@@ -4020,7 +4020,7 @@ impl Interpreter {
                     result.push_str(q);
                     if i < exprs.len() {
                         let val = self.eval_expr(&exprs[i])?;
-                        let rendered = self.display_string(&val)?;
+                        let rendered = self.ecmascript_to_string(&val)?;
                         if result.len().saturating_add(rendered.len())
                             > crate::value::MAX_STRING_LEN
                         {

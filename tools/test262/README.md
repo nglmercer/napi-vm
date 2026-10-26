@@ -85,6 +85,12 @@ The [auto-accessor decorator follow-up](evidence/auto-accessor-decorator-2026-10
 also retains **32,596 / 32,596** focused passes and passes **409 core tests**. The latest full score is
 unchanged until another complete run confirms these gains.
 
+The [conversion and length follow-up](evidence/conversion-length-2026-10-26/)
+passes **18,247 / 18,247** focused variants, gaining **three passes with zero
+losses** against the latest full projection. All 412 core tests, five worker
+tests, static checks, and the standard timing slice pass. The complete score
+above remains unchanged until another full run.
+
 ## Historical measurements
 
 The preceding completed full pinned Test262 run (archived 2026-10-20, corpus

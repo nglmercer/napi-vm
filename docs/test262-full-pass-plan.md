@@ -68,6 +68,12 @@ timing slice and 409 core tests. It applies paired replacements and per-element
 initializers in both tiers. These are focused results; the complete score is
 unchanged until a new full run.
 
+The [conversion and length follow-up](../tools/test262/evidence/conversion-length-2026-10-26/)
+passes **18,247 / 18,247** focused variants, gaining three passes with zero
+losses against the latest full projection: two Array ToLength and one object
+ToPrimitive variant. All 412 core tests, five worker tests, static checks, and
+the standard timing slice pass. These gains await full-run confirmation.
+
 ## Ordered execution
 
 1. **Confirm decorator gains in a full run.** Class, method, getter/setter,
@@ -83,9 +89,9 @@ unchanged until a new full run.
    timezone offsets, and strict ISO rejection. Ten resource-limit variants
    need legitimate large strings, a 20 MiB DataView buffer, and a flat JSON
    array with 2^21 + 1 entries. Decouple buffer limits from dense-array limits
-   and preserve bounded allocation behavior. The five remaining runtime
-   variants cover Array ToLength (two), legacy NUL quoting (two), and object
-   primitive conversion (one). Each cause needs its neighboring comparison.
+   and preserve bounded allocation behavior. The remaining runtime variants also include legacy NUL quoting (two).
+   Array ToLength (two) and object primitive conversion (one) now pass in a
+   focused run and require full-run confirmation. Each cause needs its neighboring comparison.
 
 3. **Remove all 52 timeouts.** The inventory includes 22 staging/sm, eight
    RegExp-literal, six TypedArray, four URI-decode, four Annex B, two RegExp, four URI-encode,

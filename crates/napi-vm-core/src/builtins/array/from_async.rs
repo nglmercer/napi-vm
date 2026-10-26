@@ -59,7 +59,7 @@ fn initialize(i: &mut Interpreter, s: &Value, c: Value) -> Result<(), VmErr> {
         None
     };
     if let Some(method) = asynchronous.as_ref().or(synchronous.as_ref()) {
-        let result = super::array_result_create(i, &c, 0, true)?;
+        let result = super::array_result_create(i, &c, 0.0, true)?;
         s.set_prop("result".into(), result)?;
         let mut iterator = i.iterator_from_method(&source, method)?;
         if asynchronous.is_none() {
@@ -75,7 +75,7 @@ fn initialize(i: &mut Interpreter, s: &Value, c: Value) -> Result<(), VmErr> {
         let result = if crate::builtins::is_constructor(&c) {
             i.ctor(&c, vec![Value::Number(length)])?
         } else {
-            super::array_result_create(i, &c, length as usize, false)?
+            super::array_result_create(i, &c, length, false)?
         };
         s.set_prop("source".into(), source)?;
         s.set_prop("result".into(), result)?;

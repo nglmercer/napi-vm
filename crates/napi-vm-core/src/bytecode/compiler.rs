@@ -5392,11 +5392,21 @@ impl<'a> Compiler<'a> {
         exprs: &'a [Expr],
     ) -> Result<Reg, Decline> {
         let start = self.alloc_regs(exprs.len())?;
+        let empty_quasis = if exprs.is_empty() {
+            None
+        } else {
+            Some(self.push_const(Constant::StringList(vec![
+                crate::JsString::default(),
+                crate::JsString::default(),
+            ]))?)
+        };
         for (i, expr) in exprs.iter().enumerate() {
             let reg = self.compile_expr(expr)?;
-            self.emit(Instr::Mov {
+            self.emit(Instr::Template {
                 dst: start + i as u16,
-                src: reg,
+                quasis: empty_quasis.expect("interpolation chunks"),
+                args: reg,
+                argc: 1,
             });
         }
         let quasis = self.push_const(Constant::StringList(quasis.to_vec()))?;

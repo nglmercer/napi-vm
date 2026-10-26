@@ -354,7 +354,7 @@ fn array_ctor(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmE
 fn array_result_create(
     interp: &mut Interpreter,
     constructor: &Value,
-    length: usize,
+    length: f64,
     iterable: bool,
 ) -> Result<Value, VmErr> {
     if super::is_constructor(constructor) {
@@ -363,13 +363,14 @@ fn array_result_create(
             if iterable {
                 vec![]
             } else {
-                vec![Value::Number(length as f64)]
+                vec![Value::Number(length)]
             },
         );
     }
-    if length > crate::value::MAX_ARRAY_LEN {
+    if length > crate::value::MAX_ARRAY_LEN as f64 {
         return Err(crate::value::limit_err("Maximum array length exceeded"));
     }
+    let length = length as usize;
     Value::checked_array_with_presence(vec![Value::Undefined; length], vec![false; length])
 }
 
@@ -379,7 +380,7 @@ fn array_of(
     arguments: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let length = arguments.len();
-    let result = array_result_create(interp, &constructor, length, false)?;
+    let result = array_result_create(interp, &constructor, length as f64, false)?;
     for (index, value) in arguments.into_iter().enumerate() {
         create_array_result_element(interp, &result, index, value)?;
     }
@@ -413,7 +414,7 @@ fn array_from(
         &super::well_known("iterator").expect("Symbol.iterator"),
     )?;
     if let Some(method) = method {
-        let result = array_result_create(interp, &constructor, 0, true)?;
+        let result = array_result_create(interp, &constructor, 0.0, true)?;
         let iterator = interp.iterator_from_method(&source, &method)?;
         let next = interp.get_prop_value_str(&iterator, "next")?;
         let mut index = 0;
@@ -447,10 +448,14 @@ fn array_from(
             index += 1;
         }
     }
-    let length = array_like_length(interp, &source)?;
+    let length = array_like_length_number(interp, &source)?;
     let result = array_result_create(interp, &constructor, length, false)?;
-    for index in 0..length {
+    for index in 0..(length as u64) {
         interp.consume_loop()?;
+        if index >= crate::value::MAX_ARRAY_LEN as u64 {
+            return Err(crate::value::limit_err("Maximum array length exceeded"));
+        }
+        let index = index as usize;
         let value = interp.get_prop_value_str(&source, &index.to_string())?;
         let value = if let Some(mapper) = &mapper {
             interp.call_this(
@@ -463,7 +468,7 @@ fn array_from(
         };
         create_array_result_element(interp, &result, index, value)?;
     }
-    interp.set_member_str_or_throw(&result, "length", Value::Number(length as f64))?;
+    interp.set_member_str_or_throw(&result, "length", Value::Number(length))?;
     Ok(result)
 }
 
