@@ -91,6 +91,10 @@ losses** against the latest full projection. All 412 core tests, five worker
 tests, static checks, and the standard timing slice pass. The complete score
 above remains unchanged until another full run.
 
+The [buffer follow-up](evidence/buffer-cap-2026-10-26/) gains both DataView
+variants with zero losses in a 4,664-variant selection; six prior TypedArray
+timeouts remain. All 414 core tests and the standard timing slice pass.
+
 ## Historical measurements
 
 The preceding completed full pinned Test262 run (archived 2026-10-20, corpus

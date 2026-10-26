@@ -840,7 +840,7 @@ fn range_err(message: &str) -> VmErr {
 }
 
 fn new_buffer(byte_length: usize) -> Result<Buffer, VmErr> {
-    if byte_length > crate::value::MAX_ARRAY_LEN * 8 {
+    if byte_length > crate::value::MAX_BUFFER_BYTES {
         return Err(range_err("Invalid array buffer length"));
     }
     Ok(Buffer::zeroed(byte_length))
@@ -866,7 +866,7 @@ fn new_array_buffer(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result
         return Err(range_err("Invalid ArrayBuffer maximum length"));
     }
     let prototype = buffer_constructor_prototype(interp, "ArrayBuffer")?;
-    if maximum.is_some_and(|maximum| maximum > crate::value::MAX_ARRAY_LEN * 8) {
+    if maximum.is_some_and(|maximum| maximum > crate::value::MAX_BUFFER_BYTES) {
         return Err(range_err("Invalid buffer maximum length"));
     }
     let buffer = match maximum {
@@ -960,10 +960,10 @@ fn new_shared_array_buffer(
         return Err(range_err("Invalid shared array buffer maximum length"));
     }
     let prototype = buffer_constructor_prototype(interp, "SharedArrayBuffer")?;
-    if length > crate::value::MAX_ARRAY_LEN * 8 {
+    if length > crate::value::MAX_BUFFER_BYTES {
         return Err(range_err("Invalid shared array buffer length"));
     }
-    if maximum.is_some_and(|maximum| maximum > crate::value::MAX_ARRAY_LEN * 8) {
+    if maximum.is_some_and(|maximum| maximum > crate::value::MAX_BUFFER_BYTES) {
         return Err(range_err("Invalid shared array buffer maximum length"));
     }
     let buffer = SharedBuffer::zeroed_with_maximum(length, maximum)
@@ -3605,7 +3605,7 @@ fn immutable_buffer(
     length: usize,
     count: usize,
 ) -> Result<Value, VmErr> {
-    if length > crate::value::MAX_ARRAY_LEN * 8 {
+    if length > crate::value::MAX_BUFFER_BYTES {
         return Err(range_err("Invalid array buffer length"));
     }
     let mut bytes = vec![0; length];

@@ -2327,3 +2327,33 @@ fn date_default_conversion_honors_removed_or_replaced_to_primitive() {
         );
     }
 }
+
+#[test]
+fn buffer_byte_limit_is_independent_of_dense_array_capacity() {
+    for source in [
+        "let b=new ArrayBuffer(20*1024*1024);let v=new DataView(b);v.setUint32(b.byteLength-4,0x12345678);b.byteLength===20*1024*1024&&v.getUint32(b.byteLength-4)===0x12345678;",
+        "let b=new ArrayBuffer(20*1024*1024,{maxByteLength:24*1024*1024});b.resize(21*1024*1024);b.byteLength===21*1024*1024&&b.maxByteLength===24*1024*1024;",
+        "let b=new SharedArrayBuffer(20*1024*1024);new DataView(b).byteLength===20*1024*1024;",
+        "let ok=0;try{new ArrayBuffer(64*1024*1024+1);}catch(e){if(e instanceof RangeError)ok++;}try{new SharedArrayBuffer(64*1024*1024+1);}catch(e){if(e instanceof RangeError)ok++;}ok===2;",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn typed_array_numeric_reads_do_not_fall_through_to_prototype() {
+    for source in [
+        "let b=new ArrayBuffer(16,{maxByteLength:40});let a=new Int8Array(b,0,4);a.__proto__={'2':'wrong','-1':'wrong','NaN':'wrong'};a[2]=10;let before=a[2];b.resize(0);before===10&&a[2]===undefined&&a[-1]===undefined&&a.NaN===undefined&&!(2 in a);",
+        "let a=new Uint8Array(1);a.__proto__={'1':'wrong','1.5':'wrong','-0':'wrong','01':'named'};a[1]===undefined&&a['1.5']===undefined&&a['-0']===undefined&&a['01']==='named';",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}

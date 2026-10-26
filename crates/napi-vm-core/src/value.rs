@@ -26,6 +26,10 @@ use crate::parser::Statement;
 /// worst-case guest allocations survivable for the host.
 pub const MAX_ARRAY_LEN: usize = 262_144;
 
+/// Maximum backing-store size for ArrayBuffer and SharedArrayBuffer. Byte
+/// storage has different memory costs from dense arrays of `Value` slots.
+pub const MAX_BUFFER_BYTES: usize = 64 * 1024 * 1024;
+
 /// Hard cap on the number of own properties in a guest object. Object
 /// assignment is another unbounded allocation path even when arrays and
 /// strings are capped.

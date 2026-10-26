@@ -1193,6 +1193,13 @@ impl Interpreter {
                 key
             )));
         }
+        // Integer-indexed exotic reads never consult the prototype, including
+        // invalid, detached, and out-of-bounds canonical numeric indices.
+        if matches!(o, Value::TypedArray(_))
+            && crate::builtins::canonical_numeric_index(key).is_some()
+        {
+            return self.prop_str(o, key);
+        }
         // Ordinary [[Get]] delegates missing own properties to the prototype's
         // internal operation, retaining the original receiver for accessors.
         if o.property_cell().is_some() || matches!(o, Value::Array(_)) {
