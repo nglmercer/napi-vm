@@ -201,6 +201,29 @@ fn array_search_reads_own_elements_and_prototype_holes() {
 }
 
 #[test]
+fn primitive_prototype_cache_observes_replacement_and_getters() {
+    let source = r#"
+        let original = Object.getOwnPropertyDescriptor(Number.prototype, 'toString');
+        function read(x) { return x.toString; }
+        let first = read(12);
+        for (let i = 0; i < 4; i++) if (read(34) !== first) throw Error('unstable');
+        let replacement = function () { return 'changed'; };
+        Number.prototype.toString = replacement;
+        let changed = read(5) === replacement;
+        Object.defineProperty(Number.prototype, 'toString', {configurable:true,
+          get() { 'use strict'; return this === 7 ? replacement : first; }});
+        let getter = read(7) === replacement && read(8) === first;
+        Object.defineProperty(Number.prototype, 'toString', original);
+        changed && getter && read(3) === first;
+        "#;
+    check(source, true);
+    assert!(matches!(
+        run_ast_with_modules(source, &[]),
+        Ok(Value::Bool(true))
+    ));
+}
+
+#[test]
 fn uri_decoders_reject_utf8_encoded_surrogate_pairs() {
     let source = r#"
         let rejected = 0;

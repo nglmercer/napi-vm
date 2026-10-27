@@ -325,9 +325,8 @@ fn seed_captured(
 }
 
 /// Property storage of receivers an inline cache can guard directly:
-/// ordinary objects, classes, and functions. Primitive string prototype
-/// reads are handled separately because their guard is the current realm's
-/// String.prototype cell.
+/// ordinary objects, classes, and functions. Primitive prototype reads are
+/// handled separately using the current realm's prototype cell as a guard.
 fn cached_cell(obj: &Value) -> Option<&Rc<crate::value::ObjectCell>> {
     match obj {
         Value::Object { props } => Some(props),
@@ -426,7 +425,10 @@ fn get_prop_cached(
             return interp.get_prop_value(obj, key);
         }
     }
-    let primitive_prototype = if matches!(obj, Value::String(_)) {
+    let primitive_prototype = if matches!(
+        obj,
+        Value::String(_) | Value::Number(_) | Value::Bool(_) | Value::BigInt(_) | Value::Symbol(_)
+    ) {
         interp.primitive_reference_prototype(obj)
     } else {
         None
