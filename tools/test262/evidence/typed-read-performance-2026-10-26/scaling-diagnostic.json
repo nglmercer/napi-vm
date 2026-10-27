@@ -1,0 +1,23 @@
+{
+  "scope": "Single-worker modified test diagnostic; not corpus score",
+  "engine_sha256": "0ebd3b6eeb4de254b4e6874554772f0f51da45cb54586ae61f22130816fc7ee5",
+  "test": "staging/sm/TypedArray/set-same-buffer-different-source-target-types.js",
+  "runs": [
+    {
+      "source_length": 4096,
+      "seconds": 0.628,
+      "status": "ok"
+    },
+    {
+      "source_length": 16384,
+      "seconds": 2.458,
+      "status": "ok"
+    },
+    {
+      "source_length": 65536,
+      "seconds": 9.426,
+      "status": "ok"
+    }
+  ],
+  "note": "Modified source lengths; single-worker 30-second diagnostic. All original variants timed out at the required two-worker five-second deadline."
+}

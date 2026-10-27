@@ -1,0 +1,14 @@
+{
+  "source_commit": "8c573cfaff2724bc0933e7e7e3cc6eb9289cdd73",
+  "source_diff_sha256": "a0af1b360cadf6227dd6415960e8f31edc5d0910a59d360a0492d60a9a024104",
+  "engine_sha256": "0ebd3b6eeb4de254b4e6874554772f0f51da45cb54586ae61f22130816fc7ee5",
+  "counts": {
+    "pass": 0,
+    "fail": 0,
+    "skip": 0,
+    "timeout": 4,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "note": "All four large TypedArray variants still time out at five seconds."
+}

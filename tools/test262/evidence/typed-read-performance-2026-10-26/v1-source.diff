@@ -1,0 +1,42 @@
+diff --git a/crates/napi-vm-core/src/builtins/typedarray.rs b/crates/napi-vm-core/src/builtins/typedarray.rs
+index 9ed6962..c1c79f0 100644
+--- a/crates/napi-vm-core/src/builtins/typedarray.rs
++++ b/crates/napi-vm-core/src/builtins/typedarray.rs
+@@ -1905,7 +1905,8 @@ pub fn read_element(view: &Rc<TypedArrayData>, index: usize) -> Option<Value> {
+         return None;
+     }
+     let at = view.effective_byte_offset() + index * view.kind.size();
+-    let bytes = view.buffer.read(at, view.kind.size())?;
++    let data = view.buffer.read_element_bytes(at, view.kind.size())?;
++    let bytes = &data[..view.kind.size()];
+     Some(match view.kind {
+         TypedKind::Int8 => Value::Number(bytes[0] as i8 as f64),
+         TypedKind::Uint8 | TypedKind::Uint8Clamped => Value::Number(bytes[0] as f64),
+diff --git a/crates/napi-vm-core/src/value.rs b/crates/napi-vm-core/src/value.rs
+index a2e8c93..f4ac767 100644
+--- a/crates/napi-vm-core/src/value.rs
++++ b/crates/napi-vm-core/src/value.rs
+@@ -2515,6 +2515,23 @@ impl BufferBacking {
+         }
+     }
+ 
++    /// Read a single typed-array element without allocating a temporary Vec.
++    pub(crate) fn read_element_bytes(&self, offset: usize, length: usize) -> Option<[u8; 8]> {
++        if length > 8 {
++            return None;
++        }
++        let mut output = [0; 8];
++        match self {
++            Self::Array(buffer) => {
++                let bytes = buffer.borrow();
++                let end = offset.checked_add(length)?;
++                output[..length].copy_from_slice(bytes.get(offset..end)?);
++            }
++            Self::Shared(buffer) => output[..length].copy_from_slice(&buffer.read(offset, length)?),
++        }
++        Some(output)
++    }
++
+     pub fn write(&self, offset: usize, bytes: &[u8]) -> bool {
+         if self.is_immutable() {
+             return false;
