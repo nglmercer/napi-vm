@@ -431,6 +431,11 @@ fn substitute(
     captures: &[Value],
     groups: &Value,
 ) -> Result<crate::JsString, VmErr> {
+    // A template without substitution markers has no observable lookups and
+    // is already the complete replacement text.
+    if !template.units().contains(&(b'$' as u16)) {
+        return Ok(template.clone());
+    }
     let mut out = crate::JsString::default();
     let mut at = 0;
     while at < template.len() {

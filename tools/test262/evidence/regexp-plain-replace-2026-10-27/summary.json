@@ -1,0 +1,18 @@
+{
+  "base_commit": "1738a8be04339ed6f1b1c46554774a6b26860103",
+  "source_diff_sha256": "57b99ab1745349d0f5dede0fe467909fda0da82047250936f1787b3ab0cc984a",
+  "baseline_worker_sha256": "4985995a4283837a4896175fe0934ff558ad3b9a16c0dcfb4ffb7c6be5bf8eb3",
+  "candidate_worker_sha256": "5d62c3698549439ff2c384bd0e93b19b68f6ecb493232f556cef7d9dc66b97fc",
+  "regression": "336/338 pass, two known whitespace timeouts, zero losses vs latest full run",
+  "single_worker_original_whitespace_test_seconds": {
+    "baseline": [
+      7.04,
+      6.854
+    ],
+    "candidate": [
+      6.813,
+      6.839
+    ]
+  },
+  "limitations": "No five-second pass gained; performance difference is small."
+}
