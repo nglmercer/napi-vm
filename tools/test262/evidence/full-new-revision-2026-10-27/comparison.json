@@ -1,0 +1,34 @@
+{
+  "gains": [
+    {
+      "test": "built-ins/RegExp/character-class-escape-non-whitespace.js",
+      "variant": "script",
+      "before": "timeout"
+    },
+    {
+      "test": "built-ins/RegExp/character-class-escape-non-whitespace.js",
+      "variant": "strict",
+      "before": "timeout"
+    },
+    {
+      "test": "staging/sm/lexical-environment/block-scoped-functions-annex-b-arguments.js",
+      "variant": "script",
+      "before": "fail"
+    },
+    {
+      "test": "staging/sm/regress/regress-602621.js",
+      "variant": "script",
+      "before": "fail"
+    }
+  ],
+  "losses": [
+    {
+      "test": "annexB/language/function-code/block-decl-func-skip-arguments.js",
+      "variant": "script",
+      "after": "fail"
+    }
+  ],
+  "added_variants": 38,
+  "deleted_variants": 2,
+  "note": "Comparison uses test path and variant; some tests were modified between revisions."
+}

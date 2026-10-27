@@ -1,0 +1,183 @@
+[
+  {
+    "test": "annexB/built-ins/RegExp/RegExp-leading-escape-BMP.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "annexB/built-ins/RegExp/RegExp-leading-escape-BMP.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "annexB/built-ins/RegExp/RegExp-trailing-escape-BMP.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "annexB/built-ins/RegExp/RegExp-trailing-escape-BMP.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "annexB/language/function-code/block-decl-func-skip-arguments.js",
+    "variant": "script",
+    "status": "fail",
+    "engine": {
+      "status": "error",
+      "phase": "runtime",
+      "error_type": "Test262Error",
+      "message": "Expected SameValue(\u00ab\"function arguments() {}\"\u00bb, \u00ab\"[object Arguments]\"\u00bb) to be true"
+    }
+  },
+  {
+    "test": "built-ins/decodeURI/S15.1.3.1_A2.5_T1.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/decodeURI/S15.1.3.1_A2.5_T1.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/decodeURIComponent/S15.1.3.2_A2.5_T1.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "built-ins/decodeURIComponent/S15.1.3.2_A2.5_T1.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "language/literals/regexp/S7.8.5_A1.1_T2.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "language/literals/regexp/S7.8.5_A1.1_T2.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "language/literals/regexp/S7.8.5_A1.4_T2.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "language/literals/regexp/S7.8.5_A1.4_T2.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "language/literals/regexp/S7.8.5_A2.1_T2.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "language/literals/regexp/S7.8.5_A2.1_T2.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "language/literals/regexp/S7.8.5_A2.4_T2.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "language/literals/regexp/S7.8.5_A2.4_T2.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-1-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-1-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-2-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-2-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-3-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-3-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-4-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-4-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-5-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-5-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-6-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-6-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-7-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-7-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-8-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-8-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/TypedArray/sort_large_countingsort.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/TypedArray/sort_large_countingsort.js",
+    "variant": "strict",
+    "status": "timeout"
+  }
+]

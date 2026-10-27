@@ -1,0 +1,54 @@
+{
+  "source_commit": "d1d403d34e7f16def90aa969f88c4ad256906c6f",
+  "revision": "0b4e0812022b18236b5276d2804948fdd9f71603",
+  "worker_sha256": "414093c14dec0b37eeafaa7d6eb421c8f69adc4e0c5b1f9b3185542a7bd8064a",
+  "jobs": 2,
+  "timeout_seconds": 5.0,
+  "total": 102992,
+  "counts": {
+    "pass": 102957,
+    "fail": 1,
+    "skip": 0,
+    "timeout": 34,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "pass_percentage": 99.96601677800217,
+  "resumed_files": 0,
+  "comparison": {
+    "gains": [
+      {
+        "test": "built-ins/RegExp/character-class-escape-non-whitespace.js",
+        "variant": "script",
+        "before": "timeout"
+      },
+      {
+        "test": "built-ins/RegExp/character-class-escape-non-whitespace.js",
+        "variant": "strict",
+        "before": "timeout"
+      },
+      {
+        "test": "staging/sm/lexical-environment/block-scoped-functions-annex-b-arguments.js",
+        "variant": "script",
+        "before": "fail"
+      },
+      {
+        "test": "staging/sm/regress/regress-602621.js",
+        "variant": "script",
+        "before": "fail"
+      }
+    ],
+    "losses": [
+      {
+        "test": "annexB/language/function-code/block-decl-func-skip-arguments.js",
+        "variant": "script",
+        "after": "fail"
+      }
+    ],
+    "added_variants": 38,
+    "deleted_variants": 2,
+    "note": "Comparison uses test path and variant; some tests were modified between revisions."
+  },
+  "caveat": "Full run overlapped focused diagnostics and release builds, so timing-sensitive nonpasses should be repeated in isolation.",
+  "isolated_timeout_repeat": "0/34 passed; all 34 timed out again with two workers and a five-second limit"
+}

@@ -44,15 +44,14 @@ report still contains all selected outcomes and records the restored file count.
 
 ## Current full result
 
-The latest complete run used the previous pin
-`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81` and clean source `6416949`.
-It passes **102,918 / 102,956**, with two failures, 36 timeouts, and zero
-skips, crashes, or harness errors. [Full evidence](evidence/full-date-prototype-2026-10-27/)
-records every result and worker identity. Focused improvements since that run
-are not a new full score.
+The latest complete run used the pinned revision
+`0b4e0812022b18236b5276d2804948fdd9f71603` and source `d1d403d`.
+It passes **102,957 / 102,992**, with one failure, 34 timeouts, and zero
+skips, crashes, or harness errors. [Full evidence](evidence/full-new-revision-2026-10-27/)
+records every result and worker identity. The run overlapped other work; all
+34 timeouts repeated without competing builds at the same limits.
 
-The target pin is now `0b4e0812022b18236b5276d2804948fdd9f71603`; a full
-result on that revision is still needed. It retains the contradictory Annex B
+The selected revision retains the contradictory Annex B
 tests described in [upstream issue 5113](https://github.com/tc39/test262/issues/5113).
 The [full-pass plan](../../docs/test262-full-pass-plan.md) tracks remaining work.
 

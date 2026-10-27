@@ -2,14 +2,14 @@
 
 ## Measured status
 
-The latest completed full run used clean commit `6416949`, Test262 revision
-`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, two workers, and a five-second
-deadline per variant. It passed **102,918 / 102,956**, with two failures and
-36 timeouts, and no skips, crashes, or harness errors. The complete report
-and worker identity are in [the full-run evidence](../tools/test262/evidence/full-date-prototype-2026-10-27/).
-Subsequent fixes have focused results but have not yet been confirmed by a
-completed full run. A partial checkpoint of source `7bcd549` against the old
-revision is retained; the newer-revision run takes priority.
+The latest completed full run used source commit `d1d403d`, Test262 revision
+`0b4e0812022b18236b5276d2804948fdd9f71603`, two workers, and a five-second
+deadline per variant. It passed **102,957 / 102,992**, with one failure and
+34 timeouts, and no skips, crashes, or harness errors. The complete report,
+worker identity, and comparison are in [the full-run evidence](../tools/test262/evidence/full-new-revision-2026-10-27/).
+The run overlapped builds and diagnostics; all 34 timeouts repeated in a
+subsequent isolated selection with the same limits. The previous revision's
+full run passed 102,918 / 102,956.
 
 The current implementation follows the current specification for Annex B
 `arguments` block functions. Focused testing recovered the two staging failures,
@@ -31,18 +31,17 @@ an explicit compatibility difference until the specification changes.
 1. **Move the target to a newer Test262 revision.** The user selected a newer
    revision. Upstream `main` was `0b4e0812022b18236b5276d2804948fdd9f71603`
    on 2026-10-27, six commits beyond the old pin. Both conflicting files are
-   unchanged there. Pin that commit and run its full unmodified corpus. Preserve the old
-   revision and report separately so the denominator and changes are explicit.
+   unchanged there. The commit is pinned and its full unmodified corpus has
+   run. Preserve the old revision and report separately so the denominator and changes are explicit.
    If the contradictory tests remain, report the unresolved upstream issue;
    do not claim a literal full pass or silently change or exclude a test.
-2. **Refresh the baseline.** Complete the new revision's checkpointed full run
-   and compare shared variants with the previous full report. Keep
-   timing-sensitive results visible and repeat marginal cases under the same
-   two-worker, five-second configuration.
-3. **Remove remaining timeouts and semantic failures.** The last completed
-   pinned run had 16 Date, eight RegExp literal, four Annex B RegExp, four URI,
-   two RegExp whitespace, and two TypedArray sort timeouts. The whitespace
-   variants subsequently passed focused checks. Profile the unmodified cases
+2. **Confirm timing-sensitive results.** The complete reports have been
+   compared, and all 34 timeouts repeated without competing builds under the
+   same two-worker, five-second configuration. Repeat marginal cases after
+   performance changes.
+3. **Remove remaining timeouts and semantic failures.** The new full run has
+   16 Date, eight RegExp literal, four Annex B RegExp, four URI, and two
+   TypedArray sort timeouts. Profile the unmodified cases
    and prioritize shared interpreter call, binding, property, and loop costs.
    For Date, profile the four-level guest-language sweep and repeated calls;
    its scaled 24-timestamp diagnostic still took 2.36–2.84 seconds after the

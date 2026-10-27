@@ -513,27 +513,22 @@ flight. VMs that only use the synchronous `run()` do not need it.
 The core language and bridge are actively developed and covered by the native
 regression suite. Run `npm test` to see the current verified count.
 
-The latest completed full pinned Test262 run (archived 2026-10-20, corpus
-`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `daadb9b`)
-passes **101,978 / 102,956 variants (99.0501%)**, with 753 failures,
-225 timeouts, and zero skips, crashes, or harness errors. It gains 54 passes
-and loses 155 against the previous full run on `1bffdb8`; all 155 losses are
-measured timeouts, retained without reclassification. Of the gains, 30 were
-previous failures and 24 were previous timeouts. The frozen worker is
-`852c7c9c…`; this run did not resume a checkpoint.
-It includes Object constructor metadata, Object locale-string invocation,
-and Array string invocation, along with earlier module and disposal changes.
-Reports and comparison are archived in [full Array-string evidence](tools/test262/evidence/full-array-string-2026-10-20/).
+The latest completed full Test262 run uses corpus
+`0b4e0812022b18236b5276d2804948fdd9f71603` and source `d1d403d`. It passes
+**102,957 / 102,992 variants (99.9660%)**, with one failure, 34 timeouts,
+and no skips, crashes, or harness errors. The failure is an
+[upstream-confirmed contradiction](https://github.com/tc39/test262/issues/5113).
+The run used two workers and five-second deadlines; all 34 timeouts repeated
+without competing builds. The complete report
+and remaining work are in the [evidence](tools/test262/evidence/full-new-revision-2026-10-27/)
+and [full-pass plan](docs/test262-full-pass-plan.md).
 
-This snapshot excludes subsequent sparse indices, logical Array lengths,
-core constructor metadata/unscopables, and String semantic fixes. Focused
-results remain separate from this full score. A new full run is active on detached clean source `f708e0c` (worker
-`8dab6498…`), including the verified built-in and tagged-constructor fixes.
-The completed full score remains authoritative until that report finishes.
+The following paragraphs describe historical focused checkpoints; the full
+result above supersedes references to their then-active full runs.
 
 Function/Proxy metadata and inheritance now pass **1,624 / 1,628** focused
 variants in an isolated optimized build: **12 gains, zero lost passes**.
-This later change is excluded from the active full run. See the
+See the
 [Function/Proxy continuation](docs/test262-function-proxy-metadata-continuation.md).
 
 Bound functions now retain intermediate target identities and resolve deep
@@ -541,7 +536,7 @@ call, construction, and instanceof chains iteratively. Isolated optimized
 verification passes **1,831 / 1,837**, with **two gains and zero lost passes**.
 The subsequent primitive-operand ordering fix passes **107 / 107**
 focused debug instanceof variants, gaining **four passes with zero losses**.
-Both changes are excluded from the active full run. See the
+See the
 [bound-chain continuation](docs/test262-bound-function-chains-continuation.md) and
 [instanceof ordering continuation](docs/test262-instanceof-primitive-order-continuation.md).
 
