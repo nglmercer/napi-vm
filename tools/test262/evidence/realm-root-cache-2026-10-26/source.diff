@@ -1,0 +1,118 @@
+diff --git a/crates/napi-vm-core/src/interpreter/env.rs b/crates/napi-vm-core/src/interpreter/env.rs
+index aaae739..2c21b4e 100644
+--- a/crates/napi-vm-core/src/interpreter/env.rs
++++ b/crates/napi-vm-core/src/interpreter/env.rs
+@@ -271,6 +271,8 @@ pub struct Environment {
+     vars: Vars,
+     global_environment: Option<GlobalEnvironment>,
+     parent: Option<Env>,
++    /// Cached global ancestor; weak so this shortcut does not retain a realm.
++    global_ancestor: std::rc::Weak<std::cell::RefCell<Environment>>,
+     /// Only the persistent user-global frame has a binding quota. Local
+     /// function/catch frames and the trusted builtins frame leave this unset.
+     global_limit: Option<usize>,
+@@ -734,6 +736,7 @@ impl Environment {
+             vars: Vars::Small(SmallVec::new()),
+             global_environment: None,
+             parent: None,
++            global_ancestor: std::rc::Weak::new(),
+             global_limit: None,
+             module_context: None,
+             module_realm: None,
+@@ -761,10 +764,12 @@ impl Environment {
+     }
+ 
+     pub fn child(p: Env) -> Self {
++        let global_ancestor = Self::global_ancestor_for_child(&p);
+         Self {
+             vars: Vars::Small(SmallVec::new()),
+             global_environment: None,
+             parent: Some(p),
++            global_ancestor,
+             global_limit: None,
+             module_context: None,
+             module_realm: None,
+@@ -800,6 +805,7 @@ impl Environment {
+             vars: Vars::Small(SmallVec::new()),
+             global_environment: Some(record),
+             parent,
++            global_ancestor: std::rc::Weak::new(),
+             global_limit: Some(MAX_GLOBAL_BINDINGS),
+             module_context: None,
+             module_realm: None,
+@@ -830,6 +836,7 @@ impl Environment {
+     /// path binds `this` and parameters without per-parameter environment
+     /// borrows. Duplicate names keep their last value in either storage mode.
+     pub fn with_bindings(p: Env, vars: SmallVec<[(Key, Value); INLINE_CAP]>) -> Self {
++        let global_ancestor = Self::global_ancestor_for_child(&p);
+         // Parameters and `this` are `var`-like: reassignable and never in a
+         // temporal dead zone.
+         let vars = vars
+@@ -854,6 +861,7 @@ impl Environment {
+             vars,
+             global_environment: None,
+             parent: Some(p),
++            global_ancestor,
+             global_limit: None,
+             module_context: None,
+             module_realm: None,
+@@ -1409,7 +1417,25 @@ impl Environment {
+     /// Find the persistent global frame in an environment chain. This is used
+     /// by generator bodies, whose active frame is detached from the normal
+     /// interpreter `global` field while the body runs.
++    fn global_ancestor_for_child(parent: &Env) -> std::rc::Weak<std::cell::RefCell<Environment>> {
++        let borrowed = parent.borrow();
++        if borrowed.is_global_scope() {
++            Rc::downgrade(parent)
++        } else {
++            borrowed.global_ancestor.clone()
++        }
++    }
++
+     pub fn find_global(env: &Env) -> Option<Env> {
++        {
++            let borrowed = env.borrow();
++            if borrowed.is_global_scope() {
++                return Some(env.clone());
++            }
++            if let Some(global) = borrowed.global_ancestor.upgrade() {
++                return Some(global);
++            }
++        }
+         let mut current = env.clone();
+         loop {
+             let (is_global, parent) = {
+@@ -1559,6 +1585,33 @@ mod global_quota_tests {
+     use super::*;
+     use crate::Interpreter;
+ 
++    #[test]
++    fn global_ancestor_tracks_nearest_global_and_does_not_own_it() {
++        let bare = Rc::new(RefCell::new(Environment::new()));
++        let bare_child = Rc::new(RefCell::new(Environment::child(bare.clone())));
++        assert!(Environment::find_global(&bare_child).is_none());
++
++        let outer = Rc::new(RefCell::new(Environment::global(Some(bare))));
++        let child = Rc::new(RefCell::new(Environment::child(outer.clone())));
++        let nested = Rc::new(RefCell::new(Environment::global(Some(child))));
++        let frame = Rc::new(RefCell::new(Environment::with_bindings(
++            nested.clone(),
++            SmallVec::new(),
++        )));
++        assert!(Rc::ptr_eq(
++            &Environment::find_global(&frame).unwrap(),
++            &nested
++        ));
++        assert!(!Rc::ptr_eq(
++            &Environment::find_global(&frame).unwrap(),
++            &outer
++        ));
++        let weak = frame.borrow().global_ancestor.clone();
++        drop(frame);
++        drop(nested);
++        assert!(weak.upgrade().is_none());
++    }
++
+     #[test]
+     fn guest_global_growth_is_bounded_and_updates_and_deletes_preserve_quota() {
+         let mut vm = Interpreter::with_builtins();

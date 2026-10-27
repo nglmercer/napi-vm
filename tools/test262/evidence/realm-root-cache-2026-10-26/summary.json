@@ -1,0 +1,13 @@
+{
+  "base_commit": "937bc0fc69b7651f4a10ecfbd0c05acfcb54a413",
+  "source_diff_sha256": "2d2f118bdb83fef334ed43f6cb50872a5b13eac63718d0f839c292e8d26ed303",
+  "baseline_worker_sha256": "7455753c5b644f4a0f33fdc4c859cdec76be3f4facb3d235fbac2786bf5fb32e",
+  "candidate_worker_sha256": "0e981502393921cb5a239d954c4d1119f16d4ed05838a686583f245ec5d3b3ef",
+  "focused": "8/8 timed out at 5 seconds",
+  "single_worker_sort_seconds": {
+    "baseline": 7.637,
+    "candidate": 7.67
+  },
+  "long_diagnostics": "On baseline, all 14 regexp variants and both sort variants passed at 30 seconds; all four URI decode variants timed out. These are diagnostics and do not change the 5-second results.",
+  "decision": "reverted cache because it showed no measurable improvement"
+}
