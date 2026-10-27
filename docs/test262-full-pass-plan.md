@@ -8,8 +8,8 @@ deadline per variant. It passed **102,918 / 102,956**, with two failures and
 36 timeouts, and no skips, crashes, or harness errors. The complete report
 and worker identity are in [the full-run evidence](../tools/test262/evidence/full-date-prototype-2026-10-27/).
 Subsequent fixes have focused results but have not yet been confirmed by a
-completed full run. A checkpointed run of committed source `7bcd549` against
-the same revision is in progress.
+completed full run. A partial checkpoint of source `7bcd549` against the old
+revision is retained; the newer-revision run takes priority.
 
 The current implementation follows the current specification for Annex B
 `arguments` block functions. Focused testing recovered the two staging failures,
@@ -21,17 +21,17 @@ itself establish that the conflict is fixed.
 
 ## Ordered work
 
-1. **Refresh the baseline.** Finish the checkpointed pinned run and compare
-   every variant against the previous full report. Keep timing-sensitive
-   results visible and repeat marginal cases under the same two-worker,
-   five-second configuration.
-2. **Move the target to a newer Test262 revision.** The user selected a newer
+1. **Move the target to a newer Test262 revision.** The user selected a newer
    revision. Upstream `main` was `0b4e0812022b18236b5276d2804948fdd9f71603`
    on 2026-10-27, six commits beyond the old pin. Both conflicting files are
    unchanged there. Pin that commit and run its full unmodified corpus. Preserve the old
    revision and report separately so the denominator and changes are explicit.
    If the contradictory tests remain, report the unresolved upstream issue;
    do not claim a literal full pass or silently change or exclude a test.
+2. **Refresh the baseline.** Complete the new revision's checkpointed full run
+   and compare shared variants with the previous full report. Keep
+   timing-sensitive results visible and repeat marginal cases under the same
+   two-worker, five-second configuration.
 3. **Remove remaining timeouts and semantic failures.** The last completed
    pinned run had 16 Date, eight RegExp literal, four Annex B RegExp, four URI,
    two RegExp whitespace, and two TypedArray sort timeouts. The whitespace
