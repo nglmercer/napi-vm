@@ -1,0 +1,37 @@
+diff --git a/crates/napi-vm-core/src/builtins/string.rs b/crates/napi-vm-core/src/builtins/string.rs
+index 4110283..a15ade7 100644
+--- a/crates/napi-vm-core/src/builtins/string.rs
++++ b/crates/napi-vm-core/src/builtins/string.rs
+@@ -1223,15 +1223,16 @@ fn decode_uri_impl(
+         if !(2..=4).contains(&n) || first == 0xC0 || first == 0xC1 {
+             return Err(uri_malformed());
+         }
+-        let mut octets = vec![first];
+-        for _ in 1..n {
++        let mut octets = [0u8; 6];
++        octets[0] = first;
++        for octet in octets.iter_mut().take(n).skip(1) {
+             let next = take_octet(units, &mut k)?;
+             if next & 0xC0 != 0x80 {
+                 return Err(uri_malformed());
+             }
+-            octets.push(next);
++            *octet = next;
+         }
+-        let value = decode_utf8_value(&octets).ok_or_else(uri_malformed)?;
++        let value = decode_utf8_value(&octets[..n]).ok_or_else(uri_malformed)?;
+         // Reject non-shortest forms: the value must need all n octets.
+         let minimum = match n {
+             2 => 0x80,
+@@ -1254,9 +1255,9 @@ fn decode_uri_impl(
+                     } else if next & 0xC0 != 0x80 {
+                         return Err(uri_malformed());
+                     }
+-                    octets.push(next);
++                    octets[3 + position] = next;
+                 }
+-                let trail_value = decode_utf8_value(&octets[3..]).ok_or_else(uri_malformed)?;
++                let trail_value = decode_utf8_value(&octets[3..6]).ok_or_else(uri_malformed)?;
+                 if !(0xDC00..=0xDFFF).contains(&trail_value) {
+                     return Err(uri_malformed());
+                 }
