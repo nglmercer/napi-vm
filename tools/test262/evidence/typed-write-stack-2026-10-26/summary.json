@@ -1,0 +1,9 @@
+{
+  "base_commit": "b61983bbb3c1ef55bea71c34e73e680177ab8721",
+  "source_diff_sha256": "9325828c2832feb0e8548fe929dafce314d8a0f917252b325903db88c477421b",
+  "candidate_worker_sha256": "77b5a742daa3e4a8e6c57db5061a3c7544b0dd8672ac4b33a35e610165d5c311",
+  "focused": "4/4 timed out: conversion and sort variants",
+  "regression": "4517/4521 passed, four known timeouts, zero gains and zero losses compared with latest full run",
+  "profiling": "single worker separate workloads: object coercion and assertion loops dominate; numeric string parse accounts for a smaller share",
+  "decision": "Candidate reverted: no focused Test262 gain and no clear improvement in repeated write benchmark."
+}

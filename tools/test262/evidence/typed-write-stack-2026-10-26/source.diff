@@ -1,0 +1,69 @@
+diff --git a/crates/napi-vm-core/src/builtins/typedarray.rs b/crates/napi-vm-core/src/builtins/typedarray.rs
+index 38b80ea..4eb352d 100644
+--- a/crates/napi-vm-core/src/builtins/typedarray.rs
++++ b/crates/napi-vm-core/src/builtins/typedarray.rs
+@@ -1939,7 +1939,8 @@ pub fn write_element(view: &Rc<TypedArrayData>, index: usize, value: &Value) ->
+     }
+     let size = view.kind.size();
+     let at = view.effective_byte_offset() + index * size;
+-    let bytes: Vec<u8> = match view.kind {
++    let mut bytes = [0u8; 8];
++    match view.kind {
+         TypedKind::BigInt64 | TypedKind::BigUint64 => {
+             let Some(big) = value.as_bigint() else {
+                 return Err(VmErr::Msg(
+@@ -1950,13 +1951,13 @@ pub fn write_element(view: &Rc<TypedArrayData>, index: usize, value: &Value) ->
+             // `as_n_bit(64, false)` yields a non-negative magnitude that fits
+             // 64 bits, so the decimal parse is exact.
+             let unsigned: u64 = wrapped.to_decimal().parse().unwrap_or(0);
+-            unsigned.to_le_bytes().to_vec()
++            bytes.copy_from_slice(&unsigned.to_le_bytes());
+         }
+         kind => {
+             let number = value.to_number();
+             match kind {
+-                TypedKind::Int8 => (to_int(number) as i8).to_le_bytes().to_vec(),
+-                TypedKind::Uint8 => (to_int(number) as u8).to_le_bytes().to_vec(),
++                TypedKind::Int8 => bytes[0] = to_int(number) as i8 as u8,
++                TypedKind::Uint8 => bytes[0] = to_int(number) as u8,
+                 // The clamped view saturates instead of wrapping, and rounds
+                 // to nearest rather than truncating.
+                 TypedKind::Uint8Clamped => {
+@@ -1965,19 +1966,27 @@ pub fn write_element(view: &Rc<TypedArrayData>, index: usize, value: &Value) ->
+                     } else {
+                         number.round_ties_even().clamp(0.0, 255.0)
+                     };
+-                    vec![clamped as u8]
++                    bytes[0] = clamped as u8;
+                 }
+-                TypedKind::Int16 => (to_int(number) as i16).to_le_bytes().to_vec(),
+-                TypedKind::Uint16 => (to_int(number) as u16).to_le_bytes().to_vec(),
+-                TypedKind::Int32 => to_int(number).to_le_bytes().to_vec(),
+-                TypedKind::Uint32 => (to_int(number) as u32).to_le_bytes().to_vec(),
+-                TypedKind::Float16 => float16_bits(number).to_le_bytes().to_vec(),
+-                TypedKind::Float32 => (number as f32).to_le_bytes().to_vec(),
+-                _ => number.to_le_bytes().to_vec(),
++                TypedKind::Int16 => {
++                    bytes[..2].copy_from_slice(&(to_int(number) as i16).to_le_bytes())
++                }
++                TypedKind::Uint16 => {
++                    bytes[..2].copy_from_slice(&(to_int(number) as u16).to_le_bytes())
++                }
++                TypedKind::Int32 => bytes[..4].copy_from_slice(&to_int(number).to_le_bytes()),
++                TypedKind::Uint32 => {
++                    bytes[..4].copy_from_slice(&(to_int(number) as u32).to_le_bytes())
++                }
++                TypedKind::Float16 => {
++                    bytes[..2].copy_from_slice(&float16_bits(number).to_le_bytes())
++                }
++                TypedKind::Float32 => bytes[..4].copy_from_slice(&(number as f32).to_le_bytes()),
++                _ => bytes.copy_from_slice(&number.to_le_bytes()),
+             }
+         }
+-    };
+-    view.buffer.write(at, &bytes);
++    }
++    view.buffer.write(at, &bytes[..size]);
+     Ok(())
+ }
+ 
