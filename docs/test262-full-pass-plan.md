@@ -19,6 +19,13 @@ describes the contradiction, and [PR 5112](https://github.com/tc39/test262/pull/
 proposes a correction. The PR is open; simply updating Test262 does not by
 itself establish that the conflict is fixed.
 
+The new revision also expects DataView length and offset accessors to return
+zero for detached or out-of-bounds views. Test262 adopted this ahead of the
+corresponding [ECMA-262 proposal](https://github.com/tc39/ecma262/pull/3972),
+which remains open; the published specification currently requires a
+TypeError. The implementation follows the selected test revision, so this is
+an explicit compatibility difference until the specification changes.
+
 ## Ordered work
 
 1. **Move the target to a newer Test262 revision.** The user selected a newer

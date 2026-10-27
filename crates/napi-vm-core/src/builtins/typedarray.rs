@@ -2617,14 +2617,14 @@ fn data_view_buffer(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<V
 fn data_view_byte_length(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     let v = require_data_view(&this)?;
     if v.is_out_of_bounds() {
-        return Err(VmErr::Msg("TypeError: DataView out of bounds".into()));
+        return Ok(Value::Number(0.0));
     }
     Ok(Value::Number(v.effective_length() as f64))
 }
 fn data_view_byte_offset(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     let v = require_data_view(&this)?;
     if v.is_out_of_bounds() {
-        return Err(VmErr::Msg("TypeError: DataView out of bounds".into()));
+        return Ok(Value::Number(0.0));
     }
     Ok(Value::Number(v.byte_offset as f64))
 }

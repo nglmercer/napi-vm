@@ -153,11 +153,11 @@ fn resizable_buffers_preserve_view_identity_and_restore_bounds_after_regrowth() 
     );
     truth(
         &mut vm,
-        "buffer.resize(2);var failed=false;try{data.byteLength;}catch(e){failed=e.constructor===TypeError;}failed&&tracking.length===0&&tracking.byteOffset===0;",
+        "buffer.resize(2);data.byteLength===0&&data.byteOffset===0&&tracking.length===0&&tracking.byteOffset===0;",
     );
     truth(
         &mut vm,
-        "buffer.resize(16);tracking.length===12&&fixed.length===4&&fixed.byteOffset===4&&fixed[0]===0&&data.byteLength===12;",
+        "buffer.resize(16);tracking.length===12&&fixed.length===4&&fixed.byteOffset===4&&fixed[0]===0&&data.byteLength===12&&data.byteOffset===4;",
     );
     let buffer = vm.global_value("buffer").unwrap();
     let Value::ArrayBuffer(ref buffer) = buffer else {
@@ -166,6 +166,6 @@ fn resizable_buffers_preserve_view_identity_and_restore_bounds_after_regrowth() 
     buffer.detach();
     truth(
         &mut vm,
-        "buffer.detached&&buffer.resizable&&buffer.maxByteLength===0&&tracking.length===0&&fixed.length===0;",
+        "buffer.detached&&buffer.resizable&&buffer.maxByteLength===0&&tracking.length===0&&fixed.length===0&&data.byteLength===0&&data.byteOffset===0;",
     );
 }
