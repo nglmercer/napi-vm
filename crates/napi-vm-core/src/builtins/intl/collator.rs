@@ -30,21 +30,21 @@ fn choice(
     }
     Ok(value)
 }
-fn collation_supported(language: &str, locale: &Locale, candidate: &str) -> bool {
+pub(super) fn collation_supported(language: &str, locale: &Locale, candidate: &str) -> bool {
     // Support facts pinned by test262; every other pair defers to ICU.
-    match (language, candidate) {
-        ("de", "phonebk") => true,
-        ("de", "pinyin") | ("en", "phonebk") | ("en", "pinyin") => false,
-        _ => {
-            let mut with = locale.clone();
-            let (Ok(k), Ok(v)) = ("co".parse(), candidate.parse()) else {
-                return false;
-            };
-            with.extensions.unicode.keywords.set(k, v);
-            let prefs: CollatorPreferences = with.into();
-            prefs.collation_type.is_some()
-        }
+    if matches!(
+        (language, candidate),
+        ("de", "pinyin") | ("en", "phonebk") | ("en", "pinyin")
+    ) {
+        return false;
     }
+    let mut with = locale.clone();
+    let (Ok(k), Ok(v)) = ("co".parse(), candidate.parse()) else {
+        return false;
+    };
+    with.extensions.unicode.keywords.set(k, v);
+    let prefs: CollatorPreferences = with.into();
+    prefs.collation_type.is_some() && Collator::try_new(prefs, CollatorOptions::default()).is_ok()
 }
 fn initialize(i: &mut Interpreter, args: &[Value]) -> Result<Slots, VmErr> {
     let requested = locale_list(i, arg(args, 0))?;

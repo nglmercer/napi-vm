@@ -514,11 +514,23 @@ fn canonical_locales(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<
 
 fn get_text_info(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     let loc = locale(&this)?;
-    let rtl = icu_locale::LocaleDirectionality::new_extended().is_right_to_left(&loc.id);
-    Ok(Value::object(vec![(
-        "direction".into(),
-        Value::String(if rtl { "rtl" } else { "ltr" }.into()),
-    )]))
+    let mut id = loc.id.clone();
+    if id.script.is_none() && loc.extended_language.is_none() {
+        maximize_id(&mut id);
+    }
+    let direction = match id.script.and_then(|script| {
+        if script.as_str() == "Zzzz" {
+            None
+        } else {
+            let script_id = icu_locale::LanguageIdentifier::from(Some(script));
+            icu_locale::LocaleDirectionality::new_extended().get(&script_id)
+        }
+    }) {
+        Some(icu_locale::Direction::RightToLeft) => Value::String("rtl".into()),
+        Some(icu_locale::Direction::LeftToRight) => Value::String("ltr".into()),
+        _ => Value::Undefined,
+    };
+    Ok(Value::object(vec![("direction".into(), direction)]))
 }
 
 fn keyword_in(loc: &LocaleSlots, key: &str) -> Option<String> {
@@ -607,9 +619,15 @@ fn get_collations(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Val
     if language == "und" || is_private_language(&language) {
         return Ok(strings("emoji eor"));
     }
+    let resolved =
+        best_available_locale(&loc.to_string()).and_then(|base| base.parse::<Locale>().ok());
+    let Some(resolved) = resolved else {
+        return Ok(strings("emoji eor"));
+    };
     Ok(Value::array(
         supported::SUPPORTED_COLLATIONS
             .iter()
+            .filter(|name| collator::collation_supported(&language, &resolved, name))
             .map(|name| Value::String((*name).into()))
             .collect(),
     ))
@@ -619,11 +637,13 @@ fn get_numbering_systems(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Res
     if let Some(numbering) = keyword_in(&loc, "nu") {
         return Ok(Value::array(vec![Value::String(numbering.into())]));
     }
-    Ok(Value::array(
-        number::numbering_system_names()
-            .map(|name| Value::String(name.into()))
-            .collect(),
-    ))
+    let tag = loc.to_string();
+    let numbering = if best_available_locale(&tag).is_some() {
+        relative::resolve_numbering(&[tag], None)?.3
+    } else {
+        "latn".into()
+    };
+    Ok(Value::array(vec![Value::String(numbering.into())]))
 }
 fn get_time_zones(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     let loc = locale(&this)?;
