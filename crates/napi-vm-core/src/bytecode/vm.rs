@@ -259,9 +259,6 @@ pub(crate) fn run_function(
             .set_new_target(interp.pending_new_target.take().unwrap_or(Value::Undefined));
     }
     if code.needs_frame_environment {
-        if !code.is_arrow {
-            fe.borrow_mut().set("this", this_value.clone());
-        }
         seed_captured(interp, &fe, code, args, function)?;
     }
     let module_context = fe.borrow().module_context();
