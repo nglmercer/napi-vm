@@ -1589,9 +1589,6 @@ impl Interpreter {
                 props.meta.borrow_mut().set_explicit_data(&slot, true);
                 return Ok(true);
             }
-            if props.meta.borrow().non_extensible {
-                return Ok(false);
-            }
             let mut prototype = self.prototype_of(target);
             let mut clear = false;
             for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
@@ -1611,6 +1608,9 @@ impl Interpreter {
                 prototype = self.prototype_of(current.as_ref());
             }
             if clear {
+                if props.meta.borrow().non_extensible {
+                    return Ok(false);
+                }
                 target.set_prop(slot.clone(), value)?;
                 props.meta.borrow_mut().set_explicit_data(&slot, true);
                 return Ok(true);

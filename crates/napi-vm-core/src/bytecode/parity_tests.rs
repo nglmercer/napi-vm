@@ -2443,6 +2443,7 @@ fn numeric_object_writes_preserve_prototype_descriptors_and_mutations() {
         "let o={};for(let i=0;i<150;i++)o[i]=i;let a=o[120];delete o[80];Object.defineProperty(o,'120',{value:4,writable:false,configurable:true});let ok=!Reflect.set(o,'120',9);o[80]=7;a===120&&ok&&o[80]===7&&o[120]===4&&Object.keys(o).length===150;",
         "let n=0;let p={set 5(v){n=v;}};let o=Object.create(p);o[5]=7;n===7&&!Object.hasOwn(o,'5');",
         "let o={};Object.preventExtensions(o);!Reflect.set(o,'0',1)&&!('0' in o);",
+        "let p=new Uint8Array(1);let o=Object.preventExtensions(Object.create(p));let calls=0;let value={valueOf(){calls++;return 2;}};let ok=Reflect.set(o,1,value);ok&&!Object.hasOwn(o,'1')&&calls===0;",
         "let get=Object.getOwnPropertyDescriptor({get x(){return 7;}},'x').get;let o={};o[0]=get;Object.defineProperty(o,'1',{get(){return 2;}});o[0]===get&&o[0]()===7;",
         "let seen=0;let p=new Proxy({},{set(t,k,v,r){seen++;return true;}});let o=Object.create(p);o[1]=4;seen===1&&!Object.hasOwn(o,'1');",
     ] {

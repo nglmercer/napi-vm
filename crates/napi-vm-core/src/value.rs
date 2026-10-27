@@ -1320,6 +1320,22 @@ impl ObjectCell {
         }
     }
 
+    /// Append a verified new property while maintaining cached indices.
+    pub(crate) fn append_new_slot(&self, key: String, value: Value) -> Result<(), VmErr> {
+        let mut slots = self.slots.borrow_mut();
+        if slots.len() >= MAX_OBJECT_PROPS {
+            return Err(limit_err("Maximum object property count exceeded"));
+        }
+        let position = slots.len();
+        slots.push((key.clone(), value));
+        drop(slots);
+        if let Some(dictionary) = self.index.borrow_mut().as_mut() {
+            dictionary.insert(key.clone(), position);
+        }
+        self.note_key_added(&key);
+        Ok(())
+    }
+
     /// Forget the cached layout after a bulk mutation (delete, redefine,
     /// wholesale host-side replace). The next indexed access rebuilds from
     /// the slots; until then the object behaves exactly as before shapes.

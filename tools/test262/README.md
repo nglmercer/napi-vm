@@ -44,84 +44,23 @@ report still contains all selected outcomes and records the restored file count.
 
 ## Current full result
 
-The latest complete pinned run finished **2026-10-26** on an uncommitted
-source snapshot based on `42ae715`. It passes **102,839 / 102,956 (99.8864%)**,
-with 65 failures, 52 timeouts, and zero skips, crashes, or harness errors.
-It gains **20 passes with zero losses** against preceding full worker
-`ef2a45bd…` (102,819 passes). The **117 remaining variants** comprise 42 parse
-failures, 23 runtime failures, and 52 timeouts.
+The latest complete pinned run on clean commit `9d23d08` passes **102,906 /
+102,956 (99.9514%)**, with **4 failures, 46 timeouts**, and zero skips,
+crashes, or harness errors. It gains **71 passes** and loses **four** against
+[the preceding full run](evidence/full-activation-followup-2026-10-26/). Two
+losses are TypedArray prototype-chain assignment failures and two are Proxy
+ownKeys timeouts. [Full evidence](evidence/full-clean-2026-10-26/) retains
+every outcome, transition, residual, and source/worker identity.
 
-The run uses corpus `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, two workers,
-five-second deadlines, no exclusions, and no resumed outcomes. Worker SHA-256:
-`aacb94ea7e8fccf9e3ddd92adf9af09a8932e0b0ec6a678fffe2fb1daf8c39b5`.
-[Full evidence](evidence/full-activation-followup-2026-10-26/) contains every
-outcome, comparison, triage, residual inventory, source identity, and exact
-source diff. Source and binary hashes were revalidated after completion.
-The final gate also requires clean committed source.
+The pinned corpus revision is `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`;
+this run used two workers, five-second deadlines, no exclusions or resume, and
+worker `af0b2e63e48fa82c44ecb4eb4f956e203194dc07a84e54934ba4ca508d1865da`.
+The [full-pass plan](../../docs/test262-full-pass-plan.md) tracks remaining
+work and the unchanged acceptance criteria.
 
-The gains cover thirteen legacy caller/arguments variants, two ArrayBuffer
-coercion variants, four URI-decode variants, and strict toSpliced-dense.
-Every previous pass is retained. The six-variant timing slice passed twice,
-and 16,279 broader focused variants passed without losses. Rejected candidate
-regressions remain in the [activation evidence](evidence/function-activation-followup-2026-10-26/).
-All 395 core tests, five worker tests, Clippy, root all-target checking,
-formatting, and whitespace checks pass.
-
-The [preceding full run](evidence/full-runtime-followup-2026-10-26/) is
-preserved. See the [full-pass plan](../../docs/test262-full-pass-plan.md)
-for the remaining causes and unchanged acceptance criteria.
-
-The [field-decorator follow-up](evidence/field-decorator-followup-2026-10-26/)
-passes **32,596 / 32,596** focused variants: eight gains since the method stage,
-or 42 gains with zero losses against the latest complete-report projection.
-All pinned parse residuals are clear in that selection. All 405 core tests,
-five worker tests, static checks, and the standard timing slice pass. Rejected
-array-data and pop-performance candidates remain archived. The subsequent
-[getter/setter follow-up](evidence/accessor-decorator-followup-2026-10-26/)
-retains **32,596 / 32,596** passes with zero losses, all **408 core tests**,
-five worker tests, and static checks. Accessor identities, cache/Node bridge
-reads, and inherited exotic reads are covered; rejected candidates are retained.
-The [auto-accessor decorator follow-up](evidence/auto-accessor-decorator-2026-10-26/)
-also retains **32,596 / 32,596** focused passes and passes **409 core tests**. The latest full score is
-unchanged until another complete run confirms these gains.
-
-The [conversion and length follow-up](evidence/conversion-length-2026-10-26/)
-passes **18,247 / 18,247** focused variants, gaining **three passes with zero
-losses** against the latest full projection. All 412 core tests, five worker
-tests, static checks, and the standard timing slice pass. The complete score
-above remains unchanged until another full run.
-
-The [buffer follow-up](evidence/buffer-cap-2026-10-26/) gains both DataView
-variants with zero losses in a 4,664-variant selection; six prior TypedArray
-timeouts remain. All 414 core tests and the standard timing slice pass.
-
-The [hour-cycle follow-up](evidence/intl-hour-cycle-2026-10-26/) passes
-**838 / 838** focused variants, gaining both NUL-option variants with zero
-losses. All 415 core tests and the standard timing slice pass.
-
-The [large-string follow-up](evidence/string-cap-2026-10-26/) passes
-**3,663 / 3,663** focused variants, gaining six Unicode escape variants with
-zero losses. All 415 core tests and the standard timing slice pass.
-
-The [large JSON follow-up](evidence/large-json-2026-10-26/) passes
-**13,661 / 13,661** focused variants, gaining both large-array variants with
-zero losses. All 416 core tests and the standard timing slice pass.
-
-The [Annex B follow-up](evidence/annex-arguments-labels-2026-10-26/) passes
-**2,947 / 2,949** selected variants, gaining two labeled-function variants with
-zero losses. Two staging arguments variants conflict with the pinned normative
-arguments test; the candidate that passes staging loses that normative test.
-All 418 core tests and the standard timing slice pass.
-
-The [Date parsing follow-up](evidence/date-parsing-2026-10-26/) passes
-**1,718 / 1,734** selected variants, gaining four passes with zero losses;
-sixteen previous DST-caching timeouts remain. All 419 core tests and the
-standard timing slice pass.
-
-The [object-index follow-up](evidence/object-index-performance-2026-10-26/)
-passes **22,058 / 22,058** focused variants, including all six formerly timed
-out TypedArray copyWithin variants; it gains eight passes with zero losses
-against the full projection. All 423 core tests and repeated timing checks pass.
+The [full-run regression repairs](evidence/full-regressions-2026-10-26/)
+pass **17,680 / 17,680** selected variants, recovering the four full-run losses
+with zero new losses. Repeated timing checks pass; full-run confirmation remains.
 
 ## Historical measurements
 

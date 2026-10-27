@@ -1592,6 +1592,14 @@ fn define_ordinary_property(target: &Value, key: &str, descriptor: &Value) -> Re
         drop_companion = old_is_accessor;
     }
 
+    if !existing && !new_is_accessor && !drop_companion {
+        let (_, value) = values.pop().expect("new data property value");
+        c.append_new_slot(key.to_owned(), value)?;
+        let mut meta = c.meta.borrow_mut();
+        meta.set_attrs(key, attrs);
+        meta.set_explicit_data(key, true);
+        return Ok(());
+    }
     {
         let mut slots = c.borrow_mut();
         if drop_companion {
