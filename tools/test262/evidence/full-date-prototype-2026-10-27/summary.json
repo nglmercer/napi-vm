@@ -1,0 +1,29 @@
+{
+  "source_commit": "64169497163bc50b3e4afd7f54fff169584e93ef",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "185f11a8752cd7792bda90cbe4d2c9f64946fef0ea5a512dbf6bb3b5124ab421",
+  "jobs": 2,
+  "timeout_seconds": 5.0,
+  "total": 102956,
+  "counts": {
+    "pass": 102918,
+    "fail": 2,
+    "skip": 0,
+    "timeout": 36,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "gains": [
+    {
+      "test": "staging/sm/TypedArray/element-setting-converts-using-ToNumber.js",
+      "variant": "script",
+      "before": "timeout"
+    },
+    {
+      "test": "staging/sm/TypedArray/element-setting-converts-using-ToNumber.js",
+      "variant": "strict",
+      "before": "timeout"
+    }
+  ],
+  "losses": []
+}
