@@ -1,0 +1,10 @@
+{
+  "base_commit": "4439ab0ecf776db8afac0d156d1c1a496eb2feea",
+  "source_diff_sha256": "8dd5887345a3ad0646a7d637ac4d505f9aa43cedd80c8535f57d2d1624c3b6ec",
+  "worker_sha256": "1853c52ded6e6532256eb55af2cacd11e781e6ee19275a8337d24a66e6aac086",
+  "spec": "https://tc39.es/ecma262/multipage/ordinary-and-exotic-objects-behaviours.html#sec-functiondeclarationinstantiation",
+  "upstream_issue": "https://github.com/tc39/test262/issues/5113",
+  "upstream_proposed_test_fix": "https://github.com/tc39/test262/pull/5112",
+  "regression": "1262/1263 pass; two staging gains and one lost pass, annexB/language/function-code/block-decl-func-skip-arguments.js, versus last full run. The loss is recorded, not suppressed.",
+  "explanation": "Implicit arguments binding is eligible for the Annex B update; an explicit formal parameter remains ineligible. The pinned suite contains contradictory expectations."
+}

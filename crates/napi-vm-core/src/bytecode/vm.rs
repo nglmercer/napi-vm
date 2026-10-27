@@ -294,6 +294,7 @@ fn seed_captured(
         let args_obj = interp.function_arguments(function, args)?;
         fe.borrow_mut()
             .declare("arguments", args_obj, BindKind::Var, true);
+        fe.borrow_mut().implicit_arguments = true;
     }
     for (index, info) in code.slots.iter().enumerate() {
         if !info.captured {

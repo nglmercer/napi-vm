@@ -1939,6 +1939,8 @@ impl Interpreter {
             parameter_scope
                 .borrow_mut()
                 .declare("arguments", arguments, BindKind::Var, true);
+            parameter_scope.borrow_mut().implicit_arguments =
+                function_scope.borrow().implicit_arguments;
         }
         self.global = parameter_scope;
         let result = self.initialize_parameter_body(params, initializers, body);

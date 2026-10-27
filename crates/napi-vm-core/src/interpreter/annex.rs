@@ -130,7 +130,11 @@ impl Interpreter {
         if !scope.borrow().is_global_scope() && !scope.borrow().is_eval_scope() {
             // Before var instantiation the function environment contains its
             // parameter bindings and (when needed) the arguments object.
-            blocked.extend(scope.borrow().own_keys());
+            let frame = scope.borrow();
+            blocked.extend(frame.own_keys());
+            if frame.implicit_arguments {
+                blocked.remove("arguments");
+            }
         }
         let mut candidates = Vec::new();
         collect(body, &blocked, false, &mut candidates);
@@ -200,15 +204,12 @@ impl Interpreter {
 pub(crate) fn eligible<'a>(
     body: &'a [Statement],
     parameters: &[String],
-    arguments: bool,
+    _arguments: bool,
 ) -> Vec<(&'a Statement, String)> {
-    let mut blocked: HashSet<String> = parameters
+    let blocked: HashSet<String> = parameters
         .iter()
         .map(|name| name.trim_start_matches("...").to_owned())
         .collect();
-    if arguments {
-        blocked.insert("arguments".into());
-    }
     let mut result = Vec::new();
     collect(body, &blocked, false, &mut result);
     result

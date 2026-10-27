@@ -2482,9 +2482,10 @@ fn large_json_arrays_preserve_index_storage_and_truncation() {
 }
 
 #[test]
-fn annex_b_preserves_arguments_and_formal_parameter_bindings() {
+fn annex_b_updates_implicit_arguments_but_preserves_formal_parameters() {
     for source in [
-        "(function(){let before=arguments;{function arguments(){return 4;}}return arguments===before&&typeof arguments==='object';})();",
+        "(function(){let before=typeof arguments;{function arguments(){return 4;}}return before==='object'&&typeof arguments==='function'&&arguments()===4;})();",
+        "(function(){eval('42');{function arguments(){return 7;}}return typeof arguments==='function'&&arguments()===7;})();",
         "(function(arguments){{function arguments(){return 4;}}return arguments===3;})(3);",
         "(function(...arguments){{function arguments(){return 4;}}return Array.isArray(arguments)&&arguments[0]===3;})(3);",
         r#"let ok=false;try{eval("'use strict';{function arguments(){}}");}catch(e){ok=e instanceof SyntaxError;}ok;"#,

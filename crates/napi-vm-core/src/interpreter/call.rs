@@ -2503,6 +2503,7 @@ impl Interpreter {
                         context
                             .borrow_mut()
                             .set("arguments", self.function_arguments(f, &args)?);
+                        context.borrow_mut().implicit_arguments = true;
                     }
                     let (body, closure, parameters_initialized) =
                         if let Some(Statement::ParameterInitialization {
@@ -2688,6 +2689,7 @@ impl Interpreter {
                 };
 
                 self.map_function_arguments(f, &fe, args.len())?;
+                fe.borrow_mut().implicit_arguments = fd.needs_arguments_object();
                 fe.borrow_mut().replace_strict(Some(fd.strict));
                 if !fd.is_arrow {
                     fe.borrow_mut().set_new_target(new_target);
