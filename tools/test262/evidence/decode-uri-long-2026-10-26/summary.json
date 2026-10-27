@@ -1,0 +1,16 @@
+{
+  "source_commit": "782ee1d56bef924a1bae63b21222141c34fda32c",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "a283bb628c80fd8754efb810618b38a4053649d5b4501facbf5b356458fe3032",
+  "jobs": 2,
+  "timeout_seconds": 120.0,
+  "counts": {
+    "pass": 2,
+    "fail": 0,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "interpretation": "Both unmodified decodeURI variants pass at 120 seconds. This is a diagnostic and does not replace their five-second timeout outcomes."
+}
