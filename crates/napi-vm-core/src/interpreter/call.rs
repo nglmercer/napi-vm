@@ -2124,6 +2124,36 @@ impl Interpreter {
         inc: bool,
         prefix: bool,
     ) -> Result<Value, VmErr> {
+        // A plain numeric own property on the global object cannot run guest
+        // code between resolving the reference and storing its new value.
+        let mut cursor = Some(scope.clone());
+        while let Some(environment) = cursor {
+            let frame = environment.borrow();
+            if frame.own_lexical_binding(name) || frame.with_object.is_some() {
+                break;
+            }
+            if frame.is_global_scope() {
+                let object = frame.global_object();
+                drop(frame);
+                if let Some(object) = object
+                    && let Some(properties) = object.property_cell()
+                    && !properties.meta.borrow().may_have_accessor(name)
+                    && properties.meta.borrow().attrs_of(name).writable
+                    && let Some(Value::Number(number)) = properties.own_value(name)
+                {
+                    self.check_execution_interrupt()?;
+                    let updated = Value::Number(if inc { number + 1.0 } else { number - 1.0 });
+                    object.set_prop(name.to_owned(), updated.clone())?;
+                    return Ok(if prefix {
+                        updated
+                    } else {
+                        Value::Number(number)
+                    });
+                }
+                break;
+            }
+            cursor = frame.parent_env();
+        }
         let (base, property, current) = self.read_assignment_binding(scope, name)?;
         let (previous, updated) = self.numeric_update(&current, inc)?;
         self.write_assignment_binding(&base, property, name, updated.clone())?;

@@ -2488,3 +2488,20 @@ fn array_from_fast_iterator_preserves_observable_protocol() {
         );
     }
 }
+
+#[test]
+fn global_numeric_increment_respects_binding_observability() {
+    for source in [
+        "var n=2;let a=n++;let b=++n;a===2&&b===4&&n===4;",
+        "globalThis.n=0;let log='';Object.defineProperty(globalThis,'n',{get(){log+='g';return 2;},set(v){log+='s'+v;},configurable:true});let r=n++;r===2&&log==='gs3';",
+        "var n=1;let o={n:4};with(o){n++;}n===1&&o.n===5;",
+        "var n={valueOf(){globalThis.n=8;return 2;}};let r=n++;r===2&&n===3;",
+        "Object.defineProperty(globalThis,'n',{value:2,writable:false,configurable:true});let r=n++;r===2&&n===2;",
+    ] {
+        check(source, !source.contains("with(o)"));
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}

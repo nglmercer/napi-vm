@@ -19,6 +19,12 @@ The [regression repair](../tools/test262/evidence/full-regressions-2026-10-26/)
 passes **17,680 / 17,680** focused variants, recovering all four full-run losses
 with zero new losses. Repeated timing checks pass; full-run confirmation remains.
 
+The [global increment follow-up](../tools/test262/evidence/global-increment-2026-10-26/)
+passes **12,397 / 12,399** selected variants, recovering both TypedArray
+buffer-overlap timeouts plus the two earlier assignment failures, with zero
+losses against the full projection. The two large-sort variants still time out.
+All 424 core tests and a repeated 16-variant timing selection pass.
+
 ## Ordered execution
 
 1. **Confirm the four regression repairs in a full run.** TypedArray

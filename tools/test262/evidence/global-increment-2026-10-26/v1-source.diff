@@ -1,0 +1,66 @@
+diff --git a/crates/napi-vm-core/src/bytecode/parity_tests.rs b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+index f8ffbda..2ecd6af 100644
+--- a/crates/napi-vm-core/src/bytecode/parity_tests.rs
++++ b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+@@ -2488,3 +2488,20 @@ fn array_from_fast_iterator_preserves_observable_protocol() {
+         );
+     }
+ }
++
++#[test]
++fn global_numeric_increment_respects_binding_observability() {
++    for source in [
++        "var n=2;let a=n++;let b=++n;a===2&&b===4&&n===4;",
++        "globalThis.n=0;let log='';Object.defineProperty(globalThis,'n',{get(){log+='g';return 2;},set(v){log+='s'+v;},configurable:true});let r=n++;r===2&&log==='gs3';",
++        "var n=1;let o={n:4};with(o){n++;}n===1&&o.n===5;",
++        "var n={valueOf(){globalThis.n=8;return 2;}};let r=n++;r===2&&n===3;",
++        "Object.defineProperty(globalThis,'n',{value:2,writable:false,configurable:true});let r=n++;r===2&&n===2;",
++    ] {
++        check(source, !source.contains("with(o)"));
++        assert!(
++            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
++            "{source}"
++        );
++    }
++}
+diff --git a/crates/napi-vm-core/src/interpreter/call.rs b/crates/napi-vm-core/src/interpreter/call.rs
+index 799233f..8f3d6bc 100644
+--- a/crates/napi-vm-core/src/interpreter/call.rs
++++ b/crates/napi-vm-core/src/interpreter/call.rs
+@@ -2124,6 +2124,36 @@ impl Interpreter {
+         inc: bool,
+         prefix: bool,
+     ) -> Result<Value, VmErr> {
++        // A plain numeric own property on the global object cannot run guest
++        // code between resolving the reference and storing its new value.
++        let mut cursor = Some(scope.clone());
++        while let Some(environment) = cursor {
++            let frame = environment.borrow();
++            if frame.own_lexical_binding(name) || frame.with_object.is_some() {
++                break;
++            }
++            if frame.is_global_scope() {
++                let object = frame.global_object();
++                drop(frame);
++                if let Some(object) = object
++                    && let Some(properties) = object.property_cell()
++                    && !properties.meta.borrow().may_have_accessor(name)
++                    && properties.meta.borrow().attrs_of(name).writable
++                    && let Some(Value::Number(number)) = properties.own_value(name)
++                {
++                    self.check_execution_interrupt()?;
++                    let updated = Value::Number(if inc { number + 1.0 } else { number - 1.0 });
++                    object.set_prop(name.to_owned(), updated.clone())?;
++                    return Ok(if prefix {
++                        updated
++                    } else {
++                        Value::Number(number)
++                    });
++                }
++                break;
++            }
++            cursor = frame.parent_env();
++        }
+         let (base, property, current) = self.read_assignment_binding(scope, name)?;
+         let (previous, updated) = self.numeric_update(&current, inc)?;
+         self.write_assignment_binding(&base, property, name, updated.clone())?;
