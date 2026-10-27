@@ -1,0 +1,6 @@
+{
+  "base_commit": "3f826b2",
+  "candidate": "Applied typed-read-performance-2026-10-26/v1-source.diff on top of counting-sort commit",
+  "worker_sha256": "a64779b3742688de11ad3d4fc020ead53e11a230d8a670a57c7bcd68aeea1b05",
+  "result": "Both targeted sort variants timed out at 5 seconds with 2 workers; candidate reverted."
+}
