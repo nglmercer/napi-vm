@@ -1,0 +1,91 @@
+{
+  "source_commit": "62a22dd",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "db0105ef524745475bc370cc6a52e359b0100e8682424bd5d2bebfd26d9830fc",
+  "worker_jobs": 2,
+  "timeout_seconds": 5.0,
+  "total": 102956,
+  "counts": {
+    "pass": 102916,
+    "fail": 2,
+    "skip": 0,
+    "timeout": 38,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "gains": [
+    {
+      "test": "built-ins/TypedArrayConstructors/internals/Set/BigInt/key-is-canonical-invalid-index-prototype-chain-set.js",
+      "variant": "strict",
+      "before": "fail"
+    },
+    {
+      "test": "built-ins/TypedArrayConstructors/internals/Set/key-is-canonical-invalid-index-prototype-chain-set.js",
+      "variant": "strict",
+      "before": "fail"
+    },
+    {
+      "test": "built-ins/encodeURI/S15.1.3.3_A2.3_T1.js",
+      "variant": "script",
+      "before": "timeout"
+    },
+    {
+      "test": "built-ins/encodeURI/S15.1.3.3_A2.3_T1.js",
+      "variant": "strict",
+      "before": "timeout"
+    },
+    {
+      "test": "built-ins/encodeURIComponent/S15.1.3.4_A2.3_T1.js",
+      "variant": "script",
+      "before": "timeout"
+    },
+    {
+      "test": "built-ins/encodeURIComponent/S15.1.3.4_A2.3_T1.js",
+      "variant": "strict",
+      "before": "timeout"
+    },
+    {
+      "test": "language/comments/S7.4_A5.js",
+      "variant": "script",
+      "before": "timeout"
+    },
+    {
+      "test": "language/comments/S7.4_A5.js",
+      "variant": "strict",
+      "before": "timeout"
+    },
+    {
+      "test": "staging/sm/Proxy/ownkeys-linear.js",
+      "variant": "script",
+      "before": "timeout"
+    },
+    {
+      "test": "staging/sm/Proxy/ownkeys-linear.js",
+      "variant": "strict",
+      "before": "timeout"
+    },
+    {
+      "test": "staging/sm/TypedArray/set-same-buffer-different-source-target-types.js",
+      "variant": "script",
+      "before": "timeout"
+    },
+    {
+      "test": "staging/sm/TypedArray/set-same-buffer-different-source-target-types.js",
+      "variant": "strict",
+      "before": "timeout"
+    }
+  ],
+  "losses": [
+    {
+      "test": "staging/sm/TypedArray/element-setting-converts-using-ToNumber.js",
+      "variant": "script",
+      "after": "timeout"
+    },
+    {
+      "test": "staging/sm/TypedArray/element-setting-converts-using-ToNumber.js",
+      "variant": "strict",
+      "after": "timeout"
+    }
+  ],
+  "recheck": "Both newly timed-out TypedArray conversion variants timed out again with two workers and five-second deadline."
+}
