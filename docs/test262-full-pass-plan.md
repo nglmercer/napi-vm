@@ -1,64 +1,58 @@
-# Test262 full-pass plan — 2026-10-26
+# Test262 full-pass plan — 2026-10-27
 
-## Verified status
+## Measured status
 
-The latest complete pinned run on clean commit `9d23d08` passes **102,906 /
-102,956 (99.9514%)**, with **four failures and 46 timeouts**, no skips, crashes,
-or harness errors. Against the preceding full report it gains 71 passes and
-loses four: two strict TypedArray prototype-chain assignments and two Proxy
-ownKeys timeouts. [Full evidence](../tools/test262/evidence/full-clean-2026-10-26/)
-contains every outcome, comparison, residual, and source/worker identity.
+The latest completed full run used clean commit `6416949`, Test262 revision
+`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, two workers, and a five-second
+deadline per variant. It passed **102,918 / 102,956**, with two failures and
+36 timeouts, and no skips, crashes, or harness errors. The complete report
+and worker identity are in [the full-run evidence](../tools/test262/evidence/full-date-prototype-2026-10-27/).
+Subsequent fixes have focused results but have not yet been confirmed by a
+completed full run. A checkpointed run of committed source `7bcd549` against
+the same revision is in progress.
 
-The four failures are two TypedArray regressions plus two staging Annex B
-arguments cases whose expectations conflict with the pinned normative test;
-see [Annex B evidence](../tools/test262/evidence/annex-arguments-labels-2026-10-26/).
-All 46 timeouts remain in the full report. The run used the pinned revision,
-two workers, five-second deadlines, no exclusions, and no resumed outcomes.
+The current implementation follows the current specification for Annex B
+`arguments` block functions. Focused testing recovered the two staging failures,
+but the older pinned Annex B test now fails because it asserts the opposite
+result. [Upstream issue 5113](https://github.com/tc39/test262/issues/5113)
+describes the contradiction, and [PR 5112](https://github.com/tc39/test262/pull/5112)
+proposes a correction. The PR is open; simply updating Test262 does not by
+itself establish that the conflict is fixed.
 
-The [regression repair](../tools/test262/evidence/full-regressions-2026-10-26/)
-passes **17,680 / 17,680** focused variants, recovering all four full-run losses
-with zero new losses. Repeated timing checks pass; full-run confirmation remains.
+## Ordered work
 
-The [global increment follow-up](../tools/test262/evidence/global-increment-2026-10-26/)
-passes **12,397 / 12,399** selected variants, recovering both TypedArray
-buffer-overlap timeouts plus the two earlier assignment failures, with zero
-losses against the full projection. The two large-sort variants still time out.
-All 424 core tests and a repeated 16-variant timing selection pass.
-
-## Ordered execution
-
-1. **Confirm the four regression repairs in a full run.** TypedArray
-   prototype-chain assignments and Proxy ownKeys now pass focused comparisons
-   and repeated timing checks; the full score above remains unchanged.
-
-2. **Resolve the two staging arguments conflicts.** The pinned staging tests
-   require behavior opposite to the pinned normative Annex B arguments test.
-   Keep both outcomes visible and pursue a corpus resolution rather than
-   disguising either expectation.
-
-3. **Remove the 46 timeouts.** These include 22 staging variants (16 Date,
-   four TypedArray, and two Proxy), eight RegExp literals, eight URI cases,
-   four Annex B RegExp cases, two RegExp cases, and two comment cases. Profile
-   independent causes while preserving two workers and five-second deadlines.
-
-4. **Run the final full gate.** Require **102,956 passes and zero failures,
-   timeouts, skips, crashes, or harness errors** on clean committed source.
-   Archive the complete report, every transition, source identity, worker hash,
-   configuration, and build/check logs. Repeat formerly marginal timing cases.
-   Any remaining nonpass reopens its cause. Keep the pinned corpus,
-   denominator, worker count, and timeout fixed.
+1. **Refresh the baseline.** Finish the checkpointed pinned run and compare
+   every variant against the previous full report. Keep timing-sensitive
+   results visible and repeat marginal cases under the same two-worker,
+   five-second configuration.
+2. **Move the target to a newer Test262 revision.** The user selected a newer
+   revision. Upstream `main` was `0b4e0812022b18236b5276d2804948fdd9f71603`
+   on 2026-10-27, six commits beyond the old pin. Both conflicting files are
+   unchanged there. Pin that commit and run its full unmodified corpus. Preserve the old
+   revision and report separately so the denominator and changes are explicit.
+   If the contradictory tests remain, report the unresolved upstream issue;
+   do not claim a literal full pass or silently change or exclude a test.
+3. **Remove remaining timeouts and semantic failures.** The last completed
+   pinned run had 16 Date, eight RegExp literal, four Annex B RegExp, four URI,
+   two RegExp whitespace, and two TypedArray sort timeouts. The whitespace
+   variants subsequently passed focused checks. Profile the unmodified cases
+   and prioritize shared interpreter call, binding, property, and loop costs;
+   the Date sweep in particular needs a substantial speedup. Preserve observable
+   semantics and compare broad related suites after each change. Reclassify
+   residuals using the new revision's actual full report.
+4. **Close the full gate.** On clean committed source, build the release
+   worker and run every selected-revision variant with two workers, five-second
+   deadlines, and no feature skips. Require zero failures, timeouts, skips,
+   crashes, and harness errors. Archive the full report, corpus and source
+   commits, worker hash, configuration, and check logs. Repeat marginal cases
+   and investigate any regression before claiming completion.
 
 ## Validation policy
 
-After implementation changes, run formatting, core all-target Clippy with
-warnings denied, core tests, and affected worker/integration selections.
-Check root bindings when their shared types change. Broaden testing where the
-change can affect neighboring semantics. Preserve every measured regression;
-focused results never replace the latest full score. Full AST/bytecode
-differential and wasm execution remain separate gates.
-
-Historical complete evidence remains available for
-[102,783 passes](../tools/test262/evidence/full-worktree-2026-10-26/),
-[102,760 passes](../tools/test262/evidence/full-native-prototype-repair-2026-10-25/),
-and the [d942b04 reference](../tools/test262/evidence/full-refresh-2026-10-25/).
-The current evidence does not support a reliable completion date.
+Use focused tests to diagnose and validate changes, not as a replacement for a
+complete run. Run formatting, core tests, all-target core Clippy with warnings
+denied, and affected worker and integration selections; broaden coverage for
+shared semantics. Record failed experiments as well as improvements. Scaled
+tests and longer deadlines are diagnostic only. Full AST/bytecode differential
+and wasm execution remain separate gates. The available evidence does not
+support a reliable completion date.

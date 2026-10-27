@@ -6,11 +6,11 @@ Build the isolated worker without runtime or Node bindings:
 cargo build --release --no-default-features --bin napi-vm-test262
 python3 -m pip install -r tools/test262/requirements.txt
 git clone https://github.com/tc39/test262.git .napi-vm/test262
-git -C .napi-vm/test262 checkout 5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81
+git -C .napi-vm/test262 checkout 0b4e0812022b18236b5276d2804948fdd9f71603
 mkdir -p artifacts/test262
 python3 tools/test262/run.py .napi-vm/test262 \
   --engine target/release/napi-vm-test262 \
-  --revision 5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81 \
+  --revision 0b4e0812022b18236b5276d2804948fdd9f71603 \
   --jobs 2 --timeout 5 --output artifacts/test262/full-results.json
 python3 tools/test262/dashboard.py artifacts/test262/full-results.json \
   --output artifacts/test262/compatibility.html
@@ -44,29 +44,17 @@ report still contains all selected outcomes and records the restored file count.
 
 ## Current full result
 
-The latest complete pinned run on clean commit `9d23d08` passes **102,906 /
-102,956 (99.9514%)**, with **4 failures, 46 timeouts**, and zero skips,
-crashes, or harness errors. It gains **71 passes** and loses **four** against
-[the preceding full run](evidence/full-activation-followup-2026-10-26/). Two
-losses are TypedArray prototype-chain assignment failures and two are Proxy
-ownKeys timeouts. [Full evidence](evidence/full-clean-2026-10-26/) retains
-every outcome, transition, residual, and source/worker identity.
+The latest complete run used the previous pin
+`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81` and clean source `6416949`.
+It passes **102,918 / 102,956**, with two failures, 36 timeouts, and zero
+skips, crashes, or harness errors. [Full evidence](evidence/full-date-prototype-2026-10-27/)
+records every result and worker identity. Focused improvements since that run
+are not a new full score.
 
-The pinned corpus revision is `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`;
-this run used two workers, five-second deadlines, no exclusions or resume, and
-worker `af0b2e63e48fa82c44ecb4eb4f956e203194dc07a84e54934ba4ca508d1865da`.
-The [full-pass plan](../../docs/test262-full-pass-plan.md) tracks remaining
-work and the unchanged acceptance criteria.
-
-The [full-run regression repairs](evidence/full-regressions-2026-10-26/)
-pass **17,680 / 17,680** selected variants, recovering the four full-run losses
-with zero new losses. Repeated timing checks pass; full-run confirmation remains.
-
-The [global increment follow-up](evidence/global-increment-2026-10-26/)
-passes **12,397 / 12,399** selected variants, recovering two TypedArray overlap
-timeouts and the earlier two assignment failures with zero losses against the
-full projection. Two large-sort variants remain timed out. All 424 core tests
-and a repeated 16-variant timing selection pass.
+The target pin is now `0b4e0812022b18236b5276d2804948fdd9f71603`; a full
+result on that revision is still needed. It retains the contradictory Annex B
+tests described in [upstream issue 5113](https://github.com/tc39/test262/issues/5113).
+The [full-pass plan](../../docs/test262-full-pass-plan.md) tracks remaining work.
 
 ## Historical measurements
 
