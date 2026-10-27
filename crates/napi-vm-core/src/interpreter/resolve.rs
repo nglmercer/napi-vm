@@ -685,12 +685,6 @@ impl Interpreter {
         } else {
             ["valueOf", "toString"]
         };
-        let materialized_object_prototype = self
-            .persistent_global
-            .borrow()
-            .intrinsic("Object")
-            .and_then(|constructor| constructor.get_prop("prototype"))
-            .is_some();
         for name in order {
             let method = self.member(&value, name)?;
             if is_callable(&method) {
@@ -701,11 +695,20 @@ impl Interpreter {
                 continue;
             }
 
+            if !matches!(method, Value::Undefined) {
+                continue;
+            }
+            let materialized_object_prototype = self
+                .persistent_global
+                .borrow()
+                .intrinsic("Object")
+                .and_then(|constructor| constructor.get_prop("prototype"))
+                .is_some();
+
             // Bare interpreters can omit the intrinsic bootstrap. Preserve
             // default valueOf behavior only in that configuration; a guest
             // shadowing a materialized method with undefined must be honored.
-            if matches!(method, Value::Undefined)
-                && !materialized_object_prototype
+            if !materialized_object_prototype
                 && name == "valueOf"
                 && has_default_object_prototype(&value)
             {
@@ -714,8 +717,7 @@ impl Interpreter {
 
             // Supply the bare interpreter's default toString on the same
             // terms, without replacing explicitly shadowed guest methods.
-            if matches!(method, Value::Undefined)
-                && !materialized_object_prototype
+            if !materialized_object_prototype
                 && name == "toString"
                 && has_default_object_prototype(&value)
             {

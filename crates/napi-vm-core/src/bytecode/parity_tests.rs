@@ -122,6 +122,25 @@ fn numeric_string_indices_preserve_utf16_and_prototype_fallback() {
 }
 
 #[test]
+fn numeric_coercion_checks_guest_methods_in_order() {
+    let source = r#"
+        let log = '';
+        let value = {
+          get valueOf() { log += 'v'; return function () { log += 'V'; return {}; }; },
+          get toString() { log += 's'; return function () { log += 'S'; return '42'; }; }
+        };
+        Object.defineProperty(value, Symbol.toPrimitive, {get() { log += 'p'; return undefined; }});
+        let number = Number(value);
+        number === 42 && log === 'pvVsS';
+        "#;
+    check(source, true);
+    assert!(matches!(
+        run_ast_with_modules(source, &[]),
+        Ok(Value::Bool(true))
+    ));
+}
+
+#[test]
 fn variables_and_assignment() {
     check("let x = 5; x += 3; x", true);
     check("var a = 1; var a; a", true);
