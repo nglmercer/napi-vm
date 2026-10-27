@@ -141,6 +141,25 @@ fn numeric_coercion_checks_guest_methods_in_order() {
 }
 
 #[test]
+fn uri_decoders_reject_utf8_encoded_surrogate_pairs() {
+    let source = r#"
+        let rejected = 0;
+        for (let decode of [decodeURI, decodeURIComponent]) {
+          for (let input of ['%ED%A0%80%ED%B0%80', '%ED%A0%80', '%ED%B0%80']) {
+            try { decode(input); } catch (e) { if (e instanceof URIError) rejected++; }
+          }
+          if (decode('%F0%90%80%80') !== '\uD800\uDC00') throw new Error('valid UTF-8');
+        }
+        rejected === 6;
+        "#;
+    check(source, true);
+    assert!(matches!(
+        run_ast_with_modules(source, &[]),
+        Ok(Value::Bool(true))
+    ));
+}
+
+#[test]
 fn variables_and_assignment() {
     check("let x = 5; x += 3; x", true);
     check("var a = 1; var a; a", true);

@@ -1,0 +1,66 @@
+diff --git a/crates/napi-vm-core/src/builtins/string.rs b/crates/napi-vm-core/src/builtins/string.rs
+index 4110283..ad488b9 100644
+--- a/crates/napi-vm-core/src/builtins/string.rs
++++ b/crates/napi-vm-core/src/builtins/string.rs
+@@ -1242,28 +1242,9 @@ fn decode_uri_impl(
+             return Err(uri_malformed());
+         }
+         match value {
+-            0xD800..=0xDBFF => {
+-                // A leading surrogate needs three more triplets forming a
+-                // trailing surrogate; the pair is kept as two UTF-16 units.
+-                for position in 0..3 {
+-                    let next = take_octet(units, &mut k)?;
+-                    if position == 0 {
+-                        if next & 0xE0 != 0xE0 {
+-                            return Err(uri_malformed());
+-                        }
+-                    } else if next & 0xC0 != 0x80 {
+-                        return Err(uri_malformed());
+-                    }
+-                    octets.push(next);
+-                }
+-                let trail_value = decode_utf8_value(&octets[3..]).ok_or_else(uri_malformed)?;
+-                if !(0xDC00..=0xDFFF).contains(&trail_value) {
+-                    return Err(uri_malformed());
+-                }
+-                out.push(value as u16);
+-                out.push(trail_value as u16);
+-            }
+-            0xDC00..=0xDFFF => return Err(uri_malformed()),
++            // UTF-8 encodes Unicode scalar values, never surrogate code
++            // points, even if an adjacent sequence encodes the other half.
++            0xD800..=0xDFFF => return Err(uri_malformed()),
+             _ => {
+                 let ch = char::from_u32(value).ok_or_else(uri_malformed)?;
+                 let mut pair = [0u16; 2];
+diff --git a/crates/napi-vm-core/src/bytecode/parity_tests.rs b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+index 97150c5..41c4346 100644
+--- a/crates/napi-vm-core/src/bytecode/parity_tests.rs
++++ b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+@@ -140,6 +140,25 @@ fn numeric_coercion_checks_guest_methods_in_order() {
+     ));
+ }
+ 
++#[test]
++fn uri_decoders_reject_utf8_encoded_surrogate_pairs() {
++    let source = r#"
++        let rejected = 0;
++        for (let decode of [decodeURI, decodeURIComponent]) {
++          for (let input of ['%ED%A0%80%ED%B0%80', '%ED%A0%80', '%ED%B0%80']) {
++            try { decode(input); } catch (e) { if (e instanceof URIError) rejected++; }
++          }
++          if (decode('%F0%90%80%80') !== '\uD800\uDC00') throw new Error('valid UTF-8');
++        }
++        rejected === 6;
++        "#;
++    check(source, true);
++    assert!(matches!(
++        run_ast_with_modules(source, &[]),
++        Ok(Value::Bool(true))
++    ));
++}
++
+ #[test]
+ fn variables_and_assignment() {
+     check("let x = 5; x += 3; x", true);

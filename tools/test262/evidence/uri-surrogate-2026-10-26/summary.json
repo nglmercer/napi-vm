@@ -1,0 +1,8 @@
+{
+  "base_commit": "a4a4d6f24876b15e734c21b8d67f1635c4b97e63",
+  "source_diff_sha256": "ac1f16b78da68469cadf5c7337ba24af813569e9b4230d7d51ab3f02213c389a",
+  "worker_sha256": "4716b1fadf6c81afb70743795e8e4b7854dd0e0c335d3623757fa9614bdfa512",
+  "change": "Reject UTF-8 encodings of surrogate code points including paired three-byte encodings; retain valid four-byte scalar decoding.",
+  "spec": "https://tc39.es/ecma262/2023/multipage/global-object.html#sec-decode",
+  "coverage": "342/346 pass with four known decoder timeouts; no failures, skips, crashes, or harness errors."
+}

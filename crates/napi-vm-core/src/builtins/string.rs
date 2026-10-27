@@ -1242,28 +1242,9 @@ fn decode_uri_impl(
             return Err(uri_malformed());
         }
         match value {
-            0xD800..=0xDBFF => {
-                // A leading surrogate needs three more triplets forming a
-                // trailing surrogate; the pair is kept as two UTF-16 units.
-                for position in 0..3 {
-                    let next = take_octet(units, &mut k)?;
-                    if position == 0 {
-                        if next & 0xE0 != 0xE0 {
-                            return Err(uri_malformed());
-                        }
-                    } else if next & 0xC0 != 0x80 {
-                        return Err(uri_malformed());
-                    }
-                    octets.push(next);
-                }
-                let trail_value = decode_utf8_value(&octets[3..]).ok_or_else(uri_malformed)?;
-                if !(0xDC00..=0xDFFF).contains(&trail_value) {
-                    return Err(uri_malformed());
-                }
-                out.push(value as u16);
-                out.push(trail_value as u16);
-            }
-            0xDC00..=0xDFFF => return Err(uri_malformed()),
+            // UTF-8 encodes Unicode scalar values, never surrogate code
+            // points, even if an adjacent sequence encodes the other half.
+            0xD800..=0xDFFF => return Err(uri_malformed()),
             _ => {
                 let ch = char::from_u32(value).ok_or_else(uri_malformed)?;
                 let mut pair = [0u16; 2];
