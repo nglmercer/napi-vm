@@ -819,6 +819,15 @@ fn escaped_source(source: &crate::JsString, unicode_sets: bool) -> crate::JsStri
     if source.is_empty() {
         return "(?:)".into();
     }
+    // Without a slash or line terminator there is nothing EscapeRegExpPattern
+    // can rewrite; the immutable source can be shared directly.
+    if !source
+        .units()
+        .iter()
+        .any(|unit| matches!(unit, 47 | 10 | 13 | 0x2028 | 0x2029))
+    {
+        return source.clone();
+    }
     let mut result = Vec::new();
     let mut backslashes = 0;
     let mut class_depth = 0usize;
