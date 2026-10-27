@@ -3508,6 +3508,65 @@ fn typed_sort_impl(
         t
     };
     let dest = require(&result)?;
+    // Stable numeric ordering of 16-bit numbers can count each raw value.
+    // This path has no guest callback and operates on an ordinary buffer;
+    // shared memory and custom comparators retain the element-wise algorithm.
+    if matches!(cmp, Value::Undefined)
+        && matches!(
+            v.kind,
+            TypedKind::Int16 | TypedKind::Uint16 | TypedKind::Float16
+        )
+        && len >= 65_536
+        && !v.buffer.is_shared()
+        && !dest.buffer.is_shared()
+    {
+        let bytes = v
+            .buffer
+            .read(v.byte_offset, len * 2)
+            .ok_or_else(|| VmErr::Msg("TypeError: TypedArray out of bounds".into()))?;
+        let mut counts = vec![0usize; 65_536];
+        let mut nan_values = Vec::new();
+        for chunk in bytes.as_chunks::<2>().0 {
+            i.consume_loop()?;
+            let bits = u16::from_le_bytes(*chunk);
+            let key = match v.kind {
+                TypedKind::Int16 => bits ^ 0x8000,
+                TypedKind::Uint16 => bits,
+                TypedKind::Float16 if bits & 0x7c00 == 0x7c00 && bits & 0x03ff != 0 => {
+                    nan_values.extend_from_slice(chunk);
+                    continue;
+                }
+                TypedKind::Float16 if bits & 0x8000 != 0 => !bits,
+                TypedKind::Float16 => bits ^ 0x8000,
+                _ => unreachable!(),
+            };
+            counts[key as usize] += 1;
+        }
+        let mut sorted = Vec::with_capacity(bytes.len());
+        for (key, count) in counts.into_iter().enumerate() {
+            let key = key as u16;
+            let bits = match v.kind {
+                TypedKind::Int16 => key ^ 0x8000,
+                TypedKind::Uint16 => key,
+                TypedKind::Float16 if key & 0x8000 == 0 => !key,
+                TypedKind::Float16 => key ^ 0x8000,
+                _ => unreachable!(),
+            };
+            let pair = bits.to_le_bytes();
+            for _ in 0..count {
+                i.consume_loop()?;
+                sorted.extend_from_slice(&pair);
+            }
+        }
+        for _ in 0..nan_values.len() / 2 {
+            i.consume_loop()?;
+        }
+        sorted.extend_from_slice(&nan_values);
+        if !dest.buffer.write(dest.byte_offset, &sorted) {
+            return Err(VmErr::Msg("TypeError: TypedArray out of bounds".into()));
+        }
+        return Ok(result);
+    }
     let mut values = read_all(&v);
     typed_sort_values(i, &mut values, &cmp)?;
     for (k, x) in values.iter().enumerate() {

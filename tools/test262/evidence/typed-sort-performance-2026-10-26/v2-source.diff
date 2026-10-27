@@ -1,0 +1,94 @@
+diff --git a/crates/napi-vm-core/src/builtins/typedarray.rs b/crates/napi-vm-core/src/builtins/typedarray.rs
+index 9ed6962..38b80ea 100644
+--- a/crates/napi-vm-core/src/builtins/typedarray.rs
++++ b/crates/napi-vm-core/src/builtins/typedarray.rs
+@@ -3508,6 +3508,65 @@ fn typed_sort_impl(
+         t
+     };
+     let dest = require(&result)?;
++    // Stable numeric ordering of 16-bit numbers can count each raw value.
++    // This path has no guest callback and operates on an ordinary buffer;
++    // shared memory and custom comparators retain the element-wise algorithm.
++    if matches!(cmp, Value::Undefined)
++        && matches!(
++            v.kind,
++            TypedKind::Int16 | TypedKind::Uint16 | TypedKind::Float16
++        )
++        && len >= 65_536
++        && !v.buffer.is_shared()
++        && !dest.buffer.is_shared()
++    {
++        let bytes = v
++            .buffer
++            .read(v.byte_offset, len * 2)
++            .ok_or_else(|| VmErr::Msg("TypeError: TypedArray out of bounds".into()))?;
++        let mut counts = vec![0usize; 65_536];
++        let mut nan_values = Vec::new();
++        for chunk in bytes.as_chunks::<2>().0 {
++            i.consume_loop()?;
++            let bits = u16::from_le_bytes(*chunk);
++            let key = match v.kind {
++                TypedKind::Int16 => bits ^ 0x8000,
++                TypedKind::Uint16 => bits,
++                TypedKind::Float16 if bits & 0x7c00 == 0x7c00 && bits & 0x03ff != 0 => {
++                    nan_values.extend_from_slice(chunk);
++                    continue;
++                }
++                TypedKind::Float16 if bits & 0x8000 != 0 => !bits,
++                TypedKind::Float16 => bits ^ 0x8000,
++                _ => unreachable!(),
++            };
++            counts[key as usize] += 1;
++        }
++        let mut sorted = Vec::with_capacity(bytes.len());
++        for (key, count) in counts.into_iter().enumerate() {
++            let key = key as u16;
++            let bits = match v.kind {
++                TypedKind::Int16 => key ^ 0x8000,
++                TypedKind::Uint16 => key,
++                TypedKind::Float16 if key & 0x8000 == 0 => !key,
++                TypedKind::Float16 => key ^ 0x8000,
++                _ => unreachable!(),
++            };
++            let pair = bits.to_le_bytes();
++            for _ in 0..count {
++                i.consume_loop()?;
++                sorted.extend_from_slice(&pair);
++            }
++        }
++        for _ in 0..nan_values.len() / 2 {
++            i.consume_loop()?;
++        }
++        sorted.extend_from_slice(&nan_values);
++        if !dest.buffer.write(dest.byte_offset, &sorted) {
++            return Err(VmErr::Msg("TypeError: TypedArray out of bounds".into()));
++        }
++        return Ok(result);
++    }
+     let mut values = read_all(&v);
+     typed_sort_values(i, &mut values, &cmp)?;
+     for (k, x) in values.iter().enumerate() {
+diff --git a/crates/napi-vm-core/src/bytecode/parity_tests.rs b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+index 2ecd6af..fa6580f 100644
+--- a/crates/napi-vm-core/src/bytecode/parity_tests.rs
++++ b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+@@ -2505,3 +2505,19 @@ fn global_numeric_increment_respects_binding_observability() {
+         );
+     }
+ }
++
++#[test]
++fn large_typed_integer_sort_orders_signed_and_unsigned_values() {
++    for source in [
++        "let a=new Int16Array(65536);a[0]=32767;a[1]=-32768;a[2]=-1;a.sort();a[0]===-32768&&a[1]===-1&&a[65535]===32767;",
++        "let a=new Uint16Array(65536);a[0]=65535;a[1]=32768;a[2]=1;let b=a.toSorted();a[0]===65535&&b[0]===0&&b[65533]===1&&b[65534]===32768&&b[65535]===65535;",
++        "let a=new Float16Array(65536);let bits=new Uint16Array(a.buffer);bits[0]=0x7e01;bits[1]=0xfe02;bits[2]=0x8000;bits[3]=0x7c00;bits[4]=0xfc00;a.sort();let out=new Uint16Array(a.buffer);a[0]===-Infinity&&Object.is(a[1],-0)&&a[65533]===Infinity&&out[65534]===0x7e01&&out[65535]===0xfe02;",
++        "let a=new Int16Array([3,-1,2]);let calls=0;a.sort((x,y)=>{calls++;return y-x;});a[0]===3&&a[2]===-1&&calls>0;",
++    ] {
++        check(source, true);
++        assert!(
++            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
++            "{source}"
++        );
++    }
++}

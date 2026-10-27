@@ -1,0 +1,6 @@
+{
+  "source_commit": "df7188266baa7113339cc4d863c4445d680020af",
+  "source_diff_sha256": "96700fdecbc9bd90d2dae403494f52ef6d861efbaa0a085876d45e8be1c88308",
+  "engine_sha256": "60d411d2ce993abe9f2db85ae09b693cd2d2a5da3907619b613f08e910b86205",
+  "note": "Both complete large-sort variants timed out at five seconds; single-worker isolated Int16, Uint16, and Float16 diagnostics took 1.041, 1.134, and 1.170 seconds."
+}

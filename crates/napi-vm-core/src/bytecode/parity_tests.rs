@@ -2505,3 +2505,19 @@ fn global_numeric_increment_respects_binding_observability() {
         );
     }
 }
+
+#[test]
+fn large_typed_integer_sort_orders_signed_and_unsigned_values() {
+    for source in [
+        "let a=new Int16Array(65536);a[0]=32767;a[1]=-32768;a[2]=-1;a.sort();a[0]===-32768&&a[1]===-1&&a[65535]===32767;",
+        "let a=new Uint16Array(65536);a[0]=65535;a[1]=32768;a[2]=1;let b=a.toSorted();a[0]===65535&&b[0]===0&&b[65533]===1&&b[65534]===32768&&b[65535]===65535;",
+        "let a=new Float16Array(65536);let bits=new Uint16Array(a.buffer);bits[0]=0x7e01;bits[1]=0xfe02;bits[2]=0x8000;bits[3]=0x7c00;bits[4]=0xfc00;a.sort();let out=new Uint16Array(a.buffer);a[0]===-Infinity&&Object.is(a[1],-0)&&a[65533]===Infinity&&out[65534]===0x7e01&&out[65535]===0xfe02;",
+        "let a=new Int16Array([3,-1,2]);let calls=0;a.sort((x,y)=>{calls++;return y-x;});a[0]===3&&a[2]===-1&&calls>0;",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}
