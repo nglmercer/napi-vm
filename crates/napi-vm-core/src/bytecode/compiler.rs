@@ -1145,6 +1145,8 @@ impl<'a> Compiler<'a> {
             }
         }
         let caches = vec![crate::shape::PropCache::empty(); site_count as usize].into_boxed_slice();
+        let global_read_slots =
+            vec![std::cell::Cell::new(None); self.constants.len()].into_boxed_slice();
         let needs_frame_environment = self.captures_arguments
             || self.slots.iter().any(|s| s.captured)
             || self.constants.iter().any(|c| {
@@ -1170,6 +1172,7 @@ impl<'a> Compiler<'a> {
             captures_arguments: self.captures_arguments,
             needs_frame_environment,
             caches,
+            global_read_slots,
             tiers: crate::jit::TierCounters::default(),
         })
     }

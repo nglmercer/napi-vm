@@ -74,6 +74,8 @@ pub struct BytecodeFunction {
     /// Cells only, so the VM probes and fills with plain loads and stores
     /// and no borrow can span a re-entrant slow path.
     pub caches: Box<[crate::shape::PropCache]>,
+    /// Verified own-global slot hints indexed by constant-pool name index.
+    pub global_read_slots: Box<[std::cell::Cell<Option<usize>>]>,
     /// Tier-up state for the JIT seam: entry/loop hotness plus the cached
     /// compilation, if a backend produced one. Cloning a function forks
     /// its tier state; each copy counts and compiles independently.

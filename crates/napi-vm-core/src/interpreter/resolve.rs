@@ -76,6 +76,42 @@ impl Interpreter {
         self.read_resolved_binding(&base, property, name)
     }
 
+    pub(crate) fn lookup_binding_cached(
+        &mut self,
+        scope: &super::Env,
+        name: &str,
+        cached: &std::cell::Cell<Option<usize>>,
+    ) -> Result<super::Lookup, VmErr> {
+        let mut cursor = Some(scope.clone());
+        while let Some(environment) = cursor {
+            let frame = environment.borrow();
+            if frame.own_lexical_binding(name) || frame.with_object.is_some() {
+                break;
+            }
+            if frame.is_global_scope() {
+                let object = frame.global_object();
+                drop(frame);
+                if let Some(object) = object
+                    && let Some(properties) = object.property_cell()
+                    && !properties.meta.borrow().may_have_accessor(name)
+                    && let Some(value) = properties.cached_own_value(name, cached)
+                {
+                    self.check_execution_interrupt()?;
+                    return Ok(super::Lookup::Value(
+                        if matches!(value, Value::Binding(_)) {
+                            value.deref_binding()
+                        } else {
+                            value
+                        },
+                    ));
+                }
+                break;
+            }
+            cursor = frame.parent_env();
+        }
+        self.lookup_binding_in(scope, name)
+    }
+
     /// Plain environment records cannot run guest code between resolution and
     /// reading. With records and global accessors/prototypes retain the full
     /// reference algorithm, including its observable HasBinding operations.

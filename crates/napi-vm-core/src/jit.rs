@@ -289,6 +289,7 @@ mod tests {
             captures_arguments: false,
             needs_frame_environment: false,
             caches: Vec::new().into_boxed_slice(),
+            global_read_slots: Vec::new().into_boxed_slice(),
             tiers: TierCounters::default(),
         }
     }

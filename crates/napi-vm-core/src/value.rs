@@ -1299,6 +1299,28 @@ impl ObjectCell {
         (k == key).then(|| v.clone_for_execution())
     }
 
+    /// A cached index is safe only while raw slot storage has never escaped.
+    /// Normal mutations preserve unique keys; each hit still verifies its key.
+    pub(crate) fn cached_own_value(
+        &self,
+        key: &str,
+        cached: &std::cell::Cell<Option<usize>>,
+    ) -> Option<Value> {
+        if self.index_disabled.get() {
+            return None;
+        }
+        if let Some(value) = cached
+            .get()
+            .and_then(|index| self.slot_verified(index, key))
+        {
+            return Some(value);
+        }
+        let index = self.own_index(key)?;
+        let value = self.slot_verified(index, key)?;
+        cached.set(Some(index));
+        Some(value)
+    }
+
     /// Replace an existing slot only if it still has the expected key.
     /// Returning the value on mismatch allows the caller to use the ordinary
     /// property path without losing it.
@@ -4400,7 +4422,23 @@ mod weak_registry_drop_tests {
 #[cfg(test)]
 mod object_index_tests {
     use super::{ObjectCell, Value};
+    use std::cell::Cell;
     use std::ops::Deref;
+
+    #[test]
+    fn cached_slot_read_disables_after_raw_storage_escapes() {
+        let props = ObjectCell::new_with_default_proto(vec![("name".into(), Value::Number(1.0))]);
+        let cached = Cell::new(None);
+        assert!(matches!(
+            props.cached_own_value("name", &cached),
+            Some(Value::Number(1.0))
+        ));
+        let raw = props.deref();
+        raw.borrow_mut()
+            .insert(0, ("name".into(), Value::Number(2.0)));
+        assert!(props.cached_own_value("name", &cached).is_none());
+        assert!(matches!(props.own_value("name"), Some(Value::Number(2.0))));
+    }
 
     #[test]
     fn verified_slot_write_rejects_stale_keys() {

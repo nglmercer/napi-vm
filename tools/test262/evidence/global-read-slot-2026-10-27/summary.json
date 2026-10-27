@@ -1,0 +1,10 @@
+{
+  "base_commit": "ac3247789fef983345dc007fcba884e29bf155a7",
+  "source_diff_sha256": "83ec5e45a11159a671d59906fca34b4e14f89d4a40e0966e244d695be03e864e",
+  "baseline_worker_sha256": "22a925af2b2db893cdf39c6d10927d0227dec1f499101d23dfb4fb5ca40ee7dd",
+  "candidate_worker_sha256": "24fc2e8fc89c6d8549bd333e47a3ff67b61ed05836314eb2ce480b294617600f",
+  "regression": "2715/2719 passed; four known URI timeouts; zero gains and zero losses vs latest full run",
+  "scaled_uri": "single-worker B4 loop limited to 8 of 64 values: baseline 1.320, 1.255, 1.277 seconds; candidate 1.208, 1.209, 1.254 seconds. Modified test is diagnostic only.",
+  "uri_diagnostic": "All 4 original variants passed with 10 seconds; all 4 timed out at 5 seconds.",
+  "additional_validation": "cross-interpreter cached-slot test and clippy passed after main checks"
+}

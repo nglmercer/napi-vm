@@ -715,12 +715,18 @@ fn run_loop(
                     }
                 }
                 Instr::LoadGlobal { dst, name } => {
+                    let name_index = name as usize;
                     let name = const_string(frame.function, name)?;
                     // Lookup cannot run guest code or change the active
                     // scope. Borrow its existing root instead of bumping
                     // the environment's Rc count for every global read.
                     let scope = current_scope(interp, frame);
-                    let lookup = interp.lookup_binding_in(&scope, name)?;
+                    let lookup =
+                        if let Some(cached) = frame.function.global_read_slots.get(name_index) {
+                            interp.lookup_binding_cached(&scope, name, cached)?
+                        } else {
+                            interp.lookup_binding_in(&scope, name)?
+                        };
                     match lookup {
                         Lookup::Value(v) => frame.registers[dst as usize].assign_for_execution(v),
                         Lookup::Uninitialized => {

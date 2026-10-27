@@ -1,0 +1,225 @@
+diff --git a/crates/napi-vm-core/src/bytecode/compiler.rs b/crates/napi-vm-core/src/bytecode/compiler.rs
+index 5d67681..92fcabd 100644
+--- a/crates/napi-vm-core/src/bytecode/compiler.rs
++++ b/crates/napi-vm-core/src/bytecode/compiler.rs
+@@ -1145,6 +1145,8 @@ impl<'a> Compiler<'a> {
+             }
+         }
+         let caches = vec![crate::shape::PropCache::empty(); site_count as usize].into_boxed_slice();
++        let global_read_slots =
++            vec![std::cell::Cell::new(None); self.constants.len()].into_boxed_slice();
+         let needs_frame_environment = self.captures_arguments
+             || self.slots.iter().any(|s| s.captured)
+             || self.constants.iter().any(|c| {
+@@ -1170,6 +1172,7 @@ impl<'a> Compiler<'a> {
+             captures_arguments: self.captures_arguments,
+             needs_frame_environment,
+             caches,
++            global_read_slots,
+             tiers: crate::jit::TierCounters::default(),
+         })
+     }
+diff --git a/crates/napi-vm-core/src/bytecode/function.rs b/crates/napi-vm-core/src/bytecode/function.rs
+index 16b1f4d..a727fd9 100644
+--- a/crates/napi-vm-core/src/bytecode/function.rs
++++ b/crates/napi-vm-core/src/bytecode/function.rs
+@@ -74,6 +74,8 @@ pub struct BytecodeFunction {
+     /// Cells only, so the VM probes and fills with plain loads and stores
+     /// and no borrow can span a re-entrant slow path.
+     pub caches: Box<[crate::shape::PropCache]>,
++    /// Verified own-global slot hints indexed by constant-pool name index.
++    pub global_read_slots: Box<[std::cell::Cell<Option<usize>>]>,
+     /// Tier-up state for the JIT seam: entry/loop hotness plus the cached
+     /// compilation, if a backend produced one. Cloning a function forks
+     /// its tier state; each copy counts and compiles independently.
+diff --git a/crates/napi-vm-core/src/bytecode/parity_tests.rs b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+index 6825272..6dd3ee1 100644
+--- a/crates/napi-vm-core/src/bytecode/parity_tests.rs
++++ b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+@@ -240,6 +240,45 @@ fn global_assignment_fast_path_preserves_shadowing_and_setters() {
+     }
+ }
+ 
++#[test]
++fn global_read_cache_observes_deletion_accessors_and_shadowing() {
++    let source = r#"
++        globalThis.cached = 1;
++        function read() { return cached; }
++        let first = read() === 1 && read() === 1;
++        cached = 2;
++        let changed = read() === 2;
++        Object.defineProperty(globalThis, 'cached', { configurable:true,
++          get() { return 3; } });
++        let accessor = read() === 3;
++        delete globalThis.cached;
++        let absent = false;
++        try { read(); } catch (e) { absent = e instanceof ReferenceError; }
++        first && changed && accessor && absent;
++        "#;
++    check(source, true);
++    assert!(matches!(
++        run_ast_with_modules(source, &[]),
++        Ok(Value::Bool(true))
++    ));
++}
++
++#[test]
++fn global_read_cache_verifies_slots_across_interpreters() {
++    let program = Interpreter::compile("x;").expect("compile");
++    let mut first = Interpreter::with_builtins();
++    let mut second = Interpreter::with_builtins();
++    first.set_global_checked("x", Value::Number(1.0)).unwrap();
++    second
++        .set_global_checked("extra", Value::Number(9.0))
++        .unwrap();
++    second.set_global_checked("x", Value::Number(2.0)).unwrap();
++    for _ in 0..3 {
++        assert!(matches!(first.execute(&program), Ok(Value::Number(1.0))));
++        assert!(matches!(second.execute(&program), Ok(Value::Number(2.0))));
++    }
++}
++
+ #[test]
+ fn uri_decoders_reject_utf8_encoded_surrogate_pairs() {
+     let source = r#"
+diff --git a/crates/napi-vm-core/src/bytecode/vm.rs b/crates/napi-vm-core/src/bytecode/vm.rs
+index e1e7f44..d610f26 100644
+--- a/crates/napi-vm-core/src/bytecode/vm.rs
++++ b/crates/napi-vm-core/src/bytecode/vm.rs
+@@ -715,12 +715,18 @@ fn run_loop(
+                     }
+                 }
+                 Instr::LoadGlobal { dst, name } => {
++                    let name_index = name as usize;
+                     let name = const_string(frame.function, name)?;
+                     // Lookup cannot run guest code or change the active
+                     // scope. Borrow its existing root instead of bumping
+                     // the environment's Rc count for every global read.
+                     let scope = current_scope(interp, frame);
+-                    let lookup = interp.lookup_binding_in(&scope, name)?;
++                    let lookup =
++                        if let Some(cached) = frame.function.global_read_slots.get(name_index) {
++                            interp.lookup_binding_cached(&scope, name, cached)?
++                        } else {
++                            interp.lookup_binding_in(&scope, name)?
++                        };
+                     match lookup {
+                         Lookup::Value(v) => frame.registers[dst as usize].assign_for_execution(v),
+                         Lookup::Uninitialized => {
+diff --git a/crates/napi-vm-core/src/interpreter/resolve.rs b/crates/napi-vm-core/src/interpreter/resolve.rs
+index b037be8..5088ed9 100644
+--- a/crates/napi-vm-core/src/interpreter/resolve.rs
++++ b/crates/napi-vm-core/src/interpreter/resolve.rs
+@@ -76,6 +76,42 @@ impl Interpreter {
+         self.read_resolved_binding(&base, property, name)
+     }
+ 
++    pub(crate) fn lookup_binding_cached(
++        &mut self,
++        scope: &super::Env,
++        name: &str,
++        cached: &std::cell::Cell<Option<usize>>,
++    ) -> Result<super::Lookup, VmErr> {
++        let mut cursor = Some(scope.clone());
++        while let Some(environment) = cursor {
++            let frame = environment.borrow();
++            if frame.own_lexical_binding(name) || frame.with_object.is_some() {
++                break;
++            }
++            if frame.is_global_scope() {
++                let object = frame.global_object();
++                drop(frame);
++                if let Some(object) = object
++                    && let Some(properties) = object.property_cell()
++                    && !properties.meta.borrow().may_have_accessor(name)
++                    && let Some(value) = properties.cached_own_value(name, cached)
++                {
++                    self.check_execution_interrupt()?;
++                    return Ok(super::Lookup::Value(
++                        if matches!(value, Value::Binding(_)) {
++                            value.deref_binding()
++                        } else {
++                            value
++                        },
++                    ));
++                }
++                break;
++            }
++            cursor = frame.parent_env();
++        }
++        self.lookup_binding_in(scope, name)
++    }
++
+     /// Plain environment records cannot run guest code between resolution and
+     /// reading. With records and global accessors/prototypes retain the full
+     /// reference algorithm, including its observable HasBinding operations.
+diff --git a/crates/napi-vm-core/src/jit.rs b/crates/napi-vm-core/src/jit.rs
+index 4a4c3c3..ca62e21 100644
+--- a/crates/napi-vm-core/src/jit.rs
++++ b/crates/napi-vm-core/src/jit.rs
+@@ -289,6 +289,7 @@ mod tests {
+             captures_arguments: false,
+             needs_frame_environment: false,
+             caches: Vec::new().into_boxed_slice(),
++            global_read_slots: Vec::new().into_boxed_slice(),
+             tiers: TierCounters::default(),
+         }
+     }
+diff --git a/crates/napi-vm-core/src/value.rs b/crates/napi-vm-core/src/value.rs
+index 571a371..0cb40b6 100644
+--- a/crates/napi-vm-core/src/value.rs
++++ b/crates/napi-vm-core/src/value.rs
+@@ -1299,6 +1299,28 @@ impl ObjectCell {
+         (k == key).then(|| v.clone_for_execution())
+     }
+ 
++    /// A cached index is safe only while raw slot storage has never escaped.
++    /// Normal mutations preserve unique keys; each hit still verifies its key.
++    pub(crate) fn cached_own_value(
++        &self,
++        key: &str,
++        cached: &std::cell::Cell<Option<usize>>,
++    ) -> Option<Value> {
++        if self.index_disabled.get() {
++            return None;
++        }
++        if let Some(value) = cached
++            .get()
++            .and_then(|index| self.slot_verified(index, key))
++        {
++            return Some(value);
++        }
++        let index = self.own_index(key)?;
++        let value = self.slot_verified(index, key)?;
++        cached.set(Some(index));
++        Some(value)
++    }
++
+     /// Replace an existing slot only if it still has the expected key.
+     /// Returning the value on mismatch allows the caller to use the ordinary
+     /// property path without losing it.
+@@ -4400,8 +4422,24 @@ mod weak_registry_drop_tests {
+ #[cfg(test)]
+ mod object_index_tests {
+     use super::{ObjectCell, Value};
++    use std::cell::Cell;
+     use std::ops::Deref;
+ 
++    #[test]
++    fn cached_slot_read_disables_after_raw_storage_escapes() {
++        let props = ObjectCell::new_with_default_proto(vec![("name".into(), Value::Number(1.0))]);
++        let cached = Cell::new(None);
++        assert!(matches!(
++            props.cached_own_value("name", &cached),
++            Some(Value::Number(1.0))
++        ));
++        let raw = props.deref();
++        raw.borrow_mut()
++            .insert(0, ("name".into(), Value::Number(2.0)));
++        assert!(props.cached_own_value("name", &cached).is_none());
++        assert!(matches!(props.own_value("name"), Some(Value::Number(2.0))));
++    }
++
+     #[test]
+     fn verified_slot_write_rejects_stale_keys() {
+         let props = ObjectCell::new_with_default_proto(vec![

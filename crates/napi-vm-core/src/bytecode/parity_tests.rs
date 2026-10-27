@@ -241,6 +241,45 @@ fn global_assignment_fast_path_preserves_shadowing_and_setters() {
 }
 
 #[test]
+fn global_read_cache_observes_deletion_accessors_and_shadowing() {
+    let source = r#"
+        globalThis.cached = 1;
+        function read() { return cached; }
+        let first = read() === 1 && read() === 1;
+        cached = 2;
+        let changed = read() === 2;
+        Object.defineProperty(globalThis, 'cached', { configurable:true,
+          get() { return 3; } });
+        let accessor = read() === 3;
+        delete globalThis.cached;
+        let absent = false;
+        try { read(); } catch (e) { absent = e instanceof ReferenceError; }
+        first && changed && accessor && absent;
+        "#;
+    check(source, true);
+    assert!(matches!(
+        run_ast_with_modules(source, &[]),
+        Ok(Value::Bool(true))
+    ));
+}
+
+#[test]
+fn global_read_cache_verifies_slots_across_interpreters() {
+    let program = Interpreter::compile("x;").expect("compile");
+    let mut first = Interpreter::with_builtins();
+    let mut second = Interpreter::with_builtins();
+    first.set_global_checked("x", Value::Number(1.0)).unwrap();
+    second
+        .set_global_checked("extra", Value::Number(9.0))
+        .unwrap();
+    second.set_global_checked("x", Value::Number(2.0)).unwrap();
+    for _ in 0..3 {
+        assert!(matches!(first.execute(&program), Ok(Value::Number(1.0))));
+        assert!(matches!(second.execute(&program), Ok(Value::Number(2.0))));
+    }
+}
+
+#[test]
 fn uri_decoders_reject_utf8_encoded_surrogate_pairs() {
     let source = r#"
         let rejected = 0;
