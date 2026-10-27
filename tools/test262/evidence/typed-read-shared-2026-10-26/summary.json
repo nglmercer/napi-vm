@@ -1,0 +1,12 @@
+{
+  "base_commit": "3ca6d435f5439ded3c011ce6ba9685f4e2ce3c30",
+  "source_diff_sha256": "76ad086d7ea09bd25ccdfa407f7baf0ffc463e280d6cd360a0c21b1e56d7fbe2",
+  "baseline_worker_sha256": "7455753c5b644f4a0f33fdc4c859cdec76be3f4facb3d235fbac2786bf5fb32e",
+  "candidate_worker_sha256": "8a13381f85c28deac51832478bb19f6c1801e3c0e9c8acfe2c8f6d3ad020a5f2",
+  "focused": "both sort and both conversion variants timed out at 5 seconds with 2 workers",
+  "single_worker_complete_sort_seconds": {
+    "baseline": 7.746,
+    "candidate": 7.776
+  },
+  "decision": "candidate reverted; no demonstrated gain"
+}
