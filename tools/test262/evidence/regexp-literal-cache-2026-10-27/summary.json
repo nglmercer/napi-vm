@@ -1,0 +1,19 @@
+{
+  "base_commit": "13baa0fffae5234264417b2f89c406955da145d1",
+  "source_diff_sha256": "d3507244d129a29ca353f053e29083777ef5b069440643b48bd5dc385c979661",
+  "baseline_worker_sha256": "185f11a8752cd7792bda90cbe4d2c9f64946fef0ea5a512dbf6bb3b5124ab421",
+  "candidate_worker_sha256": "4985995a4283837a4896175fe0934ff558ad3b9a16c0dcfb4ffb7c6be5bf8eb3",
+  "targeted": "both whitespace variants timed out at 5 seconds",
+  "regression": "1672/1684 passed; 12 known timeouts; zero gains and zero losses versus latest full run",
+  "single_worker_original_whitespace_test_seconds": {
+    "baseline": [
+      7.327,
+      7.014
+    ],
+    "candidate": [
+      6.874,
+      6.809
+    ]
+  },
+  "limitations": "No five-second pass gained; each RegExp object keeps independent mutable state."
+}

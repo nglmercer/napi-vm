@@ -397,12 +397,16 @@ fn type_err(message: String) -> VmErr {
 
 pub(crate) fn compile(source: impl Into<crate::JsString>, flags: &str) -> Result<Value, VmErr> {
     let regex = Regex::new(source, flags).map_err(type_err)?;
-    Ok(Value::RegExp(Rc::new(RegExpData {
+    Ok(from_compiled(regex))
+}
+
+pub(crate) fn from_compiled(regex: Regex) -> Value {
+    Value::RegExp(Rc::new(RegExpData {
         properties: Value::instance_properties(),
         regex: RefCell::new(regex),
         legacy_enabled: Cell::new(true),
         last_index: Cell::new(0),
-    })))
+    }))
 }
 
 /// `RegExp(pattern, flags)`. A `RegExp` argument is re-compiled, taking its

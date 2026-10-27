@@ -578,8 +578,20 @@ fn run_loop(
                         Constant::Null => Value::Null,
                         Constant::Undefined => Value::Undefined,
                         Constant::BigInt(v) => Value::BigInt(v.clone()),
-                        Constant::Regex { pattern, flags } => {
-                            crate::builtins::compile_regex(pattern, flags)?
+                        Constant::Regex {
+                            pattern,
+                            flags,
+                            compiled,
+                        } => {
+                            if let Some(regex) = compiled.get() {
+                                crate::builtins::regex_from_compiled(regex.clone())
+                            } else {
+                                let value = crate::builtins::compile_regex(pattern, flags)?;
+                                if let Value::RegExp(data) = &value {
+                                    let _ = compiled.set(data.regex.borrow().clone());
+                                }
+                                value
+                            }
                         }
                         _ => return Err(internal("invalid load_const")),
                     };

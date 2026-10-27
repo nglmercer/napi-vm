@@ -26,11 +26,12 @@ pub enum Constant {
     StringList(Vec<crate::JsString>),
     /// A parsed bigint literal, shared across executions (immutable).
     BigInt(Rc<crate::bigint::BigInt>),
-    /// A regex literal's source and flags; compiled fresh per `LoadConst`
-    /// so every evaluation gets its own `lastIndex`, like the evaluator.
+    /// A regex literal's source, flags and immutable compiled pattern. Each
+    /// evaluation still creates a separate guest object and lastIndex.
     Regex {
         pattern: crate::JsString,
         flags: String,
+        compiled: std::sync::Arc<std::sync::OnceLock<crate::regex::Regex>>,
     },
     /// A nested supported function, compiled to bytecode.
     Function(Rc<BytecodeFunction>),

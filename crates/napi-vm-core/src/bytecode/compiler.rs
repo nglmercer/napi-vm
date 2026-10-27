@@ -3886,6 +3886,7 @@ impl<'a> Compiler<'a> {
                 let index = self.push_const(Constant::Regex {
                     pattern: pattern.clone(),
                     flags: flags.clone(),
+                    compiled: std::sync::Arc::new(std::sync::OnceLock::new()),
                 })?;
                 self.load_const(index)
             }

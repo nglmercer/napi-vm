@@ -32,7 +32,7 @@ const MAX_STEPS: usize = 1_000_000;
 const STEPS_PER_INPUT_UNIT: usize = 64;
 
 /// A compiled pattern together with its flags.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Regex {
     root: Node,
     pub group_count: usize,

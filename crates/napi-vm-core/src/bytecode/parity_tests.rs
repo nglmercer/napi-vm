@@ -164,6 +164,23 @@ fn date_prototype_read_cache_observes_mutations() {
 }
 
 #[test]
+fn repeated_regexp_literals_keep_independent_mutable_state() {
+    let source = r#"
+        function make() { return /a/g; }
+        let first = make(), second = make();
+        first.lastIndex = 4;
+        first.compile('b', 'i');
+        first !== second && second.source === 'a' && second.flags === 'g' &&
+          second.lastIndex === 0 && second.test('a') && first.test('B');
+        "#;
+    check(source, true);
+    assert!(matches!(
+        run_ast_with_modules(source, &[]),
+        Ok(Value::Bool(true))
+    ));
+}
+
+#[test]
 fn uri_decoders_reject_utf8_encoded_surrogate_pairs() {
     let source = r#"
         let rejected = 0;
