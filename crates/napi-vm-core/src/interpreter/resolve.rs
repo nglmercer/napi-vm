@@ -859,6 +859,18 @@ impl Interpreter {
 
     /// Resolve a property value, invoking it if it is a getter.
     pub(crate) fn get_prop_value(&mut self, o: &Value, p: &Value) -> Result<Value, VmErr> {
+        // In-range numeric indices are virtual own properties of primitive
+        // strings. Other keys must still consult the prototype chain.
+        if let (Value::String(text), Value::Number(index)) = (o, p)
+            && *index >= 0.0
+            && *index < text.len() as f64
+            && index.fract() == 0.0
+        {
+            self.check_execution_interrupt()?;
+            return Ok(Value::String(crate::JsString::from_units(vec![
+                text.units()[*index as usize],
+            ])));
+        }
         // A numeric key on an integer-indexed exotic bypasses ordinary
         // property lookup; numeric -0 is converted to the property key "0".
         if let (Value::TypedArray(view), Value::Number(index)) = (o, p) {

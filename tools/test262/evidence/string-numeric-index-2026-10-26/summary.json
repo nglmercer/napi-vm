@@ -1,0 +1,7 @@
+{
+  "base_commit": "915604a35a116be618a9569656a97dbf6837b234",
+  "source_diff_sha256": "f986fe65ef6c0e93a6008ea6561384067228ebe6e29a40c2e134f916f412dd55",
+  "selection": "2791 variants: 2787 pass, 4 timeout, no other outcomes",
+  "comparison_to_last_full": "4 gains, 0 losses; all 4 gains also pass with the clean baseline worker",
+  "candidate_targeted_uri": "4 encode pass, 4 decode timeout; same as clean baseline"
+}

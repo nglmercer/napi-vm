@@ -107,6 +107,21 @@ fn arithmetic_and_strings() {
 }
 
 #[test]
+fn numeric_string_indices_preserve_utf16_and_prototype_fallback() {
+    let source = r#"
+        Object.defineProperty(String.prototype, '3', {get() { return 'prototype'; }, configurable: true});
+        let s = 'a\uD83D\uDE00';
+        let result = [s[-0], s[1].charCodeAt(0), s[2].charCodeAt(0), s[3], s[1.5], s[NaN]].join('|');
+        delete String.prototype[3];
+        result;
+        "#;
+    check(source, true);
+    assert!(
+        matches!(run_ast_with_modules(source, &[]), Ok(Value::String(ref result)) if result.as_str() == "a|55357|56832|prototype||")
+    );
+}
+
+#[test]
 fn variables_and_assignment() {
     check("let x = 5; x += 3; x", true);
     check("var a = 1; var a; a", true);

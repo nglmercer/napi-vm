@@ -1,0 +1,49 @@
+diff --git a/crates/napi-vm-core/src/bytecode/parity_tests.rs b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+index fa6580f..978b88a 100644
+--- a/crates/napi-vm-core/src/bytecode/parity_tests.rs
++++ b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+@@ -106,6 +106,21 @@ fn arithmetic_and_strings() {
+     check("[] instanceof Array", true);
+ }
+ 
++#[test]
++fn numeric_string_indices_preserve_utf16_and_prototype_fallback() {
++    let source = r#"
++        Object.defineProperty(String.prototype, '3', {get() { return 'prototype'; }, configurable: true});
++        let s = 'a\uD83D\uDE00';
++        let result = [s[-0], s[1].charCodeAt(0), s[2].charCodeAt(0), s[3], s[1.5], s[NaN]].join('|');
++        delete String.prototype[3];
++        result;
++        "#;
++    check(source, true);
++    assert!(
++        matches!(run_ast_with_modules(source, &[]), Ok(Value::String(ref result)) if result.as_str() == "a|55357|56832|prototype||")
++    );
++}
++
+ #[test]
+ fn variables_and_assignment() {
+     check("let x = 5; x += 3; x", true);
+diff --git a/crates/napi-vm-core/src/interpreter/resolve.rs b/crates/napi-vm-core/src/interpreter/resolve.rs
+index 1317194..5e0fe6d 100644
+--- a/crates/napi-vm-core/src/interpreter/resolve.rs
++++ b/crates/napi-vm-core/src/interpreter/resolve.rs
+@@ -859,6 +859,18 @@ impl Interpreter {
+ 
+     /// Resolve a property value, invoking it if it is a getter.
+     pub(crate) fn get_prop_value(&mut self, o: &Value, p: &Value) -> Result<Value, VmErr> {
++        // In-range numeric indices are virtual own properties of primitive
++        // strings. Other keys must still consult the prototype chain.
++        if let (Value::String(text), Value::Number(index)) = (o, p)
++            && *index >= 0.0
++            && *index < text.len() as f64
++            && index.fract() == 0.0
++        {
++            self.check_execution_interrupt()?;
++            return Ok(Value::String(crate::JsString::from_units(vec![
++                text.units()[*index as usize],
++            ])));
++        }
+         // A numeric key on an integer-indexed exotic bypasses ordinary
+         // property lookup; numeric -0 is converted to the property key "0".
+         if let (Value::TypedArray(view), Value::Number(index)) = (o, p) {
