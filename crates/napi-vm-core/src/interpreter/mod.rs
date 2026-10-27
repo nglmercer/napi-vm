@@ -1725,8 +1725,30 @@ impl Interpreter {
         &mut self,
         scope: &Env,
         name: &str,
+        value: Value,
+        strict: bool,
+    ) -> Result<(), VmErr> {
+        self.assign_or_set_binding_with_cache(scope, name, value, strict, None)
+    }
+
+    pub(crate) fn assign_or_set_binding_cached(
+        &mut self,
+        scope: &Env,
+        name: &str,
+        value: Value,
+        cached: &std::cell::Cell<Option<usize>>,
+    ) -> Result<(), VmErr> {
+        let strict = scope.borrow().strict();
+        self.assign_or_set_binding_with_cache(scope, name, value, strict, Some(cached))
+    }
+
+    fn assign_or_set_binding_with_cache(
+        &mut self,
+        scope: &Env,
+        name: &str,
         mut value: Value,
         strict: bool,
+        cached: Option<&std::cell::Cell<Option<usize>>>,
     ) -> Result<(), VmErr> {
         // An existing writable own data property on the global object cannot
         // invoke guest code when assigned. Any intervening declarative or
@@ -1744,7 +1766,9 @@ impl Interpreter {
                     && let Some(properties) = object.property_cell()
                     && !properties.meta.borrow().may_have_accessor(name)
                     && properties.meta.borrow().attrs_of(name).writable
-                    && let Some(index) = properties.own_index(name)
+                    && let Some(index) = cached
+                        .and_then(|hint| properties.cached_own_index(name, hint))
+                        .or_else(|| properties.own_index(name))
                 {
                     self.check_execution_interrupt()?;
                     match properties.set_slot_verified(index, name, value) {

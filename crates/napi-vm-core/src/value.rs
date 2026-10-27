@@ -1321,6 +1321,29 @@ impl ObjectCell {
         Some(value)
     }
 
+    /// Obtain a verified own-slot hint without cloning its value.
+    pub(crate) fn cached_own_index(
+        &self,
+        key: &str,
+        cached: &std::cell::Cell<Option<usize>>,
+    ) -> Option<usize> {
+        if self.index_disabled.get() {
+            return None;
+        }
+        if let Some(index) = cached.get()
+            && self
+                .slots
+                .borrow()
+                .get(index)
+                .is_some_and(|(name, _)| name == key)
+        {
+            return Some(index);
+        }
+        let index = self.own_index(key)?;
+        cached.set(Some(index));
+        Some(index)
+    }
+
     /// Replace an existing slot only if it still has the expected key.
     /// Returning the value on mismatch allows the caller to use the ordinary
     /// property path without losing it.

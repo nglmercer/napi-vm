@@ -745,10 +745,15 @@ fn run_loop(
                     }
                 }
                 Instr::StoreGlobal { name, src } => {
+                    let name_index = name as usize;
                     let name = const_string(frame.function, name)?;
                     let value = frame.registers[src as usize].clone_for_execution();
                     let scope = current_scope(interp, frame);
-                    interp.assign_or_set_binding_in(&scope, name, value)?;
+                    if let Some(cached) = frame.function.global_read_slots.get(name_index) {
+                        interp.assign_or_set_binding_cached(&scope, name, value, cached)?;
+                    } else {
+                        interp.assign_or_set_binding_in(&scope, name, value)?;
+                    }
                 }
                 Instr::DefineGlobal {
                     name,

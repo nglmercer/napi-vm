@@ -277,6 +277,10 @@ fn global_read_cache_verifies_slots_across_interpreters() {
         assert!(matches!(first.execute(&program), Ok(Value::Number(1.0))));
         assert!(matches!(second.execute(&program), Ok(Value::Number(2.0))));
     }
+    let update = Interpreter::compile("x = x + 1; x;").expect("compile");
+    assert!(matches!(first.execute(&update), Ok(Value::Number(2.0))));
+    assert!(matches!(second.execute(&update), Ok(Value::Number(3.0))));
+    assert!(matches!(first.execute(&update), Ok(Value::Number(3.0))));
 }
 
 #[test]
