@@ -43,10 +43,16 @@ an explicit compatibility difference until the specification changes.
    pinned run had 16 Date, eight RegExp literal, four Annex B RegExp, four URI,
    two RegExp whitespace, and two TypedArray sort timeouts. The whitespace
    variants subsequently passed focused checks. Profile the unmodified cases
-   and prioritize shared interpreter call, binding, property, and loop costs;
-   the Date sweep in particular needs a substantial speedup. Preserve observable
-   semantics and compare broad related suites after each change. Reclassify
-   residuals using the new revision's actual full report.
+   and prioritize shared interpreter call, binding, property, and loop costs.
+   For Date, profile the four-level guest-language sweep and repeated calls;
+   its scaled 24-timestamp diagnostic still took 2.36–2.84 seconds after the
+   prototype cache, so small local wins are unlikely to suffice. Evaluate
+   bytecode dispatch, call overhead, and the existing JIT seam against
+   representative unmodified tests, with guards for observable side effects,
+   mutation, execution limits, and cancellation. For RegExp and URI, profile
+   parsing, construction, calls, and repeated global bindings independently.
+   Preserve observable semantics and compare broad related suites after each
+   change. Reclassify residuals using the new revision's actual full report.
 4. **Close the full gate.** On clean committed source, build the release
    worker and run every selected-revision variant with two workers, five-second
    deadlines, and no feature skips. Require zero failures, timeouts, skips,
