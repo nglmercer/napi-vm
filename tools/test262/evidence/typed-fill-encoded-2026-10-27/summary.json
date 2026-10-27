@@ -1,0 +1,9 @@
+{
+  "base_commit": "643890e47c839f5367c6561f31ce6feba1ea33ea",
+  "source_diff_sha256": "a353c744e6a982844e92e84c639d8071bfcb904e36f69ed615e3810e2ecc1a35",
+  "baseline_worker_sha256": "00d7108cf28205ad14ff9306770f309c30577c8cb4fd594c87dc6175faf90b6a",
+  "candidate_worker_sha256": "3141e1479c80294bd4288cdccbb265f475330b61d2207a765eab35ffecfe3056",
+  "regression": "1731/1735 pass: two sort timeouts and two timing-sensitive conversion timeouts, latter passed in latest full run",
+  "benchmark": "original sort test single worker baseline 7.714, 7.564 seconds; candidate 7.755, 7.637 seconds",
+  "decision": "reverted; no demonstrated speedup and two timing losses"
+}
