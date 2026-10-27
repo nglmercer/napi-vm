@@ -1299,6 +1299,32 @@ impl ObjectCell {
         (k == key).then(|| v.clone_for_execution())
     }
 
+    /// Replace an existing slot only if it still has the expected key.
+    /// Returning the value on mismatch allows the caller to use the ordinary
+    /// property path without losing it.
+    pub(crate) fn set_slot_verified(
+        &self,
+        index: usize,
+        key: &str,
+        value: Value,
+    ) -> Result<(), Value> {
+        let mut slots = self.slots.borrow_mut();
+        let Some((stored_key, stored_value)) = slots.get_mut(index) else {
+            return Err(value);
+        };
+        if stored_key != key {
+            return Err(value);
+        }
+        if self.meta.borrow().is_arguments
+            && let Value::Binding(cell) = stored_value
+        {
+            *cell.borrow_mut() = value;
+        } else {
+            stored_value.assign_for_execution(value);
+        }
+        Ok(())
+    }
+
     /// Clone an own property's raw slot value (bindings unresolved), if
     /// present. The indexed equivalent of the linear search it replaces.
     pub(crate) fn own_value(&self, key: &str) -> Option<Value> {
@@ -4375,6 +4401,29 @@ mod weak_registry_drop_tests {
 mod object_index_tests {
     use super::{ObjectCell, Value};
     use std::ops::Deref;
+
+    #[test]
+    fn verified_slot_write_rejects_stale_keys() {
+        let props = ObjectCell::new_with_default_proto(vec![
+            ("first".into(), Value::Number(1.0)),
+            ("second".into(), Value::Number(2.0)),
+        ]);
+        assert!(
+            props
+                .set_slot_verified(0, "second", Value::Number(9.0))
+                .is_err()
+        );
+        assert!(matches!(props.own_value("first"), Some(Value::Number(1.0))));
+        assert!(
+            props
+                .set_slot_verified(1, "second", Value::Number(3.0))
+                .is_ok()
+        );
+        assert!(matches!(
+            props.own_value("second"),
+            Some(Value::Number(3.0))
+        ));
+    }
 
     #[test]
     fn escaped_raw_slot_cell_disables_index_even_after_later_mutation() {

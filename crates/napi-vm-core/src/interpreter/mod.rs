@@ -1725,7 +1725,7 @@ impl Interpreter {
         &mut self,
         scope: &Env,
         name: &str,
-        value: Value,
+        mut value: Value,
         strict: bool,
     ) -> Result<(), VmErr> {
         // An existing writable own data property on the global object cannot
@@ -1744,11 +1744,13 @@ impl Interpreter {
                     && let Some(properties) = object.property_cell()
                     && !properties.meta.borrow().may_have_accessor(name)
                     && properties.meta.borrow().attrs_of(name).writable
-                    && properties.own_index(name).is_some()
+                    && let Some(index) = properties.own_index(name)
                 {
                     self.check_execution_interrupt()?;
-                    object.set_prop(name.to_owned(), value)?;
-                    return Ok(());
+                    match properties.set_slot_verified(index, name, value) {
+                        Ok(()) => return Ok(()),
+                        Err(returned) => value = returned,
+                    }
                 }
                 break;
             }
