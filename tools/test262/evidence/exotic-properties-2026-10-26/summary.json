@@ -1,0 +1,8 @@
+{
+  "base_commit": "0c28d64ec7c420756a8cb9804f79024754b0dbb7",
+  "source_diff_sha256": "24f15a2bd4b32841d18821f73b96ca52a62fef1f1d77143bce14cd7c44622f05",
+  "worker_sha256": "a283bb628c80fd8754efb810618b38a4053649d5b4501facbf5b356458fe3032",
+  "regression": "10052/10054 passed; 2 RegExp timeouts, 0 gains, 0 losses versus latest full run",
+  "targeted": "6/6 Date, TypedArray sort and conversion variants timed out at 5 seconds with 2 workers",
+  "scaled_date_benchmark": "24 timestamp harness diagnostic, single worker: baseline 3.602, 3.504 seconds; candidate 3.471, 3.358 seconds. Harness altered only for diagnostic; not a conformance result."
+}

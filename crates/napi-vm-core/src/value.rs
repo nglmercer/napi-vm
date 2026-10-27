@@ -1090,6 +1090,25 @@ impl ObjectCell {
         }
     }
 
+    /// Create property storage for an exotic whose prototype is resolved by
+    /// its own builtin kind rather than directly from Object.prototype.
+    fn new_exotic_properties() -> Self {
+        Self {
+            weak: RefCell::new(weak::WeakStorage::None),
+            slots: RefCell::new(Vec::new()),
+            index: RefCell::new(None),
+            index_disabled: Cell::new(false),
+            meta: RefCell::new(ObjectMeta {
+                uses_default_prototype: true,
+                proto: None,
+                realm_global: crate::interpreter::realm::allocation_global(),
+                ..ObjectMeta::default()
+            }),
+            shape: RefCell::new(None),
+            read_once: Cell::new(false),
+        }
+    }
+
     pub fn proto(&self) -> Option<Rc<Value>> {
         self.meta.borrow().proto.clone()
     }
@@ -3277,10 +3296,7 @@ impl Value {
     }
 
     pub fn instance_properties() -> Rc<ObjectCell> {
-        let properties = ObjectCell::new_with_default_proto(vec![]);
-        // Exotic default prototypes depend on their builtin kind, not Object.
-        properties.meta.borrow_mut().proto = None;
-        crate::heap::tracked(Rc::new(properties))
+        crate::heap::tracked(Rc::new(ObjectCell::new_exotic_properties()))
     }
 
     pub fn date(milliseconds: f64) -> Self {
