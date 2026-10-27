@@ -1,0 +1,20 @@
+{
+  "base_commit": "ad05666",
+  "revision": "0b4e0812022b18236b5276d2804948fdd9f71603",
+  "source_diff_sha256": "21303aef556a6b8d1527fc1d3e7bff4c659d5e04af91fcec12118d0ea8c875ba",
+  "baseline_worker_sha256": "414093c14dec0b37eeafaa7d6eb421c8f69adc4e0c5b1f9b3185542a7bd8064a",
+  "candidate_worker_sha256": "77b8961ab89563ef8be63b0ed3770de4fbdc34aa7ebcc6072df1e36ea2d4a6b9",
+  "diagnostic": "Scaled Date harness with 24 timestamps; not a conformance result",
+  "baseline_seconds": [
+    2.4539,
+    2.295,
+    2.4436
+  ],
+  "candidate_seconds": [
+    2.2991,
+    2.3229,
+    2.2702
+  ],
+  "sampling": "Eight stack samples, not a statistical profile; constructor and function calls recur.",
+  "decision": "Reverted: small and variable improvement, no demonstrated five-second test gain, and per-environment cache overhead."
+}
