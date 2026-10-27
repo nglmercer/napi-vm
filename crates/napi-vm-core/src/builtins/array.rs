@@ -44,6 +44,23 @@ fn array_element_number(
     index: f64,
     skip_holes: bool,
 ) -> Result<Option<Value>, VmErr> {
+    // A present dense data element shadows the prototype and needs no
+    // HasProperty lookup or string conversion. Holes and accessor-backed
+    // arrays retain the full path so inherited properties remain visible.
+    if let Value::Array(array) = this
+        && index >= 0.0
+        && index < crate::value::MAX_ARRAY_LEN as f64
+        && index.fract() == 0.0
+        && !array.meta.borrow().has_accessors
+        && let Some(value) = array.index_value(index as usize)
+    {
+        interp.check_execution_interrupt()?;
+        return Ok(Some(if matches!(value, Value::Binding(_)) {
+            value.deref_binding()
+        } else {
+            value
+        }));
+    }
     let key = Value::String(crate::format::ecmascript_number_string(index).into());
     if skip_holes && !interp.has_property(this, &key)? {
         return Ok(None);

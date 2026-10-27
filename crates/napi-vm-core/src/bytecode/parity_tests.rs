@@ -181,6 +181,26 @@ fn repeated_regexp_literals_keep_independent_mutable_state() {
 }
 
 #[test]
+fn array_search_reads_own_elements_and_prototype_holes() {
+    let source = r#"
+        let a = [7, 8, 9];
+        let dense = a.indexOf(8) === 1;
+        delete a[1];
+        let proto = Object.create(Array.prototype);
+        Object.defineProperty(proto, '1', {get() { return this === a ? 42 : 0; }});
+        Object.setPrototypeOf(a, proto);
+        let inherited = a.indexOf(42) === 1;
+        Object.defineProperty(a, '1', {get() { return 23; }, configurable: true});
+        dense && inherited && a.indexOf(23) === 1 && a.indexOf(42) === -1;
+        "#;
+    check(source, true);
+    assert!(matches!(
+        run_ast_with_modules(source, &[]),
+        Ok(Value::Bool(true))
+    ));
+}
+
+#[test]
 fn uri_decoders_reject_utf8_encoded_surrogate_pairs() {
     let source = r#"
         let rejected = 0;

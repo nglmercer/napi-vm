@@ -1,0 +1,59 @@
+diff --git a/crates/napi-vm-core/src/builtins/array.rs b/crates/napi-vm-core/src/builtins/array.rs
+index e5db6ad..7d6c857 100644
+--- a/crates/napi-vm-core/src/builtins/array.rs
++++ b/crates/napi-vm-core/src/builtins/array.rs
+@@ -44,6 +44,23 @@ fn array_element_number(
+     index: f64,
+     skip_holes: bool,
+ ) -> Result<Option<Value>, VmErr> {
++    // A present dense data element shadows the prototype and needs no
++    // HasProperty lookup or string conversion. Holes and accessor-backed
++    // arrays retain the full path so inherited properties remain visible.
++    if let Value::Array(array) = this
++        && index >= 0.0
++        && index < crate::value::MAX_ARRAY_LEN as f64
++        && index.fract() == 0.0
++        && !array.meta.borrow().has_accessors
++        && let Some(value) = array.index_value(index as usize)
++    {
++        interp.check_execution_interrupt()?;
++        return Ok(Some(if matches!(value, Value::Binding(_)) {
++            value.deref_binding()
++        } else {
++            value
++        }));
++    }
+     let key = Value::String(crate::format::ecmascript_number_string(index).into());
+     if skip_holes && !interp.has_property(this, &key)? {
+         return Ok(None);
+diff --git a/crates/napi-vm-core/src/bytecode/parity_tests.rs b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+index 93785c7..03fcee3 100644
+--- a/crates/napi-vm-core/src/bytecode/parity_tests.rs
++++ b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+@@ -180,6 +180,26 @@ fn repeated_regexp_literals_keep_independent_mutable_state() {
+     ));
+ }
+ 
++#[test]
++fn array_search_reads_own_elements_and_prototype_holes() {
++    let source = r#"
++        let a = [7, 8, 9];
++        let dense = a.indexOf(8) === 1;
++        delete a[1];
++        let proto = Object.create(Array.prototype);
++        Object.defineProperty(proto, '1', {get() { return this === a ? 42 : 0; }});
++        Object.setPrototypeOf(a, proto);
++        let inherited = a.indexOf(42) === 1;
++        Object.defineProperty(a, '1', {get() { return 23; }, configurable: true});
++        dense && inherited && a.indexOf(23) === 1 && a.indexOf(42) === -1;
++        "#;
++    check(source, true);
++    assert!(matches!(
++        run_ast_with_modules(source, &[]),
++        Ok(Value::Bool(true))
++    ));
++}
++
+ #[test]
+ fn uri_decoders_reject_utf8_encoded_surrogate_pairs() {
+     let source = r#"
