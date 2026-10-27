@@ -1,0 +1,65 @@
+diff --git a/crates/napi-vm-core/src/bytecode/parity_tests.rs b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+index 09c7a20..6825272 100644
+--- a/crates/napi-vm-core/src/bytecode/parity_tests.rs
++++ b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+@@ -223,6 +223,23 @@ fn primitive_prototype_cache_observes_replacement_and_getters() {
+     ));
+ }
+ 
++#[test]
++fn global_assignment_fast_path_preserves_shadowing_and_setters() {
++    for source in [
++        "var x=1;function f(){let x=2;x=3;return x;}f()===3&&x===1;",
++        "var x=1;let o={x:2};with(o){x=3;}x===1&&o.x===3;",
++        "var seen=0;Object.defineProperty(globalThis,'x',{configurable:true,get(){return 2;},set(v){seen=v;}});x=9;delete globalThis.x;seen===9;",
++        "Object.defineProperty(globalThis,'x',{value:1,writable:false,configurable:true});let ok=false;try{(function(){'use strict';x=2;})();}catch(e){ok=e instanceof TypeError;}delete globalThis.x;ok;",
++        "var x=1;{let x=2;x=3;}x===1;",
++    ] {
++        check(source, !source.contains("with(o)"));
++        assert!(
++            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
++            "{source}"
++        );
++    }
++}
++
+ #[test]
+ fn uri_decoders_reject_utf8_encoded_surrogate_pairs() {
+     let source = r#"
+diff --git a/crates/napi-vm-core/src/interpreter/mod.rs b/crates/napi-vm-core/src/interpreter/mod.rs
+index 1b1f2c1..e930e37 100644
+--- a/crates/napi-vm-core/src/interpreter/mod.rs
++++ b/crates/napi-vm-core/src/interpreter/mod.rs
+@@ -1728,6 +1728,32 @@ impl Interpreter {
+         value: Value,
+         strict: bool,
+     ) -> Result<(), VmErr> {
++        // An existing writable own data property on the global object cannot
++        // invoke guest code when assigned. Any intervening declarative or
++        // with binding must retain the general reference-resolution path.
++        let mut cursor = Some(scope.clone());
++        while let Some(environment) = cursor {
++            let frame = environment.borrow();
++            if frame.own_lexical_binding(name) || frame.with_object.is_some() {
++                break;
++            }
++            if frame.is_global_scope() {
++                let object = frame.global_object();
++                drop(frame);
++                if let Some(object) = object
++                    && let Some(properties) = object.property_cell()
++                    && !properties.meta.borrow().may_have_accessor(name)
++                    && properties.meta.borrow().attrs_of(name).writable
++                    && properties.own_index(name).is_some()
++                {
++                    self.check_execution_interrupt()?;
++                    object.set_prop(name.to_owned(), value)?;
++                    return Ok(());
++                }
++                break;
++            }
++            cursor = frame.parent_env();
++        }
+         if let Some(object) = self.with_binding_object(scope, name)? {
+             return self.set_object_binding(&object, name, value, strict);
+         }

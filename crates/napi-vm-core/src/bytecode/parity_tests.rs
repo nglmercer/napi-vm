@@ -224,6 +224,23 @@ fn primitive_prototype_cache_observes_replacement_and_getters() {
 }
 
 #[test]
+fn global_assignment_fast_path_preserves_shadowing_and_setters() {
+    for source in [
+        "var x=1;function f(){let x=2;x=3;return x;}f()===3&&x===1;",
+        "var x=1;let o={x:2};with(o){x=3;}x===1&&o.x===3;",
+        "var seen=0;Object.defineProperty(globalThis,'x',{configurable:true,get(){return 2;},set(v){seen=v;}});x=9;delete globalThis.x;seen===9;",
+        "Object.defineProperty(globalThis,'x',{value:1,writable:false,configurable:true});let ok=false;try{(function(){'use strict';x=2;})();}catch(e){ok=e instanceof TypeError;}delete globalThis.x;ok;",
+        "var x=1;{let x=2;x=3;}x===1;",
+    ] {
+        check(source, !source.contains("with(o)"));
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}
+
+#[test]
 fn uri_decoders_reject_utf8_encoded_surrogate_pairs() {
     let source = r#"
         let rejected = 0;

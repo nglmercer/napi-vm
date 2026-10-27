@@ -1728,6 +1728,32 @@ impl Interpreter {
         value: Value,
         strict: bool,
     ) -> Result<(), VmErr> {
+        // An existing writable own data property on the global object cannot
+        // invoke guest code when assigned. Any intervening declarative or
+        // with binding must retain the general reference-resolution path.
+        let mut cursor = Some(scope.clone());
+        while let Some(environment) = cursor {
+            let frame = environment.borrow();
+            if frame.own_lexical_binding(name) || frame.with_object.is_some() {
+                break;
+            }
+            if frame.is_global_scope() {
+                let object = frame.global_object();
+                drop(frame);
+                if let Some(object) = object
+                    && let Some(properties) = object.property_cell()
+                    && !properties.meta.borrow().may_have_accessor(name)
+                    && properties.meta.borrow().attrs_of(name).writable
+                    && properties.own_index(name).is_some()
+                {
+                    self.check_execution_interrupt()?;
+                    object.set_prop(name.to_owned(), value)?;
+                    return Ok(());
+                }
+                break;
+            }
+            cursor = frame.parent_env();
+        }
         if let Some(object) = self.with_binding_object(scope, name)? {
             return self.set_object_binding(&object, name, value, strict);
         }
