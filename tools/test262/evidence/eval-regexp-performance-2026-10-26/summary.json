@@ -1,0 +1,18 @@
+{
+  "base_commit": "48a3f33a30141dd483a197ff643cf17a9314a65d",
+  "source_diff_sha256": "c7634823af647557d384d4c31ea2c34b7a3ddb6419595c396e3e3876ff8c22c5",
+  "baseline_worker_sha256": "4716b1fadf6c81afb70743795e8e4b7854dd0e0c335d3623757fa9614bdfa512",
+  "candidate_worker_sha256": "7a3a01b9d221f394dfa251283876345f7fdc5018ac67b9f7f74d2ac5bf99b2f0",
+  "focused": "12/12 timeouts with two workers and five-second deadline",
+  "single_worker_original_test_seconds": {
+    "baseline": [
+      5.477,
+      5.543
+    ],
+    "candidate": [
+      5.47,
+      5.365
+    ]
+  },
+  "decision": "reverted: no Test262 gain and insufficient demonstrated speedup to justify special case"
+}

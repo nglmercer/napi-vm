@@ -1,0 +1,51 @@
+diff --git a/crates/napi-vm-core/src/builtins/mod.rs b/crates/napi-vm-core/src/builtins/mod.rs
+index e1af038..ffc1631 100644
+--- a/crates/napi-vm-core/src/builtins/mod.rs
++++ b/crates/napi-vm-core/src/builtins/mod.rs
+@@ -512,6 +512,18 @@ pub(crate) fn eval_direct(interp: &mut Interpreter, args: Vec<Value>) -> Result<
+                     &interp.global,
+                 ))
+                 .map_err(|error| VmErr::Msg(format!("SyntaxError: {}", error.message)))?;
++            // A single RegExp literal cannot introduce bindings or invoke
++            // guest code. Parsing above still performs all context-sensitive
++            // early-error checks; evaluation does not need a fresh eval scope.
++            if let [crate::parser::Statement::Expr(crate::parser::Expr::Regex(pattern, flags))] =
++                body.as_slice()
++            {
++                let _realm = crate::interpreter::realm::AllocationRealm::enter(Some(
++                    interp.persistent_global.clone(),
++                ));
++                interp.consume_fuel(2)?;
++                return compile_regex(pattern.clone(), flags);
++            }
+             let strict = interp.global.borrow().strict() || crate::parser::use_strict(&body);
+             let saved = interp.global.clone();
+             // EvalDeclarationInstantiation validates global function names
+diff --git a/crates/napi-vm-core/src/bytecode/parity_tests.rs b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+index 41c4346..be8d66f 100644
+--- a/crates/napi-vm-core/src/bytecode/parity_tests.rs
++++ b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+@@ -159,6 +159,23 @@ fn uri_decoders_reject_utf8_encoded_surrogate_pairs() {
+     ));
+ }
+ 
++#[test]
++fn eval_regexp_literals_create_independent_objects_and_validate_syntax() {
++    let source = r#"
++        let first = eval('/a/g');
++        let second = eval('/a/g');
++        first.lastIndex = 7;
++        let invalid = false;
++        try { eval('/[/'); } catch (e) { invalid = e instanceof SyntaxError; }
++        first !== second && second.lastIndex === 0 && second.source === 'a' && invalid;
++        "#;
++    check(source, true);
++    assert!(matches!(
++        run_ast_with_modules(source, &[]),
++        Ok(Value::Bool(true))
++    ));
++}
++
+ #[test]
+ fn variables_and_assignment() {
+     check("let x = 5; x += 3; x", true);
