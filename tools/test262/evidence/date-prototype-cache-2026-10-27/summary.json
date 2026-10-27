@@ -1,0 +1,8 @@
+{
+  "base_commit": "4b765bc492b8aad670cd07d449f83e18e21c04a5",
+  "source_diff_sha256": "fc434b91d013e058b71e815a6db0367155c3d157c49184aa6b80ea5810664876",
+  "baseline_worker_sha256": "e3b9200bebdf962b670d95086dd8cfac8b3b5907b55526785d14fdbf807333bc",
+  "candidate_worker_sha256": "185f11a8752cd7792bda90cbe4d2c9f64946fef0ea5a512dbf6bb3b5124ab421",
+  "regression": "1356/1360 passed; four known Date timeouts; zero gains and zero losses versus latest full run",
+  "scaled_date_benchmark": "24 timestamp harness diagnostic, single worker: baseline 3.350, 3.393 seconds; candidate 2.836, 2.358 seconds. Harness altered only for diagnostic, not a conformance result."
+}

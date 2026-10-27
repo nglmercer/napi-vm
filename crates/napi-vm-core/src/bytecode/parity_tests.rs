@@ -141,6 +141,29 @@ fn numeric_coercion_checks_guest_methods_in_order() {
 }
 
 #[test]
+fn date_prototype_read_cache_observes_mutations() {
+    let source = r#"
+        let d = new Date(0), log = '';
+        function read(x) { return x.sample; }
+        Date.prototype.sample = 1;
+        for (let i = 0; i < 4; ++i) log += read(d);
+        Date.prototype.sample = 2; log += read(d);
+        d.sample = 3; log += read(d); delete d.sample;
+        Object.defineProperty(Date.prototype, 'sample', { configurable: true,
+          get() { return this === d ? 4 : 9; } });
+        log += read(d);
+        Object.setPrototypeOf(d, {sample: 5}); log += read(d);
+        delete Date.prototype.sample;
+        log === '11112345';
+        "#;
+    check(source, true);
+    assert!(matches!(
+        run_ast_with_modules(source, &[]),
+        Ok(Value::Bool(true))
+    ));
+}
+
+#[test]
 fn uri_decoders_reject_utf8_encoded_surrogate_pairs() {
     let source = r#"
         let rejected = 0;

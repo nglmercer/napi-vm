@@ -372,6 +372,49 @@ fn get_prop_cached(
     };
     let encoded_name = name.to_key_cow();
     let name = encoded_name.as_ref();
+    // Date instances have ordinary own properties and no virtual named
+    // properties. Guard absence on the instance and resolve its current
+    // prototype each time, so guest prototype and descriptor changes remain
+    // observable. Only own data properties on that prototype can hit.
+    if let Value::Date(date) = obj
+        && date.properties.own_index(name).is_none()
+        && let Some(prototype) = interp.prototype_of(obj)
+        && let Some(properties) = cached_cell(&prototype)
+    {
+        let cache = &function.caches[site];
+        if let Some(index) = cache.probe(properties.shape_id())
+            && let Some(value) = properties.slot_verified(index, name)
+            && properties
+                .meta
+                .borrow()
+                .explicit_accessor_kind(name)
+                .is_none()
+            && !is_accessor_for(&value, name)
+        {
+            interp.check_execution_interrupt()?;
+            let value = value.deref_binding();
+            if matches!(value, Value::Uninitialized) {
+                return Err(VmErr::Msg(format!(
+                    "ReferenceError: Cannot access '{name}' before initialization"
+                )));
+            }
+            return Ok(value);
+        }
+        let value = interp.get_prop_value(obj, key)?;
+        if let Some(index) = properties.own_index(name)
+            && let Some(shape_id) = properties.shape_id()
+            && let Some(slot) = properties.slot_verified(index, name)
+            && properties
+                .meta
+                .borrow()
+                .explicit_accessor_kind(name)
+                .is_none()
+            && !is_accessor_for(&slot, name)
+        {
+            cache.fill(shape_id, index);
+        }
+        return Ok(value);
+    }
     if let Value::String(string) = obj {
         // String length and in-range indices are virtual own properties, so
         // they must keep using the full exotic-property path. Other named
