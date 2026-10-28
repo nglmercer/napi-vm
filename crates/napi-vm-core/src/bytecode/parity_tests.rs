@@ -107,6 +107,25 @@ fn arithmetic_and_strings() {
 }
 
 #[test]
+fn numeric_binary_fast_path_preserves_special_values_and_coercion() {
+    let source = r#"
+        let log = '';
+        let left = { valueOf() { log += 'l'; return 3; } };
+        let right = { valueOf() { log += 'r'; return 2; } };
+        let result = left * right;
+        result === 6 && log === 'lr' &&
+          !(NaN < 1) && !(NaN >= 1) && NaN !== NaN &&
+          Object.is(-0 * 2, -0) && (4294967295 >>> 0) === 4294967295 &&
+          (2 ** 10) === 1024;
+    "#;
+    check(source, true);
+    assert!(matches!(
+        run_ast_with_modules(source, &[]),
+        Ok(Value::Bool(true))
+    ));
+}
+
+#[test]
 fn numeric_string_indices_preserve_utf16_and_prototype_fallback() {
     let source = r#"
         Object.defineProperty(String.prototype, '3', {get() { return 'prototype'; }, configurable: true});

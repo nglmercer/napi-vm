@@ -122,6 +122,36 @@ impl Interpreter {
     /// proxy-`has` trap for `in`, and `+` concat coercion, then [`Self::bin_op`].
     /// Shared by the AST evaluator and the bytecode VM so both tiers agree.
     pub(crate) fn apply_binary(&mut self, op: BinOp, l: &Value, r: &Value) -> Result<Value, VmErr> {
+        // Number operands need no observable ToPrimitive or ToNumeric calls.
+        // Let the existing numeric implementation handle their arithmetic and
+        // comparisons before entering the general coercion paths.
+        if matches!((l, r), (Value::Number(_), Value::Number(_)))
+            && matches!(
+                op,
+                BinOp::Add
+                    | BinOp::Sub
+                    | BinOp::Mul
+                    | BinOp::Div
+                    | BinOp::Mod
+                    | BinOp::Pow
+                    | BinOp::BitAnd
+                    | BinOp::BitOr
+                    | BinOp::BitXor
+                    | BinOp::Shl
+                    | BinOp::Shr
+                    | BinOp::UShr
+                    | BinOp::Lt
+                    | BinOp::Gt
+                    | BinOp::Le
+                    | BinOp::Ge
+                    | BinOp::Eq
+                    | BinOp::Neq
+                    | BinOp::Seq
+                    | BinOp::Sneq
+            )
+        {
+            return self.bin_op(op, l, r);
+        }
         if matches!(op, BinOp::Eq | BinOp::Neq) {
             let equal = self.abstract_equals(l, r)?;
             return Ok(Value::Bool(if matches!(op, BinOp::Eq) {

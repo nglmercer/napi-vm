@@ -1,0 +1,71 @@
+diff --git a/crates/napi-vm-core/src/bytecode/parity_tests.rs b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+index dcd436f..d645f49 100644
+--- a/crates/napi-vm-core/src/bytecode/parity_tests.rs
++++ b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+@@ -106,6 +106,25 @@ fn arithmetic_and_strings() {
+     check("[] instanceof Array", true);
+ }
+ 
++#[test]
++fn numeric_binary_fast_path_preserves_special_values_and_coercion() {
++    let source = r#"
++        let log = '';
++        let left = { valueOf() { log += 'l'; return 3; } };
++        let right = { valueOf() { log += 'r'; return 2; } };
++        let result = left * right;
++        result === 6 && log === 'lr' &&
++          !(NaN < 1) && !(NaN >= 1) && NaN !== NaN &&
++          Object.is(-0 * 2, -0) && (4294967295 >>> 0) === 4294967295 &&
++          (2 ** 10) === 1024;
++    "#;
++    check(source, true);
++    assert!(matches!(
++        run_ast_with_modules(source, &[]),
++        Ok(Value::Bool(true))
++    ));
++}
++
+ #[test]
+ fn numeric_string_indices_preserve_utf16_and_prototype_fallback() {
+     let source = r#"
+diff --git a/crates/napi-vm-core/src/interpreter/ops.rs b/crates/napi-vm-core/src/interpreter/ops.rs
+index c7909fd..e2b03d9 100644
+--- a/crates/napi-vm-core/src/interpreter/ops.rs
++++ b/crates/napi-vm-core/src/interpreter/ops.rs
+@@ -122,6 +122,36 @@ impl Interpreter {
+     /// proxy-`has` trap for `in`, and `+` concat coercion, then [`Self::bin_op`].
+     /// Shared by the AST evaluator and the bytecode VM so both tiers agree.
+     pub(crate) fn apply_binary(&mut self, op: BinOp, l: &Value, r: &Value) -> Result<Value, VmErr> {
++        // Number operands need no observable ToPrimitive or ToNumeric calls.
++        // Let the existing numeric implementation handle their arithmetic and
++        // comparisons before entering the general coercion paths.
++        if matches!((l, r), (Value::Number(_), Value::Number(_)))
++            && matches!(
++                op,
++                BinOp::Add
++                    | BinOp::Sub
++                    | BinOp::Mul
++                    | BinOp::Div
++                    | BinOp::Mod
++                    | BinOp::Pow
++                    | BinOp::BitAnd
++                    | BinOp::BitOr
++                    | BinOp::BitXor
++                    | BinOp::Shl
++                    | BinOp::Shr
++                    | BinOp::UShr
++                    | BinOp::Lt
++                    | BinOp::Gt
++                    | BinOp::Le
++                    | BinOp::Ge
++                    | BinOp::Eq
++                    | BinOp::Neq
++                    | BinOp::Seq
++                    | BinOp::Sneq
++            )
++        {
++            return self.bin_op(op, l, r);
++        }
+         if matches!(op, BinOp::Eq | BinOp::Neq) {
+             let equal = self.abstract_equals(l, r)?;
+             return Ok(Value::Bool(if matches!(op, BinOp::Eq) {

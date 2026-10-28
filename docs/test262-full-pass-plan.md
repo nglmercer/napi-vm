@@ -52,6 +52,10 @@ an explicit compatibility difference until the specification changes.
    parsing, construction, calls, and repeated global bindings independently.
    Preserve observable semantics and compare broad related suites after each
    change. Reclassify residuals using the new revision's actual full report.
+   A numeric-operand fast path passed 2,369 arithmetic and coercion variants
+   and reduced a scaled URI diagnostic by about 24%; the original URI, Date,
+   and TypedArray targets still timed out at five seconds. See the
+   [focused evidence](../tools/test262/evidence/numeric-binary-fast-path-2026-10-28/).
 4. **Close the full gate.** On clean committed source, build the release
    worker and run every selected-revision variant with two workers, five-second
    deadlines, and no feature skips. Require zero failures, timeouts, skips,
