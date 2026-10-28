@@ -1,0 +1,139 @@
+diff --git a/crates/napi-vm-core/src/bytecode/vm.rs b/crates/napi-vm-core/src/bytecode/vm.rs
+index 179df89..9329453 100644
+--- a/crates/napi-vm-core/src/bytecode/vm.rs
++++ b/crates/napi-vm-core/src/bytecode/vm.rs
+@@ -849,6 +849,14 @@ fn run_loop(
+                         interp.un_op(crate::parser::UnOp::Typeof, &value)?;
+                 }
+                 Instr::Binary { dst, op, lhs, rhs } => {
++                    if let (Value::Number(a), Value::Number(b)) = (
++                        &frame.registers[lhs as usize],
++                        &frame.registers[rhs as usize],
++                    ) && let Some(value) = Interpreter::number_binary(op, *a, *b)
++                    {
++                        frame.registers[dst as usize].assign_for_execution(value);
++                        return Ok(());
++                    }
+                     let l = frame.registers[lhs as usize].clone_for_execution();
+                     let r = frame.registers[rhs as usize].clone_for_execution();
+                     let value = interp.apply_binary(op, &l, &r)?;
+diff --git a/crates/napi-vm-core/src/interpreter/ops.rs b/crates/napi-vm-core/src/interpreter/ops.rs
+index e2b03d9..65a9b5b 100644
+--- a/crates/napi-vm-core/src/interpreter/ops.rs
++++ b/crates/napi-vm-core/src/interpreter/ops.rs
+@@ -122,35 +122,10 @@ impl Interpreter {
+     /// proxy-`has` trap for `in`, and `+` concat coercion, then [`Self::bin_op`].
+     /// Shared by the AST evaluator and the bytecode VM so both tiers agree.
+     pub(crate) fn apply_binary(&mut self, op: BinOp, l: &Value, r: &Value) -> Result<Value, VmErr> {
+-        // Number operands need no observable ToPrimitive or ToNumeric calls.
+-        // Let the existing numeric implementation handle their arithmetic and
+-        // comparisons before entering the general coercion paths.
+-        if matches!((l, r), (Value::Number(_), Value::Number(_)))
+-            && matches!(
+-                op,
+-                BinOp::Add
+-                    | BinOp::Sub
+-                    | BinOp::Mul
+-                    | BinOp::Div
+-                    | BinOp::Mod
+-                    | BinOp::Pow
+-                    | BinOp::BitAnd
+-                    | BinOp::BitOr
+-                    | BinOp::BitXor
+-                    | BinOp::Shl
+-                    | BinOp::Shr
+-                    | BinOp::UShr
+-                    | BinOp::Lt
+-                    | BinOp::Gt
+-                    | BinOp::Le
+-                    | BinOp::Ge
+-                    | BinOp::Eq
+-                    | BinOp::Neq
+-                    | BinOp::Seq
+-                    | BinOp::Sneq
+-            )
++        if let (Value::Number(a), Value::Number(b)) = (l, r)
++            && let Some(result) = Self::number_binary(op, *a, *b)
+         {
+-            return self.bin_op(op, l, r);
++            return Ok(result);
+         }
+         if matches!(op, BinOp::Eq | BinOp::Neq) {
+             let equal = self.abstract_equals(l, r)?;
+@@ -216,6 +191,34 @@ impl Interpreter {
+         self.bin_op(op, l, r)
+     }
+ 
++    /// Arithmetic and comparisons on already-numeric values need no coercion.
++    #[inline]
++    pub(crate) fn number_binary(op: BinOp, a: f64, b: f64) -> Option<Value> {
++        match op {
++            BinOp::Add => Some(Value::Number(a + b)),
++            BinOp::Sub => Some(Value::Number(a - b)),
++            BinOp::Mul => Some(Value::Number(a * b)),
++            BinOp::Div => Some(Value::Number(a / b)),
++            BinOp::Mod => Some(Value::Number(a % b)),
++            BinOp::Pow => Some(Value::Number(number_pow(a, b))),
++            BinOp::BitAnd => Some(Value::Number((to_int32(a) & to_int32(b)) as f64)),
++            BinOp::BitOr => Some(Value::Number((to_int32(a) | to_int32(b)) as f64)),
++            BinOp::BitXor => Some(Value::Number((to_int32(a) ^ to_int32(b)) as f64)),
++            BinOp::Shl => Some(Value::Number((to_int32(a) << (to_int32(b) & 31)) as f64)),
++            BinOp::Shr => Some(Value::Number((to_int32(a) >> (to_int32(b) & 31)) as f64)),
++            BinOp::UShr => Some(Value::Number(
++                ((to_int32(a) as u32) >> (to_int32(b) as u32 & 31)) as f64,
++            )),
++            BinOp::Lt => Some(Value::Bool(a < b)),
++            BinOp::Gt => Some(Value::Bool(a > b)),
++            BinOp::Le => Some(Value::Bool(a <= b)),
++            BinOp::Ge => Some(Value::Bool(a >= b)),
++            BinOp::Eq | BinOp::Seq => Some(Value::Bool(a == b)),
++            BinOp::Neq | BinOp::Sneq => Some(Value::Bool(a != b)),
++            _ => None,
++        }
++    }
++
+     pub fn bin_op(&self, op: BinOp, l: &Value, r: &Value) -> Result<Value, VmErr> {
+         if matches!(op, BinOp::Add)
+             && (matches!(l, Value::Symbol(_)) || matches!(r, Value::Symbol(_)))
+@@ -224,37 +227,10 @@ impl Interpreter {
+                 "TypeError: Cannot convert a Symbol value".into(),
+             ));
+         }
+-        // Fast path: when both operands are already numbers, the arithmetic and
+-        // comparison operators need no coercion and `+` cannot be string
+-        // concatenation. This skips the `to_number` dispatch and the string
+-        // check on the hottest interpreter path.
+-        if let (Value::Number(a), Value::Number(b)) = (l, r) {
+-            let fast = match op {
+-                BinOp::Add => Some(Value::Number(a + b)),
+-                BinOp::Sub => Some(Value::Number(a - b)),
+-                BinOp::Mul => Some(Value::Number(a * b)),
+-                BinOp::Div => Some(Value::Number(a / b)),
+-                BinOp::Mod => Some(Value::Number(a % b)),
+-                BinOp::Pow => Some(Value::Number(number_pow(*a, *b))),
+-                BinOp::BitAnd => Some(Value::Number((to_int32(*a) & to_int32(*b)) as f64)),
+-                BinOp::BitOr => Some(Value::Number((to_int32(*a) | to_int32(*b)) as f64)),
+-                BinOp::BitXor => Some(Value::Number((to_int32(*a) ^ to_int32(*b)) as f64)),
+-                BinOp::Shl => Some(Value::Number((to_int32(*a) << (to_int32(*b) & 31)) as f64)),
+-                BinOp::Shr => Some(Value::Number((to_int32(*a) >> (to_int32(*b) & 31)) as f64)),
+-                BinOp::UShr => Some(Value::Number(
+-                    ((to_int32(*a) as u32) >> (to_int32(*b) as u32 & 31)) as f64,
+-                )),
+-                BinOp::Lt => Some(Value::Bool(a < b)),
+-                BinOp::Gt => Some(Value::Bool(a > b)),
+-                BinOp::Le => Some(Value::Bool(a <= b)),
+-                BinOp::Ge => Some(Value::Bool(a >= b)),
+-                BinOp::Eq | BinOp::Seq => Some(Value::Bool(a == b)),
+-                BinOp::Neq | BinOp::Sneq => Some(Value::Bool(a != b)),
+-                _ => None,
+-            };
+-            if let Some(v) = fast {
+-                return Ok(v);
+-            }
++        if let (Value::Number(a), Value::Number(b)) = (l, r)
++            && let Some(result) = Self::number_binary(op, *a, *b)
++        {
++            return Ok(result);
+         }
+         if let (Value::String(a), Value::String(b)) = (l, r) {
+             let relation = match op {

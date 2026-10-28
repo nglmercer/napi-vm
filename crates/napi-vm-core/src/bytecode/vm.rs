@@ -849,6 +849,14 @@ fn run_loop(
                         interp.un_op(crate::parser::UnOp::Typeof, &value)?;
                 }
                 Instr::Binary { dst, op, lhs, rhs } => {
+                    if let (Value::Number(a), Value::Number(b)) = (
+                        &frame.registers[lhs as usize],
+                        &frame.registers[rhs as usize],
+                    ) && let Some(value) = Interpreter::number_binary(op, *a, *b)
+                    {
+                        frame.registers[dst as usize].assign_for_execution(value);
+                        return Ok(());
+                    }
                     let l = frame.registers[lhs as usize].clone_for_execution();
                     let r = frame.registers[rhs as usize].clone_for_execution();
                     let value = interp.apply_binary(op, &l, &r)?;
