@@ -849,6 +849,15 @@ fn run_loop(
                         interp.un_op(crate::parser::UnOp::Typeof, &value)?;
                 }
                 Instr::Binary { dst, op, lhs, rhs } => {
+                    if let (crate::parser::BinOp::Add, Value::String(a), Value::String(b)) = (
+                        op,
+                        &frame.registers[lhs as usize],
+                        &frame.registers[rhs as usize],
+                    ) {
+                        let value = Interpreter::concat_strings(a, b)?;
+                        frame.registers[dst as usize].assign_for_execution(value);
+                        return Ok(());
+                    }
                     if let (Value::Number(a), Value::Number(b)) = (
                         &frame.registers[lhs as usize],
                         &frame.registers[rhs as usize],

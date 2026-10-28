@@ -122,6 +122,9 @@ impl Interpreter {
     /// proxy-`has` trap for `in`, and `+` concat coercion, then [`Self::bin_op`].
     /// Shared by the AST evaluator and the bytecode VM so both tiers agree.
     pub(crate) fn apply_binary(&mut self, op: BinOp, l: &Value, r: &Value) -> Result<Value, VmErr> {
+        if let (BinOp::Add, Value::String(a), Value::String(b)) = (op, l, r) {
+            return Self::concat_strings(a, b);
+        }
         if let (Value::Number(a), Value::Number(b)) = (l, r)
             && let Some(result) = Self::number_binary(op, *a, *b)
         {
@@ -217,6 +220,13 @@ impl Interpreter {
             BinOp::Neq | BinOp::Sneq => Some(Value::Bool(a != b)),
             _ => None,
         }
+    }
+
+    pub(crate) fn concat_strings(a: &crate::JsString, b: &crate::JsString) -> Result<Value, VmErr> {
+        if a.len().saturating_add(b.len()) > crate::value::MAX_STRING_LEN {
+            return Err(crate::value::limit_err("Maximum string length exceeded"));
+        }
+        Value::checked_string(a.concat(b))
     }
 
     pub fn bin_op(&self, op: BinOp, l: &Value, r: &Value) -> Result<Value, VmErr> {

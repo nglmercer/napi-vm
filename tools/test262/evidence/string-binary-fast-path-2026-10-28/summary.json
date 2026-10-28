@@ -1,0 +1,28 @@
+{
+  "base_commit": "27e4a59",
+  "revision": "0b4e0812022b18236b5276d2804948fdd9f71603",
+  "source_diff_sha256": "5d7a62d5210e917ae3a9502635aada13ce760e5ce8e74706f143a7b48f1111b1",
+  "baseline_worker_sha256": "1da20fdf2e5421c0019d34bc08a0cfbb7bef2c0f0a0f77c450a3ec9e45ed9d2a",
+  "candidate_worker_sha256": "8bbe8f0e0eb94ab5888b7da2e7bd197114a357f19c74f3f00c2420aed69ee82f",
+  "core_tests": "439 passed",
+  "clippy": "all-target core clippy passed",
+  "regression": "3438/3438 String, addition, assignment and template variants passed",
+  "uri_target": "0/4 passed; all timed out at 5 seconds",
+  "followup_scaled_uri_seconds": {
+    "baseline": [
+      0.8873,
+      0.9129,
+      0.8894,
+      0.8823,
+      0.8973
+    ],
+    "candidate": [
+      0.8525,
+      0.831,
+      0.8332,
+      0.8608,
+      0.846
+    ]
+  },
+  "limitation": "Modified-loop benchmark is diagnostic only; full-suite score remains 102957/102992."
+}

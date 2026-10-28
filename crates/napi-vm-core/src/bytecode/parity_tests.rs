@@ -126,6 +126,23 @@ fn numeric_binary_fast_path_preserves_special_values_and_coercion() {
 }
 
 #[test]
+fn string_binary_fast_path_preserves_utf16_and_object_coercion() {
+    let source = r#"
+        let s = '\uD800', log = '';
+        let object = {};
+        object[Symbol.toPrimitive] = function(hint) { log += hint; return 'x'; };
+        let result = s + '\uDC00';
+        result.length === 2 && result.codePointAt(0) === 0x10000 &&
+          ('a' + object) === 'ax' && log === 'default';
+    "#;
+    check(source, true);
+    assert!(matches!(
+        run_ast_with_modules(source, &[]),
+        Ok(Value::Bool(true))
+    ));
+}
+
+#[test]
 fn numeric_string_indices_preserve_utf16_and_prototype_fallback() {
     let source = r#"
         Object.defineProperty(String.prototype, '3', {get() { return 'prototype'; }, configurable: true});

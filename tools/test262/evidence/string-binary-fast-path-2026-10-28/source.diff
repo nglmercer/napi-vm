@@ -1,0 +1,76 @@
+diff --git a/crates/napi-vm-core/src/bytecode/parity_tests.rs b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+index d645f49..2c86976 100644
+--- a/crates/napi-vm-core/src/bytecode/parity_tests.rs
++++ b/crates/napi-vm-core/src/bytecode/parity_tests.rs
+@@ -125,6 +125,23 @@ fn numeric_binary_fast_path_preserves_special_values_and_coercion() {
+     ));
+ }
+ 
++#[test]
++fn string_binary_fast_path_preserves_utf16_and_object_coercion() {
++    let source = r#"
++        let s = '\uD800', log = '';
++        let object = {};
++        object[Symbol.toPrimitive] = function(hint) { log += hint; return 'x'; };
++        let result = s + '\uDC00';
++        result.length === 2 && result.codePointAt(0) === 0x10000 &&
++          ('a' + object) === 'ax' && log === 'default';
++    "#;
++    check(source, true);
++    assert!(matches!(
++        run_ast_with_modules(source, &[]),
++        Ok(Value::Bool(true))
++    ));
++}
++
+ #[test]
+ fn numeric_string_indices_preserve_utf16_and_prototype_fallback() {
+     let source = r#"
+diff --git a/crates/napi-vm-core/src/bytecode/vm.rs b/crates/napi-vm-core/src/bytecode/vm.rs
+index 9329453..9668af2 100644
+--- a/crates/napi-vm-core/src/bytecode/vm.rs
++++ b/crates/napi-vm-core/src/bytecode/vm.rs
+@@ -849,6 +849,15 @@ fn run_loop(
+                         interp.un_op(crate::parser::UnOp::Typeof, &value)?;
+                 }
+                 Instr::Binary { dst, op, lhs, rhs } => {
++                    if let (crate::parser::BinOp::Add, Value::String(a), Value::String(b)) = (
++                        op,
++                        &frame.registers[lhs as usize],
++                        &frame.registers[rhs as usize],
++                    ) {
++                        let value = Interpreter::concat_strings(a, b)?;
++                        frame.registers[dst as usize].assign_for_execution(value);
++                        return Ok(());
++                    }
+                     if let (Value::Number(a), Value::Number(b)) = (
+                         &frame.registers[lhs as usize],
+                         &frame.registers[rhs as usize],
+diff --git a/crates/napi-vm-core/src/interpreter/ops.rs b/crates/napi-vm-core/src/interpreter/ops.rs
+index 65a9b5b..26b9dfd 100644
+--- a/crates/napi-vm-core/src/interpreter/ops.rs
++++ b/crates/napi-vm-core/src/interpreter/ops.rs
+@@ -122,6 +122,9 @@ impl Interpreter {
+     /// proxy-`has` trap for `in`, and `+` concat coercion, then [`Self::bin_op`].
+     /// Shared by the AST evaluator and the bytecode VM so both tiers agree.
+     pub(crate) fn apply_binary(&mut self, op: BinOp, l: &Value, r: &Value) -> Result<Value, VmErr> {
++        if let (BinOp::Add, Value::String(a), Value::String(b)) = (op, l, r) {
++            return Self::concat_strings(a, b);
++        }
+         if let (Value::Number(a), Value::Number(b)) = (l, r)
+             && let Some(result) = Self::number_binary(op, *a, *b)
+         {
+@@ -219,6 +222,13 @@ impl Interpreter {
+         }
+     }
+ 
++    pub(crate) fn concat_strings(a: &crate::JsString, b: &crate::JsString) -> Result<Value, VmErr> {
++        if a.len().saturating_add(b.len()) > crate::value::MAX_STRING_LEN {
++            return Err(crate::value::limit_err("Maximum string length exceeded"));
++        }
++        Value::checked_string(a.concat(b))
++    }
++
+     pub fn bin_op(&self, op: BinOp, l: &Value, r: &Value) -> Result<Value, VmErr> {
+         if matches!(op, BinOp::Add)
+             && (matches!(l, Value::Symbol(_)) || matches!(r, Value::Symbol(_)))
