@@ -1,0 +1,56 @@
+diff --git a/crates/napi-vm-core/src/interpreter/resolve.rs b/crates/napi-vm-core/src/interpreter/resolve.rs
+index 5088ed9..3ae8a09 100644
+--- a/crates/napi-vm-core/src/interpreter/resolve.rs
++++ b/crates/napi-vm-core/src/interpreter/resolve.rs
+@@ -905,9 +905,9 @@ impl Interpreter {
+             && index.fract() == 0.0
+         {
+             self.check_execution_interrupt()?;
+-            return Ok(Value::String(crate::JsString::from_units(vec![
++            return Ok(Value::String(crate::JsString::from_code_unit(
+                 text.units()[*index as usize],
+-            ])));
++            )));
+         }
+         // A numeric key on an integer-indexed exotic bypasses ordinary
+         // property lookup; numeric -0 is converted to the property key "0".
+diff --git a/crates/napi-vm-core/src/js_string.rs b/crates/napi-vm-core/src/js_string.rs
+index 3e29ff2..0f213e6 100644
+--- a/crates/napi-vm-core/src/js_string.rs
++++ b/crates/napi-vm-core/src/js_string.rs
+@@ -18,6 +18,18 @@ impl JsString {
+             utf8: OnceLock::new(),
+         }))
+     }
++
++    /// Reuse immutable storage for frequently read single ASCII code units.
++    pub(crate) fn from_code_unit(unit: u16) -> Self {
++        static ASCII: OnceLock<[JsString; 128]> = OnceLock::new();
++        if unit < 128 {
++            return ASCII.get_or_init(|| {
++                std::array::from_fn(|index| JsString::from_units(vec![index as u16]))
++            })[unit as usize]
++                .clone();
++        }
++        Self::from_units(vec![unit])
++    }
+     pub fn truncate(&mut self, len: usize) {
+         let data = Arc::make_mut(&mut self.0);
+         data.utf8.take();
+@@ -347,6 +359,16 @@ impl<'de> serde::Deserialize<'de> for JsString {
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn cached_code_units_are_copy_on_write_and_preserve_surrogates() {
++        let mut first = JsString::from_code_unit(b'A' as u16);
++        let second = JsString::from_code_unit(b'A' as u16);
++        first.push_str("B");
++        assert_eq!(first.units(), &[65, 66]);
++        assert_eq!(second.units(), &[65]);
++        assert_eq!(JsString::from_code_unit(0xd800).units(), &[0xd800]);
++    }
++
+     #[test]
+     fn property_key_encoding_borrows_ordinary_and_paired_strings() {
+         for value in [JsString::from("toUpperCase"), JsString::from("😀")] {
