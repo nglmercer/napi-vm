@@ -3781,6 +3781,11 @@ impl Value {
         match (&mut *self, &value) {
             (Self::Number(slot), Self::Number(number)) => *slot = *number,
             (Self::Bool(slot), Self::Bool(boolean)) => *slot = *boolean,
+            // A scalar owns nothing, so it needs no drop: skip the out-of-line
+            // drop glue that ordinary assignment would call.
+            (Self::Undefined | Self::Null | Self::Bool(_) | Self::Number(_), _) => {
+                std::mem::forget(std::mem::replace(self, value));
+            }
             _ => *self = value,
         }
     }

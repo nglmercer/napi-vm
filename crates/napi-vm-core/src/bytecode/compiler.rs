@@ -1334,6 +1334,19 @@ impl<'a> Compiler<'a> {
 
     /// Completion values carry a presence bit: empty differs from undefined.
     fn new_completion(&mut self, empty: bool) -> Result<CompletionRegs, Decline> {
+        if !self.top_level {
+            // Function code never reads completion values (see
+            // `copy_completion`), so the registers need no initial value.
+            let value = self.alloc_reg()?;
+            let present = if empty {
+                let flag = self.alloc_reg()?;
+                self.completion_presence.insert(value, flag);
+                Some(flag)
+            } else {
+                None
+            };
+            return Ok(CompletionRegs { value, present });
+        }
         let value = self.load_undefined()?;
         let present = if empty {
             let constant = self.const_false()?;
@@ -1359,6 +1372,11 @@ impl<'a> Compiler<'a> {
         destination: CompletionRegs,
         source: CompletionRegs,
     ) -> Result<(), Decline> {
+        // Statement completion values are observable only in script and eval
+        // code; a function's result comes solely from `return`.
+        if !self.top_level {
+            return Ok(());
+        }
         let skip = source
             .present
             .map(|src| self.emit_jump(|target| Instr::JumpIfFalse { src, target }));
@@ -1394,6 +1412,9 @@ impl<'a> Compiler<'a> {
     /// Merge the enclosing statement lists into the break/continue target
     /// before jumping over the normal completion moves.
     fn record_abrupt_completion(&mut self, target: usize) -> Result<(), Decline> {
+        if !self.top_level {
+            return Ok(());
+        }
         let depth = self.loops[target].completion_depth;
         let frames = self.completions[depth..].to_vec();
         let merged = self.new_completion(true)?;
@@ -4726,12 +4747,28 @@ impl<'a> Compiler<'a> {
             })
         } else {
             let start = self.alloc_regs(args.len())?;
+            let end = start + args.len() as u16;
             for (index, arg) in args.iter().enumerate() {
+                let dst = start + index as u16;
+                let before = self.code.len();
                 let src = self.compile_expr(arg)?;
-                self.emit(Instr::Mov {
-                    dst: start + index as u16,
-                    src,
-                });
+                // A lone load into a fresh temporary (allocated after the
+                // argument range, so nothing else reads it) can target the
+                // argument register directly. One instruction holds no jump
+                // join point, so no other path writes the temporary.
+                if src >= end
+                    && self.code.len() == before + 1
+                    && let Some(
+                        Instr::LoadLocal { dst: target, .. }
+                        | Instr::LoadConst { dst: target, .. }
+                        | Instr::LoadGlobal { dst: target, .. },
+                    ) = self.code.last_mut()
+                    && *target == src
+                {
+                    *target = dst;
+                    continue;
+                }
+                self.emit(Instr::Mov { dst, src });
             }
             Ok(CallArgs::Range {
                 start,

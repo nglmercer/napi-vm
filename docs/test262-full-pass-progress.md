@@ -33,6 +33,15 @@ algorithm, behind the timeouts. The changes:
 - Calls cache each closure chain's global and module context, and bytecode
   dispatch is an inlined function instead of a per-instruction closure.
 
+A follow-up removes redundant bytecode in function code: call arguments that
+are a single load go straight into their argument register, and statement
+completion values (observable only in script and eval code) are no longer
+tracked inside function bodies. Captured-binding reads skip a second chain
+walk, and overwriting a scalar register skips drop glue. A second full run
+on that tree also passed 102,975 / 102,992 with zero losses; the Date
+DST-caching tests improved from 6.5 to about 6.1 seconds alone, still above
+the five-second deadline.
+
 Measured alone, RegExp literal tests went from about 5.2 to 1.1 seconds, URI
 decoding from 5.5 to 4.2, TypedArray counting sort from 5.6 to 4.8, and the
 Date DST-caching tests from 10.3 to 6.5 seconds. The Date tests remain the only

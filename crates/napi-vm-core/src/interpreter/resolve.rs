@@ -85,8 +85,15 @@ impl Interpreter {
         let mut cursor = Some(scope.clone());
         while let Some(environment) = cursor {
             let frame = environment.borrow();
-            if frame.own_lexical_binding(name) || frame.with_object.is_some() {
+            if frame.with_object.is_some() {
                 break;
+            }
+            // A plain record's own binding is exactly what
+            // `plain_binding_value` would answer for this frame.
+            if let Some(lookup) = frame.own_binding_lookup(name) {
+                drop(frame);
+                self.check_execution_interrupt()?;
+                return Ok(lookup);
             }
             if frame.is_global_scope() {
                 let properties = frame.global_object_cell();
