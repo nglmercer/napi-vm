@@ -1635,6 +1635,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "napi-vm-test262-runner"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "regex",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "nohash-hasher"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -125,5 +125,5 @@ wasm-opt = false
 [workspace]
 resolver = "3"
 default-members = ["."]
-members = ["crates/napi-vm-plugin-protocol", "crates/napi-vm-plugin-sdk", "crates/napi-vm-plugin-host", "crates/napi-vm-plugin-conformance", "examples/trusted/greeter-rust", "examples/trusted/counter-rust", "examples/trusted/host-rust"]
+members = ["tools/test262-runner", "crates/napi-vm-plugin-protocol", "crates/napi-vm-plugin-sdk", "crates/napi-vm-plugin-host", "crates/napi-vm-plugin-conformance", "examples/trusted/greeter-rust", "examples/trusted/counter-rust", "examples/trusted/host-rust"]
 exclude = ["zed-extension", "tests/fixtures/node-api/napi-rs", "examples/plugins/rust-napi-plugin/native", "vendor/rdev-node", "packages/plugin-cli/templates/rust"]

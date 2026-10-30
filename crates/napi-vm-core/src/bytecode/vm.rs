@@ -390,7 +390,9 @@ fn get_prop_cached(
     // prototype each time, so guest prototype and descriptor changes remain
     // observable. Only own data properties on that prototype can hit.
     if let Value::Date(date) = obj
-        && date.properties.own_index(name).is_none()
+        && date
+            .existing_properties()
+            .is_none_or(|properties| properties.own_index(name).is_none())
         && let Some(prototype) = interp.prototype_of(obj)
         && let Some(properties) = cached_cell(&prototype)
     {

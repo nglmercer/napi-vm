@@ -3168,11 +3168,7 @@ impl Interpreter {
         };
         self.execution.check()?;
         let _allocation_realm = super::realm::AllocationRealm::enter(Some(owner));
-        let date = Value::date(time);
-        if let Some(properties) = date.property_cell() {
-            properties.set_proto(Some(prototype));
-        }
-        Ok(Some(date))
+        Ok(Some(Value::date_with_prototype(time, Some(prototype))))
     }
 
     fn ctor_in_realm(&mut self, f: &Value, args: Vec<Value>) -> Result<Value, VmErr> {

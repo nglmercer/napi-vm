@@ -1,5 +1,43 @@
 # Test262 runner
 
+## Rust runner (`tools/test262-runner`)
+
+A dependency-light Rust tool runs, times, and compares Test262 results with no
+Python setup. It drives the same isolated worker, sends the same requests, and
+writes reports in the same format, so its reports compare directly with ones
+from `run.py`. Each report row also records the variant's wall time in
+`seconds`. Run it from the repository root:
+
+```sh
+cargo build --release --no-default-features --bin napi-vm-test262
+cargo build --release -p napi-vm-test262-runner   # produces target/release/test262
+```
+
+Defaults: corpus `.napi-vm/test262`, required revision from
+`tools/test262/corpus.lock.json` (checked, along with a clean corpus tree), and
+worker `target/release/napi-vm-test262`. Override them with `--corpus`,
+`--revision`, and `--engine`. The worker is copied before a run starts, so a
+concurrent `cargo build` cannot change it midway.
+
+| Task | Command |
+| --- | --- |
+| Full corpus, standard limits | `target/release/test262 run --jobs 2 --timeout 5 --output full.json` |
+| Long run that can be resumed | add `--checkpoint full.ckpt`, rerun with `--resume` after an interruption |
+| Focused selection | `target/release/test262 run --path built-ins/Date --group realms --output date.json` |
+| Time tests without a cap | `target/release/test262 time staging/sm/Date/dst-offset-caching-2-of-8.js` |
+| Gains and losses | `target/release/test262 compare baseline.json.gz full.json --output comparison.json` |
+| Non-passes and slowest variants | `target/release/test262 summary full.json --slowest 20` |
+| Worker request for profiling | `target/release/test262 request staging/sm/Date/dst-offset-caching-2-of-8.js --output req.json` then `target/release/napi-vm-test262 < req.json` |
+| Time JavaScript snippets | `target/release/test262 bench snippet.js --harness --repeat 5` |
+
+`run` exits 0 only when every selected variant passes. `compare` exits 1 when
+any variant that passed in the baseline no longer passes, and rejects reports
+with a different revision, worker count, or timeout unless given
+`--allow-config-change`. `time` accepts files or directories and
+`--variant script|strict|module`.
+
+## Python runner
+
 Build the isolated worker without runtime or Node bindings:
 
 ```sh

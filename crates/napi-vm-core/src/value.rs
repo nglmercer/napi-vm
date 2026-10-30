@@ -1880,10 +1880,46 @@ pub struct ClassData {
 }
 
 /// Date state and ordinary own-property/prototype storage.
+///
+/// Most dates never gain an own property, so the property cell is created on
+/// first use. Until then the date records only its allocation realm and an
+/// explicit prototype link, which the cell adopts when it is created.
 #[derive(Debug)]
 pub struct DateData {
-    pub properties: Rc<ObjectCell>,
+    properties: std::cell::OnceCell<Rc<ObjectCell>>,
+    realm: Option<std::rc::Weak<RefCell<crate::interpreter::Environment>>>,
+    prototype: RefCell<Option<Rc<Value>>>,
     milliseconds: std::cell::Cell<f64>,
+}
+
+impl DateData {
+    /// The ordinary property cell, created on first request.
+    pub fn properties(&self) -> &Rc<ObjectCell> {
+        self.properties.get_or_init(|| {
+            let mut cell = ObjectCell::new_exotic_properties();
+            let meta = cell.meta.get_mut();
+            meta.realm_global = self.realm.as_ref().and_then(std::rc::Weak::upgrade);
+            if let Some(prototype) = self.prototype.borrow_mut().take() {
+                meta.proto = Some(prototype);
+                meta.uses_default_prototype = false;
+            }
+            crate::heap::tracked(Rc::new(cell))
+        })
+    }
+
+    /// The property cell only if it already exists.
+    pub(crate) fn existing_properties(&self) -> Option<&Rc<ObjectCell>> {
+        self.properties.get()
+    }
+
+    /// The explicit prototype of a date whose property cell does not exist
+    /// yet; once the cell exists it is the authority.
+    pub(crate) fn pending_prototype(&self) -> Option<Rc<Value>> {
+        if self.properties.get().is_some() {
+            return None;
+        }
+        self.prototype.borrow().clone()
+    }
 }
 
 impl std::ops::Deref for DateData {
@@ -3408,8 +3444,17 @@ impl Value {
     }
 
     pub fn date(milliseconds: f64) -> Self {
+        Self::date_with_prototype(milliseconds, None)
+    }
+
+    /// A date whose prototype link is already known, as `set_proto` on its
+    /// property cell would record it.
+    pub(crate) fn date_with_prototype(milliseconds: f64, prototype: Option<Rc<Value>>) -> Self {
         Self::Date(Rc::new(DateData {
-            properties: Self::instance_properties(),
+            properties: std::cell::OnceCell::new(),
+            realm: crate::interpreter::realm::allocation_global()
+                .map(|realm| Rc::downgrade(&realm)),
+            prototype: RefCell::new(prototype),
             milliseconds: std::cell::Cell::new(milliseconds),
         }))
     }
@@ -3419,7 +3464,7 @@ impl Value {
             Self::Generator { inner } => inner.try_borrow().ok()?.properties.clone(),
             Self::StringIterator { inner } => inner.try_borrow().ok()?.properties.clone(),
             Self::Error(data) => data.properties.clone(),
-            Self::Date(data) => data.properties.clone(),
+            Self::Date(data) => data.properties().clone(),
             Self::RegExp(data) => data.properties.clone(),
             Self::TypedArray(data) | Self::DataView(data) => data.properties.clone(),
             Self::ArrayBuffer(buffer) => buffer.0.properties.clone(),
@@ -4113,7 +4158,11 @@ impl Value {
             _ => false,
         };
         if owns_exotic {
-            if let Some(properties) = self.exotic_properties()
+            let properties = match self {
+                Value::Date(data) => data.existing_properties().cloned(),
+                _ => self.exotic_properties(),
+            };
+            if let Some(properties) = properties
                 && Rc::strong_count(&properties) == 2
             {
                 drain_object_cell(&properties, work);

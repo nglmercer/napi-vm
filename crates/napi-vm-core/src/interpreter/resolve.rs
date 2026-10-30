@@ -460,6 +460,12 @@ impl Interpreter {
     /// default Object.prototype and Function.prototype links that are stored
     /// as defaults rather than copied into every property cell.
     pub(crate) fn prototype_of(&self, object: &Value) -> Option<std::rc::Rc<Value>> {
+        // A date without a property cell yet holds its explicit link inline.
+        if let Value::Date(date) = object
+            && let Some(prototype) = date.pending_prototype()
+        {
+            return Some(prototype);
+        }
         if let Some(properties) = object.exotic_properties()
             && !properties.meta.borrow().uses_default_prototype
         {

@@ -1,0 +1,16 @@
+[package]
+name = "napi-vm-test262-runner"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Test262 corpus runner, timer, and report comparison for the isolated napi-vm worker"
+
+[[bin]]
+name = "test262"
+path = "src/main.rs"
+
+[dependencies]
+flate2 = "1"
+regex = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
