@@ -1,0 +1,24 @@
+{
+  "source_commit": "85ba746",
+  "revision": "0b4e0812022b18236b5276d2804948fdd9f71603",
+  "worker_sha256": "8cc7a99935277cf0c9277a0a8c6cae3962ac00fdb5a60941ca2ba9c79b5361ad",
+  "jobs": 2,
+  "timeout_seconds": 5.0,
+  "total": 102992,
+  "counts": {
+    "pass": 102975,
+    "fail": 1,
+    "skip": 0,
+    "timeout": 16,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "pass_percentage": 99.98349386360105,
+  "resumed_files": 0,
+  "comparison": {
+    "gains": 18,
+    "losses": 0
+  },
+  "core_tests": "441 passed (cargo test --profile ci -p napi-vm-core --lib)",
+  "note": "Run on an otherwise idle two-core host; no concurrent builds."
+}

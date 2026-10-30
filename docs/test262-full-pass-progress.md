@@ -6,6 +6,40 @@ skips, timeouts, crashes, failures, or harness errors. Measurements use two
 workers and five-second per-variant deadlines. Focused reports do not update
 the full score.
 
+## Interpreter overhead continuation: `85ba746` (revision `0b4e081`)
+
+The current pinned revision is `0b4e0812022b18236b5276d2804948fdd9f71603`
+(102,992 variants). Clean source `85ba746` passes **102,975 / 102,992
+(99.9835%)**: one failure, 16 timeouts, no skips, crashes, or harness errors.
+It gains 18 passes and loses none against the `d1d403d` full run. The 441 core
+tests pass. [Full evidence](../tools/test262/evidence/full-interpreter-overhead-2026-10-30/)
+holds the report, comparison, and worker identity.
+
+Profiling with a frame-pointer build showed allocation and copying, not one
+algorithm, behind the timeouts. The changes:
+
+- Object metadata and environment records box rarely used payloads (Intl,
+  Temporal, iterator, realm, and module slots) and replace usually empty hash
+  collections with lazily allocated wrappers. Object and frame construction
+  no longer copies or seeds kilobyte-sized records.
+- Each realm caches its `Object`, `Array`, and `Date` allocation prototypes,
+  guarded by an intrinsic-table generation and only for immutable
+  `prototype` data properties.
+- `new Date(...)` on a realm's own intrinsic, as its own newTarget, with no
+  argument that can run guest code, allocates directly.
+- Existing writable global data properties and numeric lexical bindings are
+  read, written, and incremented in place. The AST tier's global assignment
+  previously took the full descriptor path (about 12 µs per write).
+- Calls cache each closure chain's global and module context, and bytecode
+  dispatch is an inlined function instead of a per-instruction closure.
+
+Measured alone, RegExp literal tests went from about 5.2 to 1.1 seconds, URI
+decoding from 5.5 to 4.2, TypedArray counting sort from 5.6 to 4.8, and the
+Date DST-caching tests from 10.3 to 6.5 seconds. The Date tests remain the only
+timeouts. The one failure is the contradictory Annex B `arguments` test
+described in [upstream issue 5113](https://github.com/tc39/test262/issues/5113);
+it cannot pass together with the staging test that asserts the opposite.
+
 ## Latest complete evaluation: `259402f`
 
 Clean source `259402f` passed **102,760 / 102,956 (99.8096%)** in the

@@ -1,0 +1,87 @@
+[
+  {
+    "test": "annexB/language/function-code/block-decl-func-skip-arguments.js",
+    "variant": "script",
+    "status": "fail"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-1-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-1-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-2-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-2-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-3-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-3-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-4-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-4-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-5-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-5-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-6-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-6-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-7-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-7-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-8-of-8.js",
+    "variant": "script",
+    "status": "timeout"
+  },
+  {
+    "test": "staging/sm/Date/dst-offset-caching-8-of-8.js",
+    "variant": "strict",
+    "status": "timeout"
+  }
+]

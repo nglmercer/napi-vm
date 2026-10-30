@@ -45,11 +45,14 @@ report still contains all selected outcomes and records the restored file count.
 ## Current full result
 
 The latest complete run used the pinned revision
-`0b4e0812022b18236b5276d2804948fdd9f71603` and source `d1d403d`.
-It passes **102,957 / 102,992**, with one failure, 34 timeouts, and zero
-skips, crashes, or harness errors. [Full evidence](evidence/full-new-revision-2026-10-27/)
-records every result and worker identity. The run overlapped other work; all
-34 timeouts repeated without competing builds at the same limits.
+`0b4e0812022b18236b5276d2804948fdd9f71603` and source `85ba746`.
+It passes **102,975 / 102,992 (99.9835%)**, with one failure, 16 timeouts,
+and zero skips, crashes, or harness errors. Against the `d1d403d` full run it
+gains 18 passes and loses none. The remaining timeouts are the 16
+`staging/sm/Date/dst-offset-caching-*` variants; the failure is the
+contradictory Annex B test below. [Full evidence](evidence/full-interpreter-overhead-2026-10-30/)
+records every result, the comparison, and the worker identity. The run had
+no concurrent builds.
 
 The selected revision retains the contradictory Annex B
 tests described in [upstream issue 5113](https://github.com/tc39/test262/issues/5113).

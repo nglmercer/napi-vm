@@ -1,15 +1,15 @@
-# Test262 full-pass plan — 2026-10-27
+# Test262 full-pass plan — 2026-10-30
 
 ## Measured status
 
-The latest completed full run used source commit `d1d403d`, Test262 revision
+The latest completed full run used source commit `85ba746`, Test262 revision
 `0b4e0812022b18236b5276d2804948fdd9f71603`, two workers, and a five-second
-deadline per variant. It passed **102,957 / 102,992**, with one failure and
-34 timeouts, and no skips, crashes, or harness errors. The complete report,
-worker identity, and comparison are in [the full-run evidence](../tools/test262/evidence/full-new-revision-2026-10-27/).
-The run overlapped builds and diagnostics; all 34 timeouts repeated in a
-subsequent isolated selection with the same limits. The previous revision's
-full run passed 102,918 / 102,956.
+deadline per variant. It passed **102,975 / 102,992**, with one failure and
+16 timeouts, and no skips, crashes, or harness errors. Against the `d1d403d`
+run (102,957 / 102,992) it gains 18 passes and loses none: all eight RegExp
+literal, four Annex B RegExp, four URI decode, and two TypedArray sort
+timeouts now pass. The report, worker identity, and comparison are in
+[the full-run evidence](../tools/test262/evidence/full-interpreter-overhead-2026-10-30/).
 
 The current implementation follows the current specification for Annex B
 `arguments` block functions. Focused testing recovered the two staging failures,
@@ -39,23 +39,15 @@ an explicit compatibility difference until the specification changes.
    compared, and all 34 timeouts repeated without competing builds under the
    same two-worker, five-second configuration. Repeat marginal cases after
    performance changes.
-3. **Remove remaining timeouts and semantic failures.** The new full run has
-   16 Date, eight RegExp literal, four Annex B RegExp, four URI, and two
-   TypedArray sort timeouts. Profile the unmodified cases
-   and prioritize shared interpreter call, binding, property, and loop costs.
-   For Date, profile the four-level guest-language sweep and repeated calls;
-   its scaled 24-timestamp diagnostic still took 2.36–2.84 seconds after the
-   prototype cache, so small local wins are unlikely to suffice. Evaluate
-   bytecode dispatch, call overhead, and the existing JIT seam against
-   representative unmodified tests, with guards for observable side effects,
-   mutation, execution limits, and cancellation. For RegExp and URI, profile
-   parsing, construction, calls, and repeated global bindings independently.
-   Preserve observable semantics and compare broad related suites after each
-   change. Reclassify residuals using the new revision's actual full report.
-   A numeric-operand fast path passed 2,369 arithmetic and coercion variants
-   and reduced a scaled URI diagnostic by about 24%; the original URI, Date,
-   and TypedArray targets still timed out at five seconds. See the
-   [focused evidence](../tools/test262/evidence/numeric-binary-fast-path-2026-10-28/).
+3. **Remove the 16 Date DST-caching timeouts.** Each variant takes about
+   6.5 seconds alone (down from 10.3 seconds). Its profile is now flat: no
+   source line exceeds about 2% of samples. The remaining cost is general
+   call, frame, Date allocation, and value teardown work, so further gains
+   need interpreter-wide changes rather than another local fast path.
+   Candidates are cheaper function activation (frame and environment reuse
+   without full reconstruction), avoiding a separate property cell per Date,
+   and bytecode compilation of the forms the compiler still declines (for
+   example constructors with a class initialization step).
 4. **Close the full gate.** On clean committed source, build the release
    worker and run every selected-revision variant with two workers, five-second
    deadlines, and no feature skips. Require zero failures, timeouts, skips,
