@@ -27,7 +27,7 @@ fn error() -> VmErr {
 }
 fn slot(v: &Value) -> Result<Slots, VmErr> {
     v.property_cell()
-        .and_then(|p| p.meta.borrow().intl_plurals.clone())
+        .and_then(|p| p.meta.borrow().intl_plurals.as_deref().cloned())
         .ok_or_else(error)
 }
 fn choice(
@@ -182,7 +182,7 @@ fn construct(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, V
         .unwrap()
         .meta
         .borrow_mut()
-        .intl_plurals = Some(Slots {
+        .intl_plurals = Some(Box::new(Slots {
         rules,
         ranges,
         locale,
@@ -198,7 +198,7 @@ fn construct(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, V
         mode,
         priority,
         trailing,
-    });
+    }));
     Ok(object)
 }
 fn rounding(mode: &str) -> RM {

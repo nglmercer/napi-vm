@@ -45,7 +45,7 @@ fn brand_error() -> VmErr {
 }
 fn segmenter(this: &Value) -> Result<SegmenterSlots, VmErr> {
     this.property_cell()
-        .and_then(|p| p.meta.borrow().intl_segmenter.clone())
+        .and_then(|p| p.meta.borrow().intl_segmenter.as_deref().cloned())
         .ok_or_else(brand_error)
 }
 fn segments(this: &Value) -> Result<Rc<SegmentsSlots>, VmErr> {
@@ -156,10 +156,10 @@ fn construct(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, V
         .unwrap()
         .meta
         .borrow_mut()
-        .intl_segmenter = Some(SegmenterSlots {
+        .intl_segmenter = Some(Box::new(SegmenterSlots {
         locale,
         granularity,
-    });
+    }));
     Ok(result)
 }
 fn resolved_options(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {

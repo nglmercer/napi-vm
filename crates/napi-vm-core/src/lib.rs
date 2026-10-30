@@ -12,6 +12,7 @@ pub mod host;
 pub mod interpreter;
 pub mod jit;
 pub mod lang;
+pub(crate) mod lazy_collections;
 pub mod lexer;
 pub mod module_loader;
 pub use module_loader::{

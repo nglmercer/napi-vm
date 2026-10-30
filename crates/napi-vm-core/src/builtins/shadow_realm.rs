@@ -281,11 +281,11 @@ fn wrap_callable(
         .expect("wrapped function state")
         .meta
         .borrow_mut()
-        .shadow_realm_wrapped = Some(ShadowRealmWrappedSlots {
+        .shadow_realm_wrapped = Some(Box::new(ShadowRealmWrappedSlots {
         target,
         target_realm,
         caller_realm: caller_realm.clone(),
-    });
+    }));
     let function_prototype = caller_realm
         .borrow()
         .intrinsic("Function")
@@ -347,7 +347,14 @@ pub(crate) fn call_wrapped(
 ) -> Result<Value, VmErr> {
     let slots = state
         .property_cell()
-        .and_then(|properties| properties.meta.borrow().shadow_realm_wrapped.clone())
+        .and_then(|properties| {
+            properties
+                .meta
+                .borrow()
+                .shadow_realm_wrapped
+                .as_deref()
+                .cloned()
+        })
         .ok_or_else(|| type_error("Invalid ShadowRealm wrapped function"))?;
     let this_value =
         translate_into_realm(interp, this_value, &slots.caller_realm, &slots.target_realm)?;

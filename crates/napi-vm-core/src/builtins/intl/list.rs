@@ -19,7 +19,7 @@ fn error(message: &str) -> VmErr {
 }
 fn slot(this: &Value) -> Result<Slots, VmErr> {
     this.property_cell()
-        .and_then(|p| p.meta.borrow().intl_list.clone())
+        .and_then(|p| p.meta.borrow().intl_list.as_deref().cloned())
         .ok_or_else(|| error("Intl.ListFormat receiver required"))
 }
 fn method(target: &Value, name: &str, length: usize, f: NativeFn, fp: &Option<Value>) {
@@ -108,12 +108,12 @@ fn construct(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, V
     }
     .map_err(|e| VmErr::Msg(format!("RangeError: {e}")))?;
     let result = Value::object_with_proto(vec![], prototype);
-    result.property_cell().unwrap().meta.borrow_mut().intl_list = Some(Slots {
+    result.property_cell().unwrap().meta.borrow_mut().intl_list = Some(Box::new(Slots {
         locale,
         kind,
         style,
         formatter: Rc::new(formatter),
-    });
+    }));
     Ok(result)
 }
 fn resolved_options(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {

@@ -55,6 +55,33 @@ fn virtual_modules_support_relative_imports() {
 }
 
 #[test]
+fn exported_function_uses_its_module_for_relative_dynamic_import() {
+    for tracking in [
+        napi_vm::jit::TierTracking::Disabled,
+        napi_vm::jit::TierTracking::CountersOnly,
+    ] {
+        let loader = Rc::new(VirtualLoader::new());
+        loader.insert(
+            "pkg/main.js",
+            "export function load() { return import('./value.js'); }",
+        );
+        loader.insert("pkg/value.js", "export const answer = 42;");
+        let mut vm = Interpreter::with_builtins();
+        vm.set_tier_tracking(tracking);
+        vm.set_module_loader(loader);
+        vm.load_module("pkg/main.js").unwrap();
+        vm.eval_source(
+        "import { load } from 'pkg/main.js'; var answer; load().then(ns => answer = ns.answer);",
+    )
+    .unwrap();
+        assert!(matches!(
+            vm.eval_source("answer").unwrap(),
+            Value::Number(42.0)
+        ));
+    }
+}
+
+#[test]
 fn static_deferred_import_evaluates_on_export_access() {
     let mut vm = Interpreter::with_builtins();
     vm.define_module(

@@ -36,7 +36,7 @@ fn error() -> VmErr {
 }
 fn slot(v: &Value) -> Result<Slots, VmErr> {
     v.property_cell()
-        .and_then(|p| p.meta.borrow().intl_number.clone())
+        .and_then(|p| p.meta.borrow().intl_number.as_deref().cloned())
         .ok_or_else(error)
 }
 pub(super) fn numbering_system_names() -> impl Iterator<Item = &'static str> {
@@ -267,7 +267,7 @@ fn construct(i: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value
         .unwrap()
         .meta
         .borrow_mut()
-        .intl_number = Some(s);
+        .intl_number = Some(Box::new(s));
     if new_target.is_none() && i.ordinary_instance_of(&this, &ctor)?.is_truthy() {
         let symbol = i
             .persistent_global
@@ -311,7 +311,7 @@ fn get_format(i: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, 
     slot(&this)?;
     let cell = this.property_cell().unwrap();
     if let Some(value) = &cell.meta.borrow().intl_bound_format {
-        return Ok(value.clone());
+        return Ok((**value).clone());
     }
     let fp = i
         .persistent_global
@@ -326,7 +326,7 @@ fn get_format(i: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, 
         p.iter_mut().find(|(k, _)| k == "name").unwrap().1 = Value::String("".into());
         p.sort_by_key(|(k, _)| if k == "length" { 0 } else { 1 });
     }
-    cell.meta.borrow_mut().intl_bound_format = Some(bound.clone());
+    cell.meta.borrow_mut().intl_bound_format = Some(Box::new(bound.clone()));
     Ok(bound)
 }
 fn resolved_options(i: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {

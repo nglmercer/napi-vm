@@ -24,6 +24,10 @@ const INLINE_CAP: usize = 8;
 type Key = Rc<str>;
 
 thread_local! {
+    static THIS_BINDING_KEY: Key = Rc::from("this");
+    /// Bumped whenever any intrinsic table changes, invalidating cached
+    /// intrinsic prototypes (see `cached_allocation_prototype`).
+    static INTRINSICS_GENERATION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     // Retain randomized, secret keys while avoiding SipHash on every global
     // name lookup. This holds no guest data and is independent of owner TLS.
     static BINDING_HASHER: ahash::RandomState = {
@@ -269,38 +273,48 @@ pub struct Environment {
     pub(crate) class_initializer: bool,
     pub(crate) with_object: Option<Value>,
     vars: Vars,
-    global_environment: Option<GlobalEnvironment>,
+    global_environment: Option<Box<GlobalEnvironment>>,
     parent: Option<Env>,
     /// Only the persistent user-global frame has a binding quota. Local
     /// function/catch frames and the trusted builtins frame leave this unset.
     global_limit: Option<usize>,
     module_context: Option<String>,
-    pub(crate) module_realm: Option<super::ModuleRealm>,
+    pub(crate) module_realm: Option<Box<super::ModuleRealm>>,
     new_target: Option<Value>,
     /// None outside a constructor; Some(None) is an uninitialized derived this.
     constructor_this: Option<Option<Value>>,
     constructor_fields: Option<Rc<Vec<crate::parser::Statement>>>,
-    private_names: HashMap<String, u64>,
-    private_declarations: HashSet<String>,
+    private_names: crate::lazy_collections::LazyMap<String, u64>,
+    private_declarations: crate::lazy_collections::LazySet<String>,
     private_instance_elements: Option<Vec<(u64, PrivateElement)>>,
     strict: Option<bool>,
     variable_scope: bool,
     pub(crate) async_generator_body: bool,
     eval_scope: bool,
-    pub(super) annex_functions: HashSet<usize>,
-    pub(super) annex_names: HashSet<String>,
+    pub(super) annex_functions: crate::lazy_collections::LazySet<usize>,
+    pub(super) annex_names: crate::lazy_collections::LazySet<String>,
     pub(crate) implicit_arguments: bool,
     parameter_scope: bool,
-    property_attributes: HashMap<String, crate::value::PropAttrs>,
-    intrinsics: HashMap<String, Value>,
-    pub(crate) template_objects: HashMap<u64, Value>,
+    property_attributes: crate::lazy_collections::LazyMap<String, crate::value::PropAttrs>,
+    intrinsics: crate::lazy_collections::LazyMap<String, Value>,
+    pub(crate) template_objects: crate::lazy_collections::LazyMap<u64, Value>,
     pub(crate) regexp_legacy: Option<Rc<RefCell<crate::builtins::regexp::LegacyState>>>,
+    /// `Object.prototype` and `Array.prototype` links for allocations in this
+    /// realm, tagged with the intrinsics generation they were read under.
+    allocation_prototypes: RefCell<[Option<(u64, Value, Rc<Value>)>; 3]>,
+    /// The persistent global and module context of this frame's chain. Parent
+    /// links of a live closure chain never change, so calls reuse this.
+    chain_context: RefCell<Option<(std::rc::Weak<RefCell<Environment>>, Option<String>)>>,
 }
 
 impl std::fmt::Debug for Environment {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "Env({} vars)", self.vars.len())
     }
+}
+
+fn bump_intrinsics_generation() {
+    INTRINSICS_GENERATION.with(|value| value.set(value.get().wrapping_add(1)));
 }
 
 impl Default for Environment {
@@ -503,10 +517,12 @@ impl Environment {
             .filter_map(|name| self.own_binding(&name).map(|value| (name, value)))
             .collect::<HashMap<_, _>>();
         self.intrinsics.extend(globals);
+        bump_intrinsics_generation();
     }
 
     pub(crate) fn install_intrinsic(&mut self, name: &str, value: Value) {
         self.intrinsics.insert(name.into(), value);
+        bump_intrinsics_generation();
     }
 
     pub(crate) fn intrinsic(&self, name: &str) -> Option<Value> {
@@ -519,6 +535,68 @@ impl Environment {
                     .and_then(|parent| parent.borrow().intrinsic(name))
             })
             .or_else(|| self.get(name))
+    }
+
+    /// The intrinsic `intrinsic(name)` would return when it comes from an
+    /// intrinsic table. Tables precede every binding fallback in that
+    /// lookup, so such a hit stays valid until a table changes.
+    fn table_intrinsic(&self, name: &str) -> Option<Value> {
+        self.intrinsics.get(name).cloned().or_else(|| {
+            self.parent
+                .as_ref()
+                .and_then(|parent| parent.borrow().table_intrinsic(name))
+        })
+    }
+
+    /// `intrinsic(name).prototype`, shared across allocations. Only built-in
+    /// constructors whose `prototype` is an immutable own data property are
+    /// cached; anything else reads through every time.
+    pub(crate) fn cached_allocation_prototype(&self, name: &str) -> Option<Rc<Value>> {
+        let index = match name {
+            "Object" => 0,
+            "Array" => 1,
+            "Date" => 2,
+            _ => return self.intrinsic(name)?.get_prop("prototype").map(Rc::new),
+        };
+        let generation = INTRINSICS_GENERATION.with(|value| value.get());
+        if let Some((cached, _, link)) = &self.allocation_prototypes.borrow()[index]
+            && *cached == generation
+        {
+            return Some(link.clone());
+        }
+        let Some(constructor) = self.table_intrinsic(name) else {
+            return self.intrinsic(name)?.get_prop("prototype").map(Rc::new);
+        };
+        let link = Rc::new(constructor.get_prop("prototype")?);
+        let immutable = constructor.property_cell().is_some_and(|cell| {
+            let meta = cell.meta.borrow();
+            let attrs = meta.attrs_of("prototype");
+            !meta.may_have_accessor("prototype") && !attrs.writable && !attrs.configurable
+        });
+        if immutable {
+            self.allocation_prototypes.borrow_mut()[index] =
+                Some((generation, constructor, link.clone()));
+        }
+        Some(link)
+    }
+
+    /// `Date.prototype` for constructing `date`, only when `date` is this
+    /// realm's intrinsic table entry and that link is cacheable.
+    pub(crate) fn cached_intrinsic_date_prototype(&self, date: &Value) -> Option<Rc<Value>> {
+        let generation = INTRINSICS_GENERATION.with(|value| value.get());
+        let current = |slots: &[Option<(u64, Value, Rc<Value>)>; 3]| {
+            slots[2].as_ref().and_then(|(cached, constructor, link)| {
+                (*cached == generation && super::strict_equals(constructor, date))
+                    .then(|| link.clone())
+            })
+        };
+        if let Some(link) = current(&self.allocation_prototypes.borrow()) {
+            return Some(link);
+        }
+        // Fill (or refuse) through the validated path. Only an immutable
+        // link from this realm's own intrinsic `Date` is ever cached.
+        self.cached_allocation_prototype("Date")?;
+        current(&self.allocation_prototypes.borrow())
     }
 
     pub(crate) fn intrinsic_name(&self, value: &Value) -> Option<String> {
@@ -536,8 +614,14 @@ impl Environment {
 
     pub(crate) fn global_object(&self) -> Option<Value> {
         self.global_environment
-            .as_ref()
+            .as_deref()
             .map(GlobalEnvironment::value)
+    }
+
+    pub(crate) fn global_object_cell(&self) -> Option<Rc<ObjectCell>> {
+        self.global_environment
+            .as_ref()
+            .map(|record| record.object.clone())
     }
 
     pub(crate) fn create_global_var_binding(
@@ -583,6 +667,27 @@ impl Environment {
     }
     pub(crate) fn own_lexical_binding(&self, name: &str) -> bool {
         self.vars.get(name).is_some()
+    }
+
+    pub(crate) fn own_binding_lookup(&self, name: &str) -> Option<Lookup> {
+        let binding = self.vars.get(name)?;
+        if name == "this"
+            && let Some(value) = &self.constructor_this
+        {
+            return Some(match value {
+                Some(value) => Lookup::Value(value.clone()),
+                None => Lookup::Uninitialized,
+            });
+        }
+        if !binding.initialized {
+            return Some(Lookup::Uninitialized);
+        }
+        let value = binding.value.deref_binding();
+        Some(if matches!(value, Value::Uninitialized) {
+            Lookup::Uninitialized
+        } else {
+            Lookup::Value(value)
+        })
     }
 
     pub fn has_var_declaration(&self, name: &str) -> bool {
@@ -722,6 +827,7 @@ impl Environment {
     pub(crate) fn set_module_context(&mut self, name: &str) {
         self.variable_scope = true;
         self.module_context = Some(name.into());
+        *self.chain_context.get_mut() = None;
     }
     pub(crate) fn module_context(&self) -> Option<String> {
         self.module_context.clone().or_else(|| {
@@ -743,22 +849,24 @@ impl Environment {
             constructor_this: None,
             constructor_fields: None,
             private_instance_elements: None,
-            private_names: HashMap::new(),
-            private_declarations: HashSet::new(),
+            private_names: Default::default(),
+            private_declarations: Default::default(),
             strict: None,
             variable_scope: false,
             async_generator_body: false,
             eval_scope: false,
-            annex_functions: HashSet::new(),
-            annex_names: HashSet::new(),
+            annex_functions: Default::default(),
+            annex_names: Default::default(),
             implicit_arguments: false,
             parameter_scope: false,
             with_object: None,
             resources: Vec::new(),
-            property_attributes: HashMap::new(),
-            intrinsics: HashMap::new(),
-            template_objects: HashMap::new(),
+            property_attributes: Default::default(),
+            intrinsics: Default::default(),
+            template_objects: Default::default(),
             regexp_legacy: None,
+            allocation_prototypes: Default::default(),
+            chain_context: RefCell::new(None),
         }
     }
 
@@ -775,22 +883,24 @@ impl Environment {
             constructor_this: None,
             constructor_fields: None,
             private_instance_elements: None,
-            private_names: HashMap::new(),
-            private_declarations: HashSet::new(),
+            private_names: Default::default(),
+            private_declarations: Default::default(),
             strict: None,
             variable_scope: false,
             async_generator_body: false,
             eval_scope: false,
-            annex_functions: HashSet::new(),
-            annex_names: HashSet::new(),
+            annex_functions: Default::default(),
+            annex_names: Default::default(),
             implicit_arguments: false,
             parameter_scope: false,
             with_object: None,
             resources: Vec::new(),
-            property_attributes: HashMap::new(),
-            intrinsics: HashMap::new(),
-            template_objects: HashMap::new(),
+            property_attributes: Default::default(),
+            intrinsics: Default::default(),
+            template_objects: Default::default(),
             regexp_legacy: None,
+            allocation_prototypes: Default::default(),
+            chain_context: RefCell::new(None),
         }
     }
 
@@ -798,10 +908,11 @@ impl Environment {
     /// trusted builtins frame, and only this frame enforces the guest binding
     /// quota.
     pub fn global(parent: Option<Env>) -> Self {
+        bump_intrinsics_generation();
         let record = GlobalEnvironment::new(parent.as_ref());
         Self {
             vars: Vars::Small(SmallVec::new()),
-            global_environment: Some(record),
+            global_environment: Some(Box::new(record)),
             parent,
             global_limit: Some(MAX_GLOBAL_BINDINGS),
             module_context: None,
@@ -811,22 +922,24 @@ impl Environment {
             constructor_this: None,
             constructor_fields: None,
             private_instance_elements: None,
-            private_names: HashMap::new(),
-            private_declarations: HashSet::new(),
+            private_names: Default::default(),
+            private_declarations: Default::default(),
             strict: None,
             variable_scope: false,
             async_generator_body: false,
             eval_scope: false,
-            annex_functions: HashSet::new(),
-            annex_names: HashSet::new(),
+            annex_functions: Default::default(),
+            annex_names: Default::default(),
             implicit_arguments: false,
             parameter_scope: false,
             with_object: None,
             resources: Vec::new(),
-            property_attributes: HashMap::new(),
-            intrinsics: HashMap::new(),
-            template_objects: HashMap::new(),
+            property_attributes: Default::default(),
+            intrinsics: Default::default(),
+            template_objects: Default::default(),
             regexp_legacy: None,
+            allocation_prototypes: Default::default(),
+            chain_context: RefCell::new(None),
         }
     }
 
@@ -866,22 +979,24 @@ impl Environment {
             constructor_this: None,
             constructor_fields: None,
             private_instance_elements: None,
-            private_names: HashMap::new(),
-            private_declarations: HashSet::new(),
+            private_names: Default::default(),
+            private_declarations: Default::default(),
             strict: None,
             variable_scope: true,
             async_generator_body: false,
             eval_scope: false,
-            annex_functions: HashSet::new(),
-            annex_names: HashSet::new(),
+            annex_functions: Default::default(),
+            annex_names: Default::default(),
             implicit_arguments: false,
             parameter_scope: false,
             with_object: None,
             resources: Vec::new(),
-            property_attributes: HashMap::new(),
-            intrinsics: HashMap::new(),
-            template_objects: HashMap::new(),
+            property_attributes: Default::default(),
+            intrinsics: Default::default(),
+            template_objects: Default::default(),
             regexp_legacy: None,
+            allocation_prototypes: Default::default(),
+            chain_context: RefCell::new(None),
         }
     }
 
@@ -899,6 +1014,24 @@ impl Environment {
         let mut frame = Self::child(parent);
         frame.variable_scope = true;
         frame
+    }
+
+    /// Turn a pristine `Environment::new()` frame into `function_child(parent)`
+    /// without rebuilding the whole record.
+    pub(crate) fn reinitialize_function_child(&mut self, parent: Env) {
+        debug_assert!(self.parent.is_none() && self.vars.len() == 0 && !self.variable_scope);
+        self.parent = Some(parent);
+        self.variable_scope = true;
+    }
+
+    pub(crate) fn initialize_function_this(&mut self, value: Value, new_target: Value) {
+        let Vars::Small(vars) = &mut self.vars else {
+            unreachable!("fresh function environment")
+        };
+        debug_assert!(vars.is_empty());
+        THIS_BINDING_KEY
+            .with(|key| vars.push((key.clone(), Binding::initialized(value, BindKind::Var))));
+        self.new_target = Some(new_target);
     }
 
     pub(crate) fn mark_eval_scope(&mut self, strict: bool) {
@@ -1226,6 +1359,28 @@ impl Environment {
     /// Reports `const` reassignment and writes into the temporal dead zone
     /// separately from a plain miss, so the caller can raise the right error
     /// instead of silently creating an implicit global.
+    /// `++`/`--` on this frame's own initialized, writable, non-const binding
+    /// holding a plain Number. Returns the previous number, or `None` (with
+    /// nothing changed) when the general update path must decide.
+    pub(crate) fn update_own_number(&mut self, n: &str, delta: f64) -> Option<f64> {
+        let binding = self.vars.get_mut(n)?;
+        if binding.silent_immutable
+            || binding.kind == BindKind::Const
+            || !binding.initialized
+            || self
+                .property_attributes
+                .get(n)
+                .is_some_and(|attrs| !attrs.writable)
+        {
+            return None;
+        }
+        let Value::Number(previous) = binding.value else {
+            return None;
+        };
+        binding.value = Value::Number(previous + delta);
+        Some(previous)
+    }
+
     pub fn assign(&mut self, n: &str, v: Value) -> AssignOutcome {
         if let Some(binding) = self.vars.get_mut(n) {
             if self
@@ -1414,6 +1569,22 @@ impl Environment {
     /// Find the persistent global frame in an environment chain. This is used
     /// by generator bodies, whose active frame is detached from the normal
     /// interpreter `global` field while the body runs.
+    /// `(find_global(env), env.module_context())`, cached on `env`.
+    pub(crate) fn chain_context(env: &Env) -> (Option<Env>, Option<String>) {
+        if let Some((global, module)) = env.borrow().chain_context.borrow().as_ref()
+            && let Some(global) = global.upgrade()
+        {
+            return (Some(global), module.clone());
+        }
+        let global = Self::find_global(env);
+        let module = env.borrow().module_context();
+        if let Some(global) = &global {
+            *env.borrow().chain_context.borrow_mut() =
+                Some((Rc::downgrade(global), module.clone()));
+        }
+        (global, module)
+    }
+
     pub fn find_global(env: &Env) -> Option<Env> {
         let mut current = env.clone();
         loop {
@@ -1436,7 +1607,7 @@ impl Environment {
         let mut values = self.vars.values_cloned();
         values.extend(
             self.global_environment
-                .as_ref()
+                .as_deref()
                 .map(GlobalEnvironment::value),
         );
         values.extend(self.with_object.iter().cloned());
@@ -1469,6 +1640,8 @@ impl Environment {
         self.resources.clear();
         self.property_attributes.clear();
         self.intrinsics.clear();
+        bump_intrinsics_generation();
+        *self.allocation_prototypes.get_mut() = Default::default();
         self.template_objects.clear();
         self.regexp_legacy = None;
         self.new_target = None;
@@ -1477,6 +1650,7 @@ impl Environment {
         self.private_instance_elements = None;
         self.parent = None;
         self.module_realm = None;
+        *self.chain_context.get_mut() = None;
     }
 
     pub(crate) fn drain_chain(env: Env, work: &mut Vec<Value>) {
@@ -1491,7 +1665,18 @@ impl Environment {
                     work.extend(env.resources.drain(..).flat_map(|r| r.values()));
                     work.extend(env.new_target.take());
                     work.extend(env.constructor_this.take().flatten());
+                    if !env.intrinsics.is_empty() {
+                        bump_intrinsics_generation();
+                    }
                     work.extend(env.intrinsics.drain().map(|(_, value)| value));
+                    work.extend(
+                        std::mem::take(env.allocation_prototypes.get_mut())
+                            .into_iter()
+                            .flatten()
+                            .flat_map(|(_, constructor, link)| {
+                                std::iter::once(constructor).chain(Rc::try_unwrap(link).ok())
+                            }),
+                    );
                     work.extend(env.template_objects.drain().map(|(_, value)| value));
                     work.extend(
                         env.private_instance_elements

@@ -89,12 +89,13 @@ impl Interpreter {
                 break;
             }
             if frame.is_global_scope() {
-                let object = frame.global_object();
+                let properties = frame.global_object_cell();
                 drop(frame);
-                if let Some(object) = object
-                    && let Some(properties) = object.property_cell()
-                    && !properties.meta.borrow().may_have_accessor(name)
+                if let Some(properties) = properties
+                    && !properties.meta.borrow().has_accessor_marker(name)
                     && let Some(value) = properties.cached_own_value(name, cached)
+                    && !(properties.meta.borrow().may_have_accessor(name)
+                        && crate::value::legacy_accessor_candidate(&value))
                 {
                     self.check_execution_interrupt()?;
                     return Ok(super::Lookup::Value(
@@ -119,15 +120,23 @@ impl Interpreter {
         let mut cursor = Some(scope.clone());
         while let Some(environment) = cursor {
             let frame = environment.borrow();
-            if frame.own_lexical_binding(name) {
-                return Some(frame.lookup(name));
+            if let Some(value) = frame.own_binding_lookup(name) {
+                return Some(value);
             }
             if frame.is_global_scope() {
-                let properties = frame.global_object()?.property_cell()?;
-                if properties.meta.borrow().may_have_accessor(name) {
+                let properties = frame.global_object_cell()?;
+                if properties.meta.borrow().has_accessor_marker(name) {
                     return None;
                 }
-                return properties.own_value(name).map(|value| {
+                let value = properties.own_value(name);
+                if properties.meta.borrow().may_have_accessor(name)
+                    && value
+                        .as_ref()
+                        .is_some_and(crate::value::legacy_accessor_candidate)
+                {
+                    return None;
+                }
+                return value.map(|value| {
                     super::Lookup::Value(if matches!(value, Value::Binding(_)) {
                         value.deref_binding()
                     } else {
@@ -307,6 +316,51 @@ impl Interpreter {
     /// SetMutableBinding uses the resolved object even if HasBinding's earlier
     /// unscopables access or the assignment RHS removed the property.
     pub(crate) fn set_object_binding(
+        &mut self,
+        object: &Value,
+        name: &str,
+        value: Value,
+        strict: bool,
+    ) -> Result<(), VmErr> {
+        // An ordinary object's own writable data property: HasBinding and
+        // OrdinarySet are unobservable and only replace the stored value.
+        // Without an explicit accessor kind, an accessor slot holds a callable;
+        // non-callable old and new values therefore stay plain data.
+        let cell = match object {
+            Value::Object { props } => Some(props.clone()),
+            Value::RealmGlobal(environment) => environment.borrow().global_object_cell(),
+            _ => None,
+        };
+        if let Some(props) = cell
+            && let Some((index, legacy)) = {
+                let meta = props.meta.borrow();
+                (!meta.module_namespace
+                    && !meta.is_arguments
+                    && !meta.has_accessor_marker(name)
+                    && meta.attrs_of(name).writable)
+                    .then(|| {
+                        props
+                            .own_index(name)
+                            .map(|index| (index, meta.may_have_accessor(name)))
+                    })
+                    .flatten()
+            }
+            && props.slot_verified(index, name).is_some_and(|current| {
+                !matches!(current, Value::Binding(_) | Value::Uninitialized)
+                    && !(legacy
+                        && (crate::value::legacy_accessor_candidate(&current)
+                            || crate::value::legacy_accessor_candidate(&value)))
+            })
+        {
+            match props.set_slot_verified(index, name, value) {
+                Ok(()) => return Ok(()),
+                Err(value) => return self.set_object_binding_slow(object, name, value, strict),
+            }
+        }
+        self.set_object_binding_slow(object, name, value, strict)
+    }
+
+    fn set_object_binding_slow(
         &mut self,
         object: &Value,
         name: &str,
@@ -638,6 +692,9 @@ impl Interpreter {
     /// this can call guest conversion methods and rejects Symbols and BigInts
     /// instead of silently manufacturing a number.
     pub(crate) fn ecmascript_to_number(&mut self, value: &Value) -> Result<f64, VmErr> {
+        if let Value::Number(number) = value {
+            return Ok(*number);
+        }
         let primitive = self.coerce_object_to_primitive(value, "number")?;
         match &primitive {
             Value::Undefined => Ok(f64::NAN),

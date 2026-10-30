@@ -30,7 +30,7 @@ fn error() -> VmErr {
 }
 fn slot(this: &Value) -> Result<Slots, VmErr> {
     this.property_cell()
-        .and_then(|p| p.meta.borrow().intl_relative.clone())
+        .and_then(|p| p.meta.borrow().intl_relative.as_deref().cloned())
         .ok_or_else(error)
 }
 fn method(target: &Value, name: &str, length: usize, f: NativeFn, fp: &Option<Value>) {
@@ -318,7 +318,7 @@ fn construct(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, V
         .unwrap()
         .meta
         .borrow_mut()
-        .intl_relative = Some(Slots {
+        .intl_relative = Some(Box::new(Slots {
         locale,
         numbering,
         style,
@@ -327,7 +327,7 @@ fn construct(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, V
         always,
         decimal: Rc::new(decimal),
         digit_map,
-    });
+    }));
     Ok(result)
 }
 fn resolved_options(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {

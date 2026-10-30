@@ -1760,15 +1760,19 @@ impl Interpreter {
                 break;
             }
             if frame.is_global_scope() {
-                let object = frame.global_object();
+                let properties = frame.global_object_cell();
                 drop(frame);
-                if let Some(object) = object
-                    && let Some(properties) = object.property_cell()
-                    && !properties.meta.borrow().may_have_accessor(name)
+                if let Some(properties) = properties
+                    && !properties.meta.borrow().has_accessor_marker(name)
                     && properties.meta.borrow().attrs_of(name).writable
                     && let Some(index) = cached
                         .and_then(|hint| properties.cached_own_index(name, hint))
                         .or_else(|| properties.own_index(name))
+                    && !(properties.meta.borrow().may_have_accessor(name)
+                        && (crate::value::legacy_accessor_candidate(&value)
+                            || properties.slot_verified(index, name).is_none_or(|current| {
+                                crate::value::legacy_accessor_candidate(&current)
+                            })))
                 {
                     self.check_execution_interrupt()?;
                     match properties.set_slot_verified(index, name, value) {
@@ -3164,7 +3168,9 @@ impl Interpreter {
 
     pub(crate) fn acquire_function_environment(&mut self, parent: Env) -> Env {
         if let Some(environment) = self.function_environment_pool.pop() {
-            *environment.borrow_mut() = Environment::function_child(parent);
+            // Pooled frames were reset to `Environment::new()` on recycle, so
+            // only the fields `function_child` sets differ.
+            environment.borrow_mut().reinitialize_function_child(parent);
             environment
         } else {
             Rc::new(RefCell::new(Environment::function_child(parent)))

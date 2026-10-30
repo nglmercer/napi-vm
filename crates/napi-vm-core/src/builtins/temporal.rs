@@ -42,7 +42,7 @@ fn arg(args: &[Value], index: usize) -> Value {
 fn slot(value: &Value) -> Option<Slots> {
     value
         .property_cell()
-        .and_then(|p| p.meta.borrow().temporal.clone())
+        .and_then(|p| p.meta.borrow().temporal.as_deref().cloned())
 }
 fn time(value: &Value) -> Result<PlainTime, VmErr> {
     match slot(value) {
@@ -572,7 +572,7 @@ fn wrap(interp: &mut Interpreter, data: Slots, construct: bool) -> Result<Value,
         default
     };
     let value = Value::object_with_proto(vec![], proto.map(Rc::new));
-    value.property_cell().unwrap().meta.borrow_mut().temporal = Some(data);
+    value.property_cell().unwrap().meta.borrow_mut().temporal = Some(Box::new(data));
     Ok(value)
 }
 fn options(value: Value) -> Result<Value, VmErr> {

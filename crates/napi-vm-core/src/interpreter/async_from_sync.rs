@@ -39,7 +39,7 @@ pub(crate) fn create(vm: &mut Interpreter, iterator: Value) -> Result<Value, VmE
         .expect("adapter object")
         .meta
         .borrow_mut()
-        .async_from_sync = Some(Slots::Iterator { iterator, next });
+        .async_from_sync = Some(Box::new(Slots::Iterator { iterator, next }));
     Ok(adapter)
 }
 
@@ -77,7 +77,7 @@ fn perform(
     let result = (|| {
         let slots = this
             .property_cell()
-            .and_then(|properties| properties.meta.borrow().async_from_sync.clone());
+            .and_then(|properties| properties.meta.borrow().async_from_sync.as_deref().cloned());
         let Some(Slots::Iterator { iterator, next }) = slots else {
             return Err(VmErr::Msg(
                 "TypeError: Async-from-sync method requires an iterator receiver".into(),
@@ -142,11 +142,11 @@ fn perform(
                 .expect("reaction object")
                 .meta
                 .borrow_mut()
-                .async_from_sync = Some(Slots::Reaction {
+                .async_from_sync = Some(Box::new(Slots::Reaction {
                 iterator: iterator.clone(),
                 done,
                 close_on_rejection: matches!(operation, Operation::Next | Operation::Throw),
-            });
+            }));
             callback
         };
         vm.register(&awaited, make(fulfilled), make(rejected), None)
@@ -160,7 +160,7 @@ fn perform(
 fn fulfilled(_: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
     let slots = this
         .property_cell()
-        .and_then(|properties| properties.meta.borrow().async_from_sync.clone());
+        .and_then(|properties| properties.meta.borrow().async_from_sync.as_deref().cloned());
     let Some(Slots::Reaction { done, .. }) = slots else {
         return Err(VmErr::Msg("Invalid async-from-sync reaction".into()));
     };
@@ -174,7 +174,7 @@ fn rejected(vm: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value
     let reason = args.first().cloned().unwrap_or(Value::Undefined);
     let slots = this
         .property_cell()
-        .and_then(|properties| properties.meta.borrow().async_from_sync.clone());
+        .and_then(|properties| properties.meta.borrow().async_from_sync.as_deref().cloned());
     if let Some(Slots::Reaction {
         iterator,
         done: false,

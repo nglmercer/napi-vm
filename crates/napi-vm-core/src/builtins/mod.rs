@@ -1,7 +1,7 @@
 mod array;
 mod bigint;
 mod collections;
-mod date;
+pub(crate) mod date;
 pub(crate) mod disposable;
 mod error;
 mod function;

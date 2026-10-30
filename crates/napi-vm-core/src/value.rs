@@ -60,6 +60,10 @@ pub(crate) fn to_integer_or_infinity(number: f64) -> f64 {
 
 /// ECMAScript ToInt32 wraps instead of saturating at Rust's integer bounds.
 pub(crate) fn to_int32(number: f64) -> i32 {
+    // In-range values truncate exactly as the modular definition does.
+    if number > -2_147_483_649.0 && number < 2_147_483_648.0 {
+        return number as i32;
+    }
     if !number.is_finite() {
         return 0;
     }
@@ -73,6 +77,9 @@ pub(crate) fn to_int32(number: f64) -> i32 {
 
 /// ECMAScript ToUint32 wraps modulo 2^32.
 pub(crate) fn to_uint32(number: f64) -> u32 {
+    if number > -1.0 && number < 4_294_967_296.0 {
+        return number as u32;
+    }
     if !number.is_finite() {
         return 0;
     }
@@ -198,11 +205,11 @@ pub struct ObjectMeta {
     /// The isolated global owned by a ShadowRealm instance.
     pub(crate) shadow_realm_global: Option<Env>,
     /// Internal target and realm boundary for a ShadowRealm wrapped function.
-    pub(crate) shadow_realm_wrapped: Option<ShadowRealmWrappedSlots>,
+    pub(crate) shadow_realm_wrapped: Option<Box<ShadowRealmWrappedSlots>>,
     pub(crate) disposable_stack: Option<Rc<RefCell<crate::builtins::disposable::Slots>>>,
     pub(crate) collection_kind: Option<CollectionKind>,
     pub(crate) collection_entries: Option<Rc<ArrayCell>>,
-    pub(crate) collection_iterator: Option<crate::builtins::CollectionIteratorSlots>,
+    pub(crate) collection_iterator: Option<Box<crate::builtins::CollectionIteratorSlots>>,
     /// Prototype link. `None` means either a null prototype or the runtime's
     /// default prototype, distinguished by `uses_default_prototype`.
     pub proto: Option<Rc<Value>>,
@@ -233,9 +240,9 @@ pub struct ObjectMeta {
     /// never allocating one.
     pub has_accessors: bool,
     /// Explicit data descriptors override the legacy callable-name encoding.
-    pub(crate) data_property_keys: std::collections::HashSet<String>,
+    pub(crate) data_property_keys: crate::lazy_collections::LazySet<String>,
     /// Canonical accessor slot kinds, independent of callable names or types.
-    pub(crate) accessor_kinds: std::collections::HashMap<String, &'static str>,
+    pub(crate) accessor_kinds: crate::lazy_collections::LazyMap<String, &'static str>,
     pub(crate) legacy_call_accessors: bool,
     /// Accessor slots with neither a callable getter nor a callable setter.
     pub(crate) empty_accessors: Vec<String>,
@@ -248,22 +255,22 @@ pub struct ObjectMeta {
     /// Presence of [[IsRawJSON]], independent of prototypes and realms.
     pub(crate) raw_json: bool,
     /// Branded Temporal data, inaccessible to guest property operations.
-    pub(crate) temporal: Option<crate::builtins::temporal::Slots>,
+    pub(crate) temporal: Option<Box<crate::builtins::temporal::Slots>>,
     pub(crate) regexp_iterator: Option<Rc<RefCell<crate::builtins::regexp::RegExpIteratorSlots>>>,
-    pub(crate) intl_plurals: Option<crate::builtins::intl::plurals::Slots>,
-    pub(crate) intl_collator: Option<crate::builtins::intl::collator::Slots>,
-    pub(crate) intl_bound_compare: Option<Value>,
-    pub(crate) intl_bound_format: Option<Value>,
-    pub(crate) intl_number: Option<crate::builtins::intl::number::Slots>,
-    pub(crate) intl_datetime: Option<crate::builtins::intl::datetime::Slots>,
-    pub(crate) intl_displaynames: Option<crate::builtins::intl::displaynames::Slots>,
-    pub(crate) intl_list: Option<crate::builtins::intl::list::Slots>,
-    pub(crate) intl_relative: Option<crate::builtins::intl::relative::Slots>,
-    pub(crate) intl_duration: Option<crate::builtins::intl::duration::Slots>,
-    pub(crate) intl_segmenter: Option<crate::builtins::intl::segmenter::SegmenterSlots>,
+    pub(crate) intl_plurals: Option<Box<crate::builtins::intl::plurals::Slots>>,
+    pub(crate) intl_collator: Option<Box<crate::builtins::intl::collator::Slots>>,
+    pub(crate) intl_bound_compare: Option<Box<Value>>,
+    pub(crate) intl_bound_format: Option<Box<Value>>,
+    pub(crate) intl_number: Option<Box<crate::builtins::intl::number::Slots>>,
+    pub(crate) intl_datetime: Option<Box<crate::builtins::intl::datetime::Slots>>,
+    pub(crate) intl_displaynames: Option<Box<crate::builtins::intl::displaynames::Slots>>,
+    pub(crate) intl_list: Option<Box<crate::builtins::intl::list::Slots>>,
+    pub(crate) intl_relative: Option<Box<crate::builtins::intl::relative::Slots>>,
+    pub(crate) intl_duration: Option<Box<crate::builtins::intl::duration::Slots>>,
+    pub(crate) intl_segmenter: Option<Box<crate::builtins::intl::segmenter::SegmenterSlots>>,
     pub(crate) intl_segments: Option<Rc<crate::builtins::intl::segmenter::SegmentsSlots>>,
     pub(crate) intl_segment_iterator: Option<Rc<crate::builtins::intl::segmenter::IteratorSlots>>,
-    pub(crate) intl_locale: Option<crate::builtins::intl::LocaleSlots>,
+    pub(crate) intl_locale: Option<Box<crate::builtins::intl::LocaleSlots>>,
     /// Some built-in instances (currently Date) have dedicated VM value
     /// variants, so their constructor identity cannot be recovered by walking
     /// an ordinary `[[Prototype]]` chain.
@@ -272,10 +279,10 @@ pub struct ObjectMeta {
     pub(crate) error_object: bool,
     pub(crate) error_stack: Option<crate::JsString>,
     /// Lexical private field identities never enter ordinary property storage.
-    pub(crate) private_elements: std::collections::HashMap<u64, PrivateElement>,
+    pub(crate) private_elements: crate::lazy_collections::LazyMap<u64, PrivateElement>,
     /// Intrinsic iterator/continuation state, invisible to property operations.
     pub(crate) iterator_helper: Option<Rc<RefCell<crate::builtins::iterator::Slots>>>,
-    pub(crate) async_from_sync: Option<crate::interpreter::async_from_sync::Slots>,
+    pub(crate) async_from_sync: Option<Box<crate::interpreter::async_from_sync::Slots>>,
     /// Host bridge identity for a `Value::HostFunction`. Kept in the shared
     /// property cell so that value remains compact.
     pub(crate) host_function_id: Option<usize>,
@@ -383,6 +390,20 @@ impl ObjectMeta {
             self.accessor_kinds.remove(key);
         }
     }
+    /// Whether metadata alone marks `key` as an accessor (explicit kind,
+    /// empty accessor, or a legacy call accessor), regardless of slot value.
+    pub(crate) fn has_accessor_marker(&self, key: &str) -> bool {
+        if self.accessor_kinds.is_empty()
+            && self.empty_accessors.is_empty()
+            && !self.legacy_call_accessors
+        {
+            return false;
+        }
+        !self.is_explicit_data(key)
+            && (self.accessor_kinds.contains_key(key)
+                || self.is_empty_accessor(key)
+                || self.legacy_call_accessors && matches!(key, "caller" | "arguments"))
+    }
     pub(crate) fn is_explicit_data(&self, key: &str) -> bool {
         self.data_property_keys.contains(key)
     }
@@ -400,8 +421,11 @@ impl ObjectMeta {
         if self.attrs.is_empty() {
             return PropAttrs::default();
         }
+        // Keys are unique (see `set_attrs`); recent definitions such as
+        // global `var`s sit at the end, so search from there.
         self.attrs
             .iter()
+            .rev()
             .find(|(k, _)| k == key)
             .map(|(_, a)| *a)
             .unwrap_or_default()
@@ -947,8 +971,8 @@ impl ArrayCell {
                     .values()
                     .flat_map(PrivateElement::values),
             );
-            out.extend(meta.intl_bound_compare.iter().cloned());
-            out.extend(meta.intl_bound_format.iter().cloned());
+            out.extend(meta.intl_bound_compare.as_deref().cloned());
+            out.extend(meta.intl_bound_format.as_deref().cloned());
             out.extend(meta.revocable_proxy.iter().cloned().map(Value::Proxy));
             if let Some(slots) = &meta.disposable_stack {
                 out.extend(slots.borrow().values());
@@ -1150,8 +1174,8 @@ impl ObjectCell {
                     .values()
                     .flat_map(PrivateElement::values),
             );
-            out.extend(meta.intl_bound_compare.iter().cloned());
-            out.extend(meta.intl_bound_format.iter().cloned());
+            out.extend(meta.intl_bound_compare.as_deref().cloned());
+            out.extend(meta.intl_bound_format.as_deref().cloned());
             out.extend(meta.revocable_proxy.iter().cloned().map(Value::Proxy));
             if let Some(slots) = &meta.disposable_stack {
                 out.extend(slots.borrow().values());
@@ -1485,6 +1509,19 @@ fn set_cell_prop(props: &ObjectCell, key: String, val: Value) -> Result<(), VmEr
         props.note_key_added(&key);
     }
     Ok(())
+}
+
+/// Whether a slot value could encode a legacy accessor half: only a
+/// function named `get …` or `set …` can (see `builtins::object::accessor_kind`).
+pub(crate) fn legacy_accessor_candidate(value: &Value) -> bool {
+    let name = match value {
+        Value::Function(function) => function.name.as_deref(),
+        Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
+            Some(name.as_ref())
+        }
+        _ => None,
+    };
+    name.is_some_and(|name| name.starts_with("get ") || name.starts_with("set "))
 }
 
 /// A symbol's identity.

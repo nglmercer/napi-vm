@@ -2129,7 +2129,21 @@ impl Interpreter {
         let mut cursor = Some(scope.clone());
         while let Some(environment) = cursor {
             let frame = environment.borrow();
-            if frame.own_lexical_binding(name) || frame.with_object.is_some() {
+            if frame.with_object.is_some() {
+                break;
+            }
+            if frame.own_lexical_binding(name) {
+                drop(frame);
+                self.check_execution_interrupt()?;
+                let delta = if inc { 1.0 } else { -1.0 };
+                let previous = environment.borrow_mut().update_own_number(name, delta);
+                if let Some(previous) = previous {
+                    return Ok(Value::Number(if prefix {
+                        previous + delta
+                    } else {
+                        previous
+                    }));
+                }
                 break;
             }
             if frame.is_global_scope() {
@@ -2137,13 +2151,19 @@ impl Interpreter {
                 drop(frame);
                 if let Some(object) = object
                     && let Some(properties) = object.property_cell()
-                    && !properties.meta.borrow().may_have_accessor(name)
+                    && !properties.meta.borrow().has_accessor_marker(name)
                     && properties.meta.borrow().attrs_of(name).writable
-                    && let Some(Value::Number(number)) = properties.own_value(name)
+                    && let Some(index) = properties.own_index(name)
+                    && let Some(Value::Number(number)) = properties.slot_verified(index, name)
                 {
                     self.check_execution_interrupt()?;
                     let updated = Value::Number(if inc { number + 1.0 } else { number - 1.0 });
-                    object.set_prop(name.to_owned(), updated.clone())?;
+                    // The verified slot is an own writable data property; this
+                    // is exactly the store `set_prop` would perform.
+                    if let Err(updated) = properties.set_slot_verified(index, name, updated.clone())
+                    {
+                        object.set_prop(name.to_owned(), updated)?;
+                    }
                     return Ok(if prefix {
                         updated
                     } else {
@@ -2228,7 +2248,12 @@ impl Interpreter {
         }
         match value {
             Value::Null | Value::Undefined => self.realm_global_object(),
-            other => Value::boxed_primitive(other.clone()).unwrap_or(other),
+            primitive @ (Value::Bool(_)
+            | Value::Number(_)
+            | Value::String(_)
+            | Value::Symbol(_)
+            | Value::BigInt(_)) => Value::boxed_primitive(primitive).expect("primitive wrapper"),
+            other => other,
         }
     }
 
@@ -2282,6 +2307,48 @@ impl Interpreter {
         this_val: Value,
         args: &[Value],
     ) -> Result<Value, VmErr> {
+        if let Value::NativeFunction { callable, .. } = f {
+            // Native functions have no realm of their own. They execute in
+            // the current realm, while allocation and native-boundary state
+            // still need the same guards as the general call path.
+            let saved_persistent = self.persistent_global.clone();
+            let _allocation_realm =
+                super::realm::AllocationRealm::enter(Some(saved_persistent.clone()));
+            let result = self.execution.check().and_then(|()| {
+                if args.len() > crate::value::MAX_ARRAY_LEN {
+                    return Err(crate::value::limit_err("Maximum argument count exceeded"));
+                }
+                self.call_native_function(*callable, this_val, args.to_vec())
+            });
+            let result = result.map_err(|error| error.with_context(None, self.get_stack()));
+            self.persistent_global = saved_persistent;
+            return result;
+        }
+        if let Value::Function(fd) = f
+            && fd.bound.is_none()
+            && let Some(callable) = fd.native
+        {
+            self.execution.check()?;
+            let owner = fd
+                .closure
+                .as_ref()
+                .and_then(super::Environment::find_global)
+                .or_else(|| fd.properties.meta.borrow().realm_global.clone())
+                .unwrap_or_else(|| self.persistent_global.clone());
+            let saved_modules = self.enter_module_realm(&owner);
+            let saved_persistent = std::mem::replace(&mut self.persistent_global, owner.clone());
+            let _allocation_realm = super::realm::AllocationRealm::enter(Some(owner));
+            let result = self.execution.check().and_then(|()| {
+                if args.len() > crate::value::MAX_ARRAY_LEN {
+                    return Err(crate::value::limit_err("Maximum argument count exceeded"));
+                }
+                self.call_native_function(callable, this_val, args.to_vec())
+            });
+            let result = result.map_err(|error| error.with_context(None, self.get_stack()));
+            self.persistent_global = saved_persistent;
+            saved_modules.install(self);
+            return result;
+        }
         if let Value::Function(fd) = f
             && fd.bound.is_none()
             && !fd.is_generator
@@ -2293,15 +2360,15 @@ impl Interpreter {
                     "RangeError: Maximum call stack size exceeded".into(),
                 ));
             }
-            let owner =
-                super::realm::value_realm(f).unwrap_or_else(|| self.persistent_global.clone());
+            let (closure_global, closure_module) = fd
+                .closure
+                .as_ref()
+                .map_or((None, None), super::Environment::chain_context);
+            let owner = closure_global
+                .or_else(|| fd.properties.meta.borrow().realm_global.clone())
+                .unwrap_or_else(|| self.persistent_global.clone());
             let saved_modules = self.enter_module_realm(&owner);
-            let saved_module = std::mem::replace(
-                &mut self.cur_mod,
-                fd.closure
-                    .as_ref()
-                    .and_then(|env| env.borrow().module_context()),
-            );
+            let saved_module = std::mem::replace(&mut self.cur_mod, closure_module);
             let saved_persistent = std::mem::replace(&mut self.persistent_global, owner.clone());
             let _allocation_realm = super::realm::AllocationRealm::enter(Some(owner));
             let parent_env = fd.closure.clone().unwrap_or_else(|| self.global.clone());
@@ -2325,6 +2392,9 @@ impl Interpreter {
                         args,
                         fd.strict,
                         f,
+                        fd.closure.is_some()
+                            && !code.needs_frame_environment
+                            && self.tier_tracking == crate::jit::TierTracking::Disabled,
                     )
                 })
             }));
@@ -3047,6 +3117,9 @@ impl Interpreter {
     }
 
     pub(crate) fn ctor(&mut self, f: &Value, args: Vec<Value>) -> Result<Value, VmErr> {
+        if let Some(date) = self.construct_intrinsic_date(f, &args)? {
+            return Ok(date);
+        }
         let caller = self.persistent_global.clone();
         // EvaluateNew checks IsConstructor in the evaluating caller's realm,
         // before entering the operand's realm or reading newTarget.prototype.
@@ -3067,6 +3140,39 @@ impl Interpreter {
         });
         self.constructor_error_realms.pop();
         result
+    }
+
+    /// `new Date(...)` on a realm's own intrinsic `Date`, as its own
+    /// newTarget, with arguments that cannot run guest code. Every step the
+    /// general path takes is then unobservable except allocation in the
+    /// constructor's realm and its immutable `Date.prototype` link.
+    fn construct_intrinsic_date(
+        &mut self,
+        f: &Value,
+        args: &[Value],
+    ) -> Result<Option<Value>, VmErr> {
+        let Value::Object { props } = f else {
+            return Ok(None);
+        };
+        if props.meta.borrow().builtin_constructor != Some(crate::value::BuiltinConstructor::Date) {
+            return Ok(None);
+        }
+        let Some(time) = crate::builtins::date::primitive_construction_time(args) else {
+            return Ok(None);
+        };
+        let Some(owner) = props.meta.borrow().realm_global.clone() else {
+            return Ok(None);
+        };
+        let Some(prototype) = owner.borrow().cached_intrinsic_date_prototype(f) else {
+            return Ok(None);
+        };
+        self.execution.check()?;
+        let _allocation_realm = super::realm::AllocationRealm::enter(Some(owner));
+        let date = Value::date(time);
+        if let Some(properties) = date.property_cell() {
+            properties.set_proto(Some(prototype));
+        }
+        Ok(Some(date))
     }
 
     fn ctor_in_realm(&mut self, f: &Value, args: Vec<Value>) -> Result<Value, VmErr> {
@@ -3130,10 +3236,20 @@ impl Interpreter {
         {
             let owner =
                 super::realm::value_realm(f).unwrap_or_else(|| self.persistent_global.clone());
-            let builtin = owner
-                .borrow()
-                .intrinsic_name(f)
-                .unwrap_or_else(|| "Object".into());
+            let builtin = if matches!(f, Value::Object { props }
+                if props.meta.borrow().builtin_constructor == Some(crate::value::BuiltinConstructor::Date))
+                && owner
+                    .borrow()
+                    .intrinsic("Date")
+                    .is_some_and(|date| crate::interpreter::strict_equals(f, &date))
+            {
+                "Date".into()
+            } else {
+                owner
+                    .borrow()
+                    .intrinsic_name(f)
+                    .unwrap_or_else(|| "Object".into())
+            };
             if matches!(
                 builtin.as_str(),
                 "Map"

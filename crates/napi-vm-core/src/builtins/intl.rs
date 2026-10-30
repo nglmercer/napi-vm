@@ -100,7 +100,7 @@ fn arg(args: &[Value], n: usize) -> Value {
 fn slot(value: &Value) -> Option<LocaleSlots> {
     value
         .property_cell()
-        .and_then(|p| p.meta.borrow().intl_locale.clone())
+        .and_then(|p| p.meta.borrow().intl_locale.as_deref().cloned())
 }
 fn locale(value: &Value) -> Result<LocaleSlots, VmErr> {
     slot(value).ok_or_else(type_error)
@@ -285,7 +285,7 @@ fn wrap(i: &mut Interpreter, loc: LocaleSlots, construct: bool) -> Result<Value,
         .unwrap()
         .meta
         .borrow_mut()
-        .intl_locale = Some(loc);
+        .intl_locale = Some(Box::new(loc));
     Ok(result)
 }
 fn construct(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {

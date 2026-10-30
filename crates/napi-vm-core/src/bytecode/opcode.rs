@@ -899,23 +899,26 @@ impl Instr {
     /// starting point for benchmark tuning, not a final schedule.
     #[inline(always)]
     pub fn cost(&self) -> u64 {
-        match self.opcode() {
-            Opcode::DirectEval
-            | Opcode::DirectEvalSpread
-            | Opcode::Call
-            | Opcode::CallMethod
-            | Opcode::CallSpread
-            | Opcode::MethodSpread => 5,
-            Opcode::Construct | Opcode::ConstructSpread => 8,
-            Opcode::NewObject | Opcode::NewArray | Opcode::BuildObject | Opcode::BuildArray => 10,
-            Opcode::GetProp | Opcode::SetProp | Opcode::SetOwnProp => 2,
-            Opcode::Mov
-            | Opcode::Jump
-            | Opcode::JumpIfTrue
-            | Opcode::JumpIfFalse
-            | Opcode::JumpIfNullish
-            | Opcode::JumpIfNotNullish
-            | Opcode::LoopHead => 0,
+        match self {
+            Instr::DirectEval { .. }
+            | Instr::DirectEvalSpread { .. }
+            | Instr::Call { .. }
+            | Instr::CallMethod { .. }
+            | Instr::CallSpread { .. }
+            | Instr::MethodSpread { .. } => 5,
+            Instr::Construct { .. } | Instr::ConstructSpread { .. } => 8,
+            Instr::NewObject { .. }
+            | Instr::NewArray { .. }
+            | Instr::BuildObject { .. }
+            | Instr::BuildArray { .. } => 10,
+            Instr::GetProp { .. } | Instr::SetProp { .. } | Instr::SetOwnProp { .. } => 2,
+            Instr::Mov { .. }
+            | Instr::Jump { .. }
+            | Instr::JumpIfTrue { .. }
+            | Instr::JumpIfFalse { .. }
+            | Instr::JumpIfNullish { .. }
+            | Instr::JumpIfNotNullish { .. }
+            | Instr::LoopHead => 0,
             _ => 1,
         }
     }

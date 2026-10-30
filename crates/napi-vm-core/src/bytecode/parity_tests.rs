@@ -200,6 +200,27 @@ fn date_prototype_read_cache_observes_mutations() {
 }
 
 #[test]
+fn date_construction_observes_coercion_and_new_target_prototype() {
+    let source = r#"
+        let log = '', proto = {}, target = new Proxy(function(){}, {
+          get(t, k, r) { if (k === 'prototype') { log += 'p'; return proto; }
+                         return Reflect.get(t, k, r); }
+        });
+        let date = Reflect.construct(Date, [{valueOf() { log += 'v'; return 42; }}], target);
+        let bound = (function(){}).bind(null);
+        Object.defineProperty(bound, 'prototype', {get() { log += 'g'; return proto; }});
+        let other = Reflect.construct(Date, [43], bound);
+        log === 'vpg' && Object.getPrototypeOf(date) === proto &&
+          Object.getPrototypeOf(other) === proto && Date.prototype.getTime.call(date) === 42;
+    "#;
+    check(source, true);
+    assert!(matches!(
+        run_ast_with_modules(source, &[]),
+        Ok(Value::Bool(true))
+    ));
+}
+
+#[test]
 fn repeated_regexp_literals_keep_independent_mutable_state() {
     let source = r#"
         function make() { return /a/g; }
@@ -1882,6 +1903,26 @@ fn completed_function_activations_release_argument_cycles() {
     let stats = vm.collect_cycles();
     assert!(stats.skipped.is_none(), "{stats:?}");
     assert!(weak.upgrade().is_none());
+}
+
+#[test]
+fn repeated_calls_reset_local_bindings_and_temporal_dead_zones() {
+    let source = r#"
+        function fill(a, b, c) { let x = {a, b, c}; return x.a; }
+        function read(a) { let x; return [a, x]; }
+        function tdz() { try { return x; } catch (e) { return e instanceof ReferenceError; } let x; }
+        for (let i = 0; i < 20; i++) {
+          if (fill(i, i + 1, i + 2) !== i || read()[0] !== undefined ||
+              read(3)[1] !== undefined || !tdz()) return false;
+        }
+        return true;
+    "#;
+    let source = format!("(function() {{{source}}})()");
+    check(&source, true);
+    assert!(matches!(
+        run_ast_with_modules(&source, &[]),
+        Ok(Value::Bool(true))
+    ));
 }
 
 #[test]

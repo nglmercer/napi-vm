@@ -26,9 +26,7 @@ pub(crate) fn allocation_global() -> Option<Env> {
 pub(crate) fn allocation_prototype(name: &str) -> Option<Rc<Value>> {
     allocation_global()?
         .borrow()
-        .intrinsic(name)?
-        .get_prop("prototype")
-        .map(Rc::new)
+        .cached_allocation_prototype(name)
 }
 
 pub(crate) fn value_realm(value: &Value) -> Option<Env> {
@@ -166,7 +164,27 @@ impl Interpreter {
         target: &Value,
         builtin: &str,
     ) -> Result<Option<Rc<Value>>, VmErr> {
-        let prototype = self.get_prop_value_str(target, "prototype")?;
+        let own_data = if let Value::Object { props } = target
+            && !props.meta.borrow().module_namespace
+            && !props.meta.borrow().may_have_accessor("prototype")
+        {
+            props
+                .own_value("prototype")
+                .filter(|value| !matches!(value, Value::Binding(_) | Value::Uninitialized))
+        } else {
+            None
+        };
+        let prototype = if let Some(value) = own_data {
+            self.check_execution_interrupt()?;
+            if self.property_get_depth >= crate::value::MAX_PROTOTYPE_DEPTH {
+                return Err(crate::value::limit_err(
+                    "Maximum property operation depth exceeded",
+                ));
+            }
+            value
+        } else {
+            self.get_prop_value_str(target, "prototype")?
+        };
         if super::call::is_js_object(&prototype) {
             return Ok(Some(Rc::new(prototype)));
         }

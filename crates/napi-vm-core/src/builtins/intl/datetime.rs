@@ -71,7 +71,7 @@ fn error() -> VmErr {
 }
 fn slot(v: &Value) -> Result<Slots, VmErr> {
     v.property_cell()
-        .and_then(|p| p.meta.borrow().intl_datetime.clone())
+        .and_then(|p| p.meta.borrow().intl_datetime.as_deref().cloned())
         .ok_or_else(error)
 }
 fn method(target: &Value, name: &str, length: usize, f: NativeFn, fp: &Option<Value>) {
@@ -503,7 +503,7 @@ fn construct(i: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value
         .unwrap()
         .meta
         .borrow_mut()
-        .intl_datetime = Some(slots);
+        .intl_datetime = Some(Box::new(slots));
     let new_target = i.new_target_stack.last().cloned();
     let ctor = i
         .persistent_global
@@ -970,7 +970,7 @@ fn resolve_moment(i: &mut Interpreter, s: &Slots, value: Value) -> Result<Moment
     }
     let temporal = value
         .property_cell()
-        .and_then(|p| p.meta.borrow().temporal.clone());
+        .and_then(|p| p.meta.borrow().temporal.as_deref().cloned());
     if let Some(t) = temporal {
         let kind_of = |id: &str| temporal_kind(id).unwrap_or(s.calendar_kind);
         match t {
@@ -1627,7 +1627,7 @@ pub(crate) fn temporal_to_locale(
     use super::super::temporal::Slots as Temporal;
     let temporal = this
         .property_cell()
-        .and_then(|p| p.meta.borrow().temporal.clone())
+        .and_then(|p| p.meta.borrow().temporal.as_deref().cloned())
         .ok_or_else(error)?;
     let requested = locale_list(i, arg(&args, 0))?;
     let options = match arg(&args, 1) {
@@ -1758,7 +1758,7 @@ fn get_format(i: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, 
     slot(&this)?;
     let cell = this.property_cell().unwrap();
     if let Some(value) = &cell.meta.borrow().intl_bound_format {
-        return Ok(value.clone());
+        return Ok((**value).clone());
     }
     let fp = i
         .persistent_global
@@ -1773,7 +1773,7 @@ fn get_format(i: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, 
         p.iter_mut().find(|(k, _)| k == "name").unwrap().1 = Value::String("".into());
         p.sort_by_key(|(k, _)| if k == "length" { 0 } else { 1 });
     }
-    cell.meta.borrow_mut().intl_bound_format = Some(bound.clone());
+    cell.meta.borrow_mut().intl_bound_format = Some(Box::new(bound.clone()));
     Ok(bound)
 }
 fn parts_array(parts: &[(String, String)], source: Option<&str>) -> Result<Value, VmErr> {
@@ -1894,7 +1894,7 @@ fn range_sides_compatible(i: &mut Interpreter, args: &[Value]) -> Result<bool, V
     let brand = |value: &Value| {
         value
             .property_cell()
-            .and_then(|cell| cell.meta.borrow().temporal.clone())
+            .and_then(|cell| cell.meta.borrow().temporal.as_deref().cloned())
             .is_some()
     };
     let first = arg(args, 0);

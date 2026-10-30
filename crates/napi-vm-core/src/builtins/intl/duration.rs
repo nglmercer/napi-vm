@@ -60,7 +60,7 @@ fn error() -> VmErr {
 }
 fn slot(v: &Value) -> Result<Slots, VmErr> {
     v.property_cell()
-        .and_then(|p| p.meta.borrow().intl_duration.clone())
+        .and_then(|p| p.meta.borrow().intl_duration.as_deref().cloned())
         .ok_or_else(error)
 }
 fn choice(
@@ -266,7 +266,7 @@ fn construct(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, V
         .unwrap()
         .meta
         .borrow_mut()
-        .intl_duration = Some(Slots {
+        .intl_duration = Some(Box::new(Slots {
         locale,
         numbering,
         style,
@@ -278,7 +278,7 @@ fn construct(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, V
         list: Rc::new(list),
         separator: data.payload.get().separator.to_string(),
         digit_map,
-    });
+    }));
     Ok(result)
 }
 fn resolved_options(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
@@ -304,18 +304,19 @@ fn resolved_options(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<V
 fn record(i: &mut Interpreter, value: Value) -> Result<([u128; 10], bool), VmErr> {
     // The pinned Temporal integration accepts duration strings and reads
     // branded Duration slots directly, without invoking prototype getters.
-    let temporal = match &value {
-        Value::String(text) => Some(
-            temporal_rs::Duration::from_utf8(text.to_string().as_bytes())
-                .map_err(|e| VmErr::Msg(e.to_string()))?,
-        ),
-        _ => value
-            .property_cell()
-            .and_then(|p| match p.meta.borrow().temporal.clone() {
-                Some(crate::builtins::temporal::Slots::Duration(d)) => Some(d),
-                _ => None,
+    let temporal =
+        match &value {
+            Value::String(text) => Some(
+                temporal_rs::Duration::from_utf8(text.to_string().as_bytes())
+                    .map_err(|e| VmErr::Msg(e.to_string()))?,
+            ),
+            _ => value.property_cell().and_then(|p| {
+                match p.meta.borrow().temporal.as_deref().cloned() {
+                    Some(crate::builtins::temporal::Slots::Duration(d)) => Some(d),
+                    _ => None,
+                }
             }),
-    };
+        };
     if let Some(d) = temporal {
         let fields = [
             d.years() as i128,

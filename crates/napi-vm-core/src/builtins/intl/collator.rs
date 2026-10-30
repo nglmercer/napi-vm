@@ -14,7 +14,7 @@ fn error() -> VmErr {
 }
 fn slot(this: &Value) -> Result<Slots, VmErr> {
     this.property_cell()
-        .and_then(|p| p.meta.borrow().intl_collator.clone())
+        .and_then(|p| p.meta.borrow().intl_collator.as_deref().cloned())
         .ok_or_else(error)
 }
 fn choice(
@@ -244,7 +244,7 @@ fn construct(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, V
         .unwrap()
         .meta
         .borrow_mut()
-        .intl_collator = Some(slots);
+        .intl_collator = Some(Box::new(slots));
     Ok(object)
 }
 fn compare(i: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
@@ -259,7 +259,7 @@ fn get_compare(i: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value,
     slot(&this)?;
     let cell = this.property_cell().unwrap();
     if let Some(bound) = &cell.meta.borrow().intl_bound_compare {
-        return Ok(bound.clone());
+        return Ok((**bound).clone());
     }
     let fp = i
         .persistent_global
@@ -281,7 +281,7 @@ fn get_compare(i: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value,
         .unwrap()
         .borrow_mut()
         .sort_by_key(|(k, _)| if k == "length" { 0 } else { 1 });
-    cell.meta.borrow_mut().intl_bound_compare = Some(bound.clone());
+    cell.meta.borrow_mut().intl_bound_compare = Some(Box::new(bound.clone()));
     Ok(bound)
 }
 fn resolved_options(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {

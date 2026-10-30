@@ -906,12 +906,12 @@ fn iterate_projection(
         .expect("collection iterator prototype");
     let iterator = Value::object_with_proto(vec![], Some(Rc::new(prototype)));
     if let Value::Object { props } = &iterator {
-        props.meta.borrow_mut().collection_iterator = Some(CollectionIteratorSlots {
+        props.meta.borrow_mut().collection_iterator = Some(Box::new(CollectionIteratorSlots {
             collection: Some(this.clone()),
             cursor: 0,
             kind,
             projection,
-        });
+        }));
     }
     Ok(iterator)
 }

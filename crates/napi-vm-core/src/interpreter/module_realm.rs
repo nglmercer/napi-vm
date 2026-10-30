@@ -87,14 +87,14 @@ impl ModuleRealmSwitch {
 }
 impl Interpreter {
     pub(crate) fn publish_module_realm(&self) {
-        self.persistent_global.borrow_mut().module_realm = Some(ModuleRealm::of(self));
+        self.persistent_global.borrow_mut().module_realm = Some(Box::new(ModuleRealm::of(self)));
     }
     pub(crate) fn enter_module_realm(&mut self, owner: &Env) -> ModuleRealmSwitch {
         if Rc::ptr_eq(owner, &self.persistent_global) {
             return ModuleRealmSwitch(None);
         }
         let saved = ModuleRealm::of(self);
-        let realm = owner.borrow().module_realm.clone();
+        let realm = owner.borrow().module_realm.as_deref().cloned();
         if let Some(realm) = realm {
             realm.install(self);
         }

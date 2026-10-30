@@ -43,7 +43,7 @@ fn error() -> VmErr {
 }
 fn slot(this: &Value) -> Result<Slots, VmErr> {
     this.property_cell()
-        .and_then(|p| p.meta.borrow().intl_displaynames.clone())
+        .and_then(|p| p.meta.borrow().intl_displaynames.as_deref().cloned())
         .ok_or_else(error)
 }
 fn method(target: &Value, name: &str, length: usize, f: NativeFn, fp: &Option<Value>) {
@@ -147,13 +147,13 @@ fn construct(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, V
         .unwrap()
         .meta
         .borrow_mut()
-        .intl_displaynames = Some(Slots {
+        .intl_displaynames = Some(Box::new(Slots {
         locale,
         style,
         type_name,
         fallback,
         language_display,
-    });
+    }));
     Ok(result)
 }
 

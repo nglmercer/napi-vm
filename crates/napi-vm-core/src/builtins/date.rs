@@ -216,6 +216,7 @@ fn date_construct(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<V
     let ms = match a.len() {
         0 => now_ms(),
         1 => match &a[0] {
+            Value::Number(number) => *number,
             Value::String(s) => parse_iso(s).unwrap_or(f64::NAN),
             Value::Date(existing) => existing.get(),
             other => {
@@ -232,6 +233,18 @@ fn date_construct(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<V
         }
     };
     Ok(Value::date(time_clip(ms)))
+}
+
+/// The time value `new Date(...args)` produces when no argument can run
+/// guest code or throw: no arguments, or one Number or String.
+pub(crate) fn primitive_construction_time(args: &[Value]) -> Option<f64> {
+    let ms = match args {
+        [] => now_ms(),
+        [Value::Number(number)] => *number,
+        [Value::String(text)] => parse_iso(text).unwrap_or(f64::NAN),
+        _ => return None,
+    };
+    Some(time_clip(ms))
 }
 
 /// Members readable on a `Date` instance.
