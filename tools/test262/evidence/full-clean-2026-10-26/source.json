@@ -1,9 +1,0 @@
-{
-  "commit": "9d23d087d0f7752853c24390776e00a605c28016",
-  "status": "clean",
-  "worker_sha256": "af0b2e63e48fa82c44ecb4eb4f956e203194dc07a84e54934ba4ca508d1865da",
-  "corpus_revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
-  "jobs": 2,
-  "timeout_seconds": 5,
-  "excluded_features": []
-}

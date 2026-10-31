@@ -23,6 +23,6 @@ All **369 core-library tests pass without exclusions**, including the complete
 native-addon fixture. Three additional isolated addon runs pass. Strict
 workspace Clippy and formatting pass. Failing/passing regression logs, full core
 output, repeat output, and the source patch are archived in
-[snapshot-order evidence](../tools/test262/evidence/node-addon-snapshot-order-2026-10-20/).
+snapshot-order evidence (removed in the 2026-10-30 Test262 cleanup; see [Test262 history](test262-history.md)).
 This host-only fix makes no Test262 score claim and is outside the preceding
 default-export naming worker.

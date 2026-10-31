@@ -1,6 +1,0 @@
-{
-  "test": "staging/sm/TypedArray/element-setting-converts-using-ToNumber.js",
-  "prior_worker_sha256": "57903219c400841e66f364137531ee0eaf5ff969373616cc2d8eee8a2217f02a",
-  "current_worker_sha256": "db0105ef524745475bc370cc6a52e359b0100e8682424bd5d2bebfd26d9830fc",
-  "result": "Both variants timed out with the previous and current workers at five seconds. Both passed with the current worker at 30 seconds. This does not identify a cause or replace the five-second outcomes."
-}

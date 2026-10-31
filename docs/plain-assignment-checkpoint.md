@@ -12,6 +12,6 @@ Eight integration regressions cover both AST and verified bytecode. Focused Test
 - Combined: **1,571/1,768**, zero crashes, timeouts, skips, or harness errors.
 - No former passing variant in this selection became nonpassing relative to the archived full abstract-equality run.
 
-Evidence: `tools/test262/evidence/plain-assignment/results.json.gz`, engine SHA-256 `2e5ed99cae51c0d35a546226f682c487e24b7deb51d6580b1989fb3cb7400c62`. The worker used a debug build, 8 jobs, and a 5-second deadline. No full-corpus or broad workspace verification was run.
+Evidence (removed in the 2026-10-30 Test262 cleanup; see [Test262 history](test262-history.md)): `tools/test262/evidence/plain-assignment/results.json.gz`, engine SHA-256 `2e5ed99cae51c0d35a546226f682c487e24b7deb51d6580b1989fb3cb7400c62`. The worker used a debug build, 8 jobs, and a 5-second deadline. No full-corpus or broad workspace verification was run.
 
 The next assignment family to address is destructuring: consume iterator records in order, close on abrupt completion, evaluate assignment targets at the specified point, and infer default initializer names.

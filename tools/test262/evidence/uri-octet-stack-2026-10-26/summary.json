@@ -1,9 +1,0 @@
-{
-  "base_commit": "70dd4564ec456fdb83babbd6600a701a379fb68f",
-  "source_diff_sha256": "741d60d55cdf89631b8865f1a28150302d9f0fd34b5b768ef07cf02c74a21c4e",
-  "baseline_worker_sha256": "7455753c5b644f4a0f33fdc4c859cdec76be3f4facb3d235fbac2786bf5fb32e",
-  "candidate_worker_sha256": "77958383469abcf553e74d81503b3055e3e8c03352c9772ffbbe6e317d4e126c",
-  "regression": "342/346 pass, four exhaustive decoder variants timeout, no other failures",
-  "benchmark": "300000 decodes: baseline 5.049, 4.995, 5.008 seconds; candidate 5.139, 5.017, 5.013 seconds",
-  "decision": "reverted: no measured improvement"
-}

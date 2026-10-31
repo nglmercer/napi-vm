@@ -1,7 +1,0 @@
-{
-  "source_commit": "42ae715ba57ee8b51bbf95e717851f63be0b4641",
-  "source_status": "uncommitted snapshot; diff includes the new decorators.rs module",
-  "source_diff_sha256": "ad78b1c5baab51c241ab105817bb4db376a5c7eea2e110b45f952e819eff674b",
-  "engine_built": false,
-  "regression_exit_code": 101
-}

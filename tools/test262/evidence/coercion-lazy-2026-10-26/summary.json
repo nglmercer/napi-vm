@@ -1,9 +1,0 @@
-{
-  "base_commit": "7eb3049b7d03ed836f5493e2d8eb4cb98c104c6a",
-  "source_diff_sha256": "762e918914ce1c006ed46cd4a7341d76a685cf12bb3f5217144b0d45dcc0330e",
-  "worker_sha256": "7455753c5b644f4a0f33fdc4c859cdec76be3f4facb3d235fbac2786bf5fb32e",
-  "targeted_first": "1 conversion pass, 1 conversion timeout; both sort variants timed out",
-  "targeted_repeat": "both conversion variants passed",
-  "regression": "5298/5300 pass, 2 sort timeouts, 2 gains and 0 losses versus latest full run",
-  "limitation": "conversion performance is close to the five-second limit; first run timed out in one variant"
-}

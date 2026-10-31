@@ -1,9 +1,0 @@
-{
-  "source_base": "d18faf70a6a9b694c3928b9503cf3e0e35114c74",
-  "implementation_paths": [
-    "crates/napi-vm-core/src/builtins/typedarray.rs",
-    "crates/napi-vm-core/tests/typed_array_method_identity.rs",
-    "crates/napi-vm-core/tests/realm_semantics.rs"
-  ],
-  "source_patch_sha256": "4bbe873024e6017f6cb5eb8f551f7c408539b0be7c12549dc55eda4c0f1563e8"
-}

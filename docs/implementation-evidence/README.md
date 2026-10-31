@@ -1,5 +1,9 @@
 # Local implementation evidence
 
+Paths under `tools/test262/evidence/` and `artifacts/test262/` refer to Test262
+files removed in the 2026-10-30 cleanup; restore them with
+`git show 9bc2103:<path>`.
+
 Read [results.md](results.md) for measured improvements, regressions, and the
 remaining release blockers. The patch is not release approved.
 
@@ -77,8 +81,8 @@ gains 134 passes and loses none. The corpus is
 The combined ShadowRealm and `isPrototypeOf` selection passes 144/144.
 
 - Full report, triage, comparison, focused report, and source patch:
-  [`tools/test262/evidence/shadow-realm-2026-10-18/`](../../tools/test262/evidence/shadow-realm-2026-10-18/)
-- Compact result: [`tools/test262/latest.json`](../../tools/test262/latest.json)
+  `tools/test262/evidence/shadow-realm-2026-10-18/` (removed in the 2026-10-30 Test262 cleanup)
+- Compact result: `tools/test262/latest.json` (removed in the 2026-10-30 Test262 cleanup)
 - Source patch SHA-256:
   `9d76d3383f55620dc96f6091e50fec53e1bc580746263677a3df590eb4322250`
 
@@ -110,7 +114,8 @@ timeout, resumable journal with zero resumed files.
 
 Reproduce with the command in [tools/test262/README.md](../../tools/test262/README.md),
 adding `--checkpoint artifacts/test262/full-2026-10-15.checkpoint.jsonl`.
-Runner unit tests pass (`python3 -m unittest discover -s tools/test262`,
+Runner unit tests passed at that revision (`python3 -m unittest discover -s tools/test262`;
+that Python runner has since been replaced by `cargo test -p napi-vm-test262-runner`),
 12 tests OK). This establishes a local Linux x64 re-measurement, not a new
 conformance claim: remaining failures are unchanged from the archived triage.
 
@@ -150,5 +155,5 @@ ran on an intermediate build whose repetition layers broke greedy
 backtracking order (120 lost passes, all since recovered and verified on
 selections). This 2026-10-15 measurement has since been superseded by later
 full-corpus reports. The current measured state and evidence are maintained in
-[`tools/test262/latest.json`](../../tools/test262/latest.json) and
-[`tools/test262/evidence/shadow-realm-2026-10-18/`](../../tools/test262/evidence/shadow-realm-2026-10-18/).
+`tools/test262/latest.json` and `tools/test262/evidence/shadow-realm-2026-10-18/`
+(removed in the 2026-10-30 Test262 cleanup).

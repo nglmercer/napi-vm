@@ -1,9 +1,0 @@
-{
-  "source_commit": "a5a2362cba0237b10b354637bb5016b9e015c0b9",
-  "source_tree": "de18b32e394f7c2e4a4d5976e25b84cff215af06",
-  "source_state": "detached clean checkout, validated before and after build",
-  "checkout": "/tmp/node-vm-verified-a5a2362",
-  "started_utc": "2026-10-20T23:59:56.850223+00:00",
-  "engine_sha256": "d7bd1b71078f5f6787e2df9e52739c81ee86280bae38a6b292e007a54548f2c1",
-  "worker": "/tmp/node-vm-verified-a5a2362-worker"
-}

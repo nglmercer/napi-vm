@@ -1,7 +1,0 @@
-{
-  "base_commit": "9bd736b9b91d8a3f2fc16b4cda1a27edc47fe314",
-  "source_diff_sha256": "6794bb02052a29b54d4279fd80d04df8526384d1e9e96ee3d5eafa1713c482fa",
-  "worker_sha256": "e3b9200bebdf962b670d95086dd8cfac8b3b5907b55526785d14fdbf807333bc",
-  "regression": "9939/9943 passed, four known Date/sort timeouts, two gains and zero losses vs latest full run",
-  "attribution": "Both conversion variants passed; they also passed in earlier focused runs before this change, so gains are not attributable to it."
-}

@@ -26,37 +26,23 @@ jobs:
         uses: ./.github/actions/setup-build
         with:
           cache-group: test262
-      - name: Build isolated worker
-        run: cargo build --release --locked --no-default-features --bin napi-vm-test262
-      - name: Install runner dependencies and pinned corpus
+      - name: Build isolated worker and Test262 tool
         run: |
-          python3 -m venv .napi-vm/test262-env
-          .napi-vm/test262-env/bin/python -m pip install -r tools/test262/requirements.txt
-          python3 - <<'PY'
-          import json
-          import subprocess
-          from pathlib import Path
-          lock = json.loads(Path('tools/test262/corpus.lock.json').read_text())
-          root = '.napi-vm/test262'
-          subprocess.run(['git', 'init', root], check=True)
-          subprocess.run(['git', '-C', root, 'fetch', '--depth=1', lock['repository'], lock['revision']], check=True)
-          subprocess.run(['git', '-C', root, 'checkout', '--detach', 'FETCH_HEAD'], check=True)
-          PY
+          cargo build --release --locked --no-default-features --bin napi-vm-test262
+          cargo build --release --locked -p napi-vm-test262-runner
+      - name: Fetch pinned corpus
+        run: target/release/test262 fetch
       - name: Run all variants without feature skips
         run: |
           mkdir -p artifacts/test262
-          revision=$(python3 -c 'import json; print(json.load(open("tools/test262/corpus.lock.json"))["revision"])')
-          .napi-vm/test262-env/bin/python tools/test262/run.py .napi-vm/test262 \
-            --engine target/release/napi-vm-test262 --revision "$revision" \
-            --jobs 2 --timeout 10 --output artifacts/test262/full-results.json
-      - name: Generate triage and dashboard
+          target/release/test262 run --jobs 2 --timeout 10 \
+            --output artifacts/test262/full-results.json
+      - name: Summarize results
         if: always()
         run: |
           if test -f artifacts/test262/full-results.json; then
-            .napi-vm/test262-env/bin/python tools/test262/triage.py artifacts/test262/full-results.json \
-              --output artifacts/test262/triage.json
-            .napi-vm/test262-env/bin/python tools/test262/dashboard.py artifacts/test262/full-results.json \
-              --output artifacts/test262/compatibility.html
+            target/release/test262 summary artifacts/test262/full-results.json \
+              --json artifacts/test262/summary.json --show 1000
           fi
       - name: Upload results even when conformance fails
         if: always()

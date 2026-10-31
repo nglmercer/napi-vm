@@ -157,7 +157,7 @@ Every claim below was checked against the current build.
   sidecar. A compiled C fixture checks real Node-API calls, guest callbacks,
   value identity, Promise settlement, package exports, and prototype-based
   reads and calls, plus construction of guest classes and proxies over those
-  classes (`src/interpreter/node_addon.rs`). Sparse arrays now preserve holes
+  classes (`crates/napi-vm-core/src/interpreter/node_addon.rs`). Sparse arrays now preserve holes
   across guest/native calls. Plain guest object prototype changes roundtrip
   through native calls, including null and default prototypes. The bridge
   reports the selected Node and Node-API versions and can enforce a minimum
@@ -175,7 +175,7 @@ Every claim below was checked against the current build.
   ArrayBuffer detachment, object type tags, freeze/seal for supported object
   models, async cleanup hooks, and controlled guest callbacks. The complete Node-API surface remains
   unsupported; unimplemented imports fail during loading
-  (`src/interpreter/rust_node_api.rs`).
+  (`crates/napi-vm-core/src/interpreter/rust_node_api.rs`).
 
 - **Generators without stack switching (`wasm32`, Windows ARM64)** — these
   targets have no supported stack-switching backend, so the body cannot be

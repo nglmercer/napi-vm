@@ -1,8 +1,0 @@
-{
-  "source_base": "7af44cda4e72e0322b08c02f1e0e701fb4bda014",
-  "implementation_paths": [
-    "crates/napi-vm-core/src/builtins/typedarray.rs",
-    "crates/napi-vm-core/tests/typed_array_buffer_coercion.rs"
-  ],
-  "source_patch_sha256": "8c59d39d545a0940b774969be2de1600b576cdd99475011833b3a8bf98f66aaf"
-}

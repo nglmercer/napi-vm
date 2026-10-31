@@ -1,1 +1,0 @@
-ba0fdfb17adc61dd7224a2248ec53bd34811cb2dafeec8d433359bf75e9f6d8d  target/release/napi-vm-test262

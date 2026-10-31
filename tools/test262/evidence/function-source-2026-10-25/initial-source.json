@@ -1,8 +1,0 @@
-{
-  "source_commit": "0a468de7298453447c1fca7ba44b1c8e9b905001",
-  "source_status": "",
-  "engine_sha256": "bbf817ac8520519221bb5cfa0b9a220ab7c795f49902cbbb54358045fc92e21a",
-  "baseline_worker_source_commit": "f3d2d6121249968f3da58282748e57071318f6d1",
-  "baseline_engine_sha256": "d338c7efb4ab9da86c947b74dd8fbcbe70cc34e5bfb307f1dfe3696bd77f9622",
-  "rust": "rustc 1.99.0 (b940084d7 2026-09-28)"
-}

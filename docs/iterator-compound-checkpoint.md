@@ -18,6 +18,6 @@ Pinned revision: `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`.
 
 Remaining 10 failures are the script/strict variants of `Iterator.zip/basic-{shortest,longest,strict}.js` (the property-check harness grows array length beyond the VM allocation cap) and `Iterator.zipKeyed/basic-{shortest,longest}.js` (instruction fuel limit). Resource limits have not been relaxed to obtain a higher score.
 
-Evidence: `tools/test262/evidence/iterator-compound/results.json.gz`; engine SHA-256 `8d7c9683885c7de5ac9aea7cad50133887b1f4a19100eea4079bf9b0681a3d9a`.
+Evidence (removed in the 2026-10-30 Test262 cleanup; see [Test262 history](test262-history.md)): `tools/test262/evidence/iterator-compound/results.json.gz`; engine SHA-256 `8d7c9683885c7de5ac9aea7cad50133887b1f4a19100eea4079bf9b0681a3d9a`.
 
 Validation used targeted integration tests and the three affected Test262 directories with a debug worker, 8 jobs, and a 15-second variant deadline. No full-corpus run or broad workspace verification was performed for this change. The earlier checkpoint remains commit `135b1bd`.

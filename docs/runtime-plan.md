@@ -189,14 +189,14 @@ graphs, cache tampering rejection and a version-pinned real-package corpus.
 Binary module integration now exposes `type: 'bytes'` through FileLoader,
 HttpLoader, NpmLoader, and TypeScriptLoader. Permission and resource-limit
 checks remain on the raw byte path; TypeScript does not transform binary
-requests. See [byte module implementation and validation](test262-byte-modules-continuation.md).
+requests. See byte module implementation and validation (notes removed; see [Test262 history](test262-history.md)).
 
 The module loader also supports an explicit `load_source_object` host hook.
 Static and dynamic source-phase imports share cached branded objects without
 linking or evaluating their target's ordinary module graph. Local and star
 re-exports preserve source-object identity. Unsupported hosts reject source
 representations; the engine does not infer one from JavaScript text. See
-[source-phase implementation](test262-static-source-imports-continuation.md).
+source-phase implementation (notes removed; see [Test262 history](test262-history.md)).
 
 ### M5 — P1 optional Node and TypeScript
 

@@ -1,9 +1,0 @@
-{
-  "base_commit": "4f4c99cc0c2181f3012ff8f8662c28dbdae0f131",
-  "source_diff_sha256": "fde59fb675013ad590cde23a4a92f3d93e8a6d765eb28955fd7c89a483b2c764",
-  "baseline_worker_sha256": "22a925af2b2db893cdf39c6d10927d0227dec1f499101d23dfb4fb5ca40ee7dd",
-  "candidate_worker_sha256": "9d87454b623a6a1ceac3d87e2a43bc223d7e691f492845a3801c9faa2ce5d718",
-  "regression": "2715/2719 passed; four known URI timeouts",
-  "scaled_uri": "single-worker B4 loop limited to 8 of 64 values: baseline 1.290, 1.255, 1.268 seconds; candidate 1.282, 1.270, 1.267 seconds. Modified test is diagnostic only.",
-  "decision": "reverted; no measurable improvement"
-}

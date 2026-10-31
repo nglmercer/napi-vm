@@ -513,121 +513,14 @@ flight. VMs that only use the synchronous `run()` do not need it.
 The core language and bridge are actively developed and covered by the native
 regression suite. Run `npm test` to see the current verified count.
 
-The latest completed full Test262 run uses corpus
-`0b4e0812022b18236b5276d2804948fdd9f71603` and source `d1d403d`. It passes
-**102,957 / 102,992 variants (99.9660%)**, with one failure, 34 timeouts,
-and no skips, crashes, or harness errors. The failure is an
-[upstream-confirmed contradiction](https://github.com/tc39/test262/issues/5113).
-The run used two workers and five-second deadlines; all 34 timeouts repeated
-without competing builds. The complete report
-and remaining work are in the [evidence](tools/test262/evidence/full-new-revision-2026-10-27/)
-and [full-pass plan](docs/test262-full-pass-plan.md).
-
-The following paragraphs describe historical focused checkpoints; the full
-result above supersedes references to their then-active full runs.
-
-Function/Proxy metadata and inheritance now pass **1,624 / 1,628** focused
-variants in an isolated optimized build: **12 gains, zero lost passes**.
-See the
-[Function/Proxy continuation](docs/test262-function-proxy-metadata-continuation.md).
-
-Bound functions now retain intermediate target identities and resolve deep
-call, construction, and instanceof chains iteratively. Isolated optimized
-verification passes **1,831 / 1,837**, with **two gains and zero lost passes**.
-The subsequent primitive-operand ordering fix passes **107 / 107**
-focused debug instanceof variants, gaining **four passes with zero losses**.
-See the
-[bound-chain continuation](docs/test262-bound-function-chains-continuation.md) and
-[instanceof ordering continuation](docs/test262-instanceof-primitive-order-continuation.md).
-
-The current deferred-import implementation passes its pinned 109-variant
-Test262 selection. Static import attributes pass 17 / 17 variants and dynamic
-import attributes pass 44 / 44. The neighboring module-code and dynamic-import
-selection now passes 2,454 / 2,502, gaining six passes with zero losses against
-the previous committed release selection. These module changes are included in the completed `d8d1652` full snapshot. Details and evidence are in the
-[deferred-import continuation](docs/test262-deferred-import-continuation.md)
-and [module attributes continuation](docs/test262-dynamic-import-attributes-continuation.md).
-
-
-Control-flow completion semantics preserve values through blocks, labels,
-switch fall-through, and abrupt loop exits in both AST and bytecode execution.
-All 150 completion variants pass. Strict tail calls now use a shared trampoline;
-all **35 / 35** tail-call variants and **216 / 216** switch variants pass.
-The neighboring control-flow release selection passes **3,591 / 3,624**, with
-17 additional gains and zero losses over the completion checkpoint. See the
-[control-flow continuation](docs/test262-control-flow-completion-continuation.md)
-and [tail-call continuation](docs/test262-tail-calls-continuation.md).
-These changes are included in the completed full-corpus snapshot. Later live
-collection iteration passes **1,726 / 1,726** selected variants, gaining 18
-passes with zero losses. The neighboring control-flow selection now passes
-**3,599 / 3,624**, with eight overlapping gains and zero losses. These
-collection changes are included in the completed full snapshot; see the
-[live collection continuation](docs/test262-live-collections-continuation.md).
-
-Lexical loop heads, TDZ reads, and catch-body environments subsequently pass **5,893 / 5,908** selected variants, gaining **20 passes with zero losses**. These changes are included in the completed full snapshot. See the [lexical scope continuation](docs/test262-lexical-scopes-continuation.md).
-
-Nested finally completions subsequently pass **5,897 / 5,908** selected variants, gaining **4 passes with zero losses**. These changes are included in the completed full snapshot. See the [finally completion continuation](docs/test262-finally-completions-continuation.md).
-
-Descriptor-aware for-in enumeration subsequently passes **6,498 / 6,515** selected variants, gaining **2 passes with zero losses**. These changes are included in the completed full snapshot. See the [for-in enumeration continuation](docs/test262-for-in-enumeration-continuation.md).
-
-Mapped arguments subsequently pass **13,621 / 13,661** selected variants, gaining **31 passes with zero losses**. All 43 mapped-arguments variants and all 1,442 for-of variants pass. These changes are included in the completed full snapshot. See the [mapped arguments continuation](docs/test262-mapped-arguments-continuation.md).
-
-With and Proxy binding resolution subsequently passes **14,466 / 14,502** selected variants, gaining **6 passes with zero losses**. See the [with-binding continuation](docs/test262-with-bindings-continuation.md).
-
-Empty accessor metadata and duplicate-parameter initialization subsequently pass **14,615 / 14,639** selected variants, gaining **21 passes with zero losses** against the completed full-run projection. Six gains overlap the prior with-binding work. These changes are included in the completed full score. See the [descriptor continuation](docs/test262-empty-accessors-continuation.md).
-
-Async generator delegation subsequently passes **2,858 / 2,858** selected variants, gaining **4 passes with zero losses**. These changes are included in the completed full score. See the [async delegation continuation](docs/test262-async-delegation-continuation.md).
-
-Canonical numeric property keys subsequently pass **2,702 / 2,729** selected variants, gaining **10 passes with zero losses**. All 2,252 object-expression variants pass. These changes are included in the completed full score. See the [numeric key continuation](docs/test262-numeric-property-keys-continuation.md).
-
-Class property layout subsequently passes **18,986 / 19,037** selected variants, gaining **38 passes with zero losses**. All computed-name and object-expression variants pass. This is included in the completed full score. See the [class layout continuation](docs/test262-class-property-layout-continuation.md).
-
-Var destructuring reference order subsequently passes **528 / 528** selected variants, gaining **one pass with zero losses**. All 368 core-library tests pass without exclusions. This is included in the completed full score. See the [var destructuring continuation](docs/test262-var-destructuring-continuation.md).
-
-Optional-chain references subsequently pass **16,722 / 16,765** selected variants, gaining **12 passes with zero losses**. All 76 optional-chaining expression variants pass. This is included in the completed full score. See the [optional-chain continuation](docs/test262-optional-chain-references-continuation.md).
-
-Public hash-named keys subsequently pass **31,739 / 31,860** selected variants, gaining **two passes with zero losses**. This is included in the completed full score. See the [public hash-key continuation](docs/test262-public-hash-keys-continuation.md).
-
-Super reference receiver order subsequently passes **19,080 / 19,125** selected variants, gaining **ten passes with zero losses**. This is included in the completed full score. See the [super receiver-order continuation](docs/test262-super-reference-order-continuation.md).
-
-Default export names subsequently pass **18,120 / 18,184** selected variants, gaining **seven passes with zero losses**. This is included in the completed full score. See the [default export-name continuation](docs/test262-default-export-names-continuation.md).
-
-Namespace descriptor TDZ fixes subsequently pass **7,887 / 7,916** selected variants, gaining **six passes with zero losses**; deferred imports remain **109 / 109**. This change is included in the completed full snapshot. See the [namespace continuation](docs/test262-namespace-tdz-continuation.md).
-
-Cyclic and ambiguous export resolution subsequently passes **2,618 / 2,637** module/import variants, gaining **two passes with zero losses**. This change is included in the completed full snapshot. See the [export resolution continuation](docs/test262-export-resolution-continuation.md).
-
-Exported destructuring bindings subsequently pass **3,486 / 3,504** selected variants, gaining **one pass with zero losses**. All **253 / 253** top-level-await variants pass. This change is included in the completed full snapshot. See the [export patterns continuation](docs/test262-export-patterns-continuation.md).
-
-Harness-error classification subsequently passes **2,621 / 2,637** selected module/import variants, correcting **two passes with zero losses**. This is a worker measurement correction, included in the completed full snapshot. See the [harness error continuation](docs/test262-harness-error-continuation.md).
-
-Dynamic deferred imports subsequently pass **2,625 / 2,637** selected module/import variants, gaining **four passes with zero losses** by awaiting asynchronous dependencies through internal reactions. This change is included in the completed full snapshot. See the [dynamic defer continuation](docs/test262-dynamic-defer-continuation.md).
-
-Async cycle outcomes subsequently pass **2,627 / 2,637** selected module/import variants, gaining **two passes with zero losses**. All **1,900 / 1,900** dynamic-import variants pass. This change is included in the completed full snapshot. See the [async cycle continuation](docs/test262-async-cycle-continuation.md).
-
-Immutable byte modules subsequently pass **4,334 / 4,341** selected variants, gaining **five passes with zero losses**; all **5 / 5** import-bytes variants pass. Two pre-existing ArrayBuffer timeouts remain measured. The engine and binary loader API support file, HTTP, package, and TypeScript adapters with permission and size checks. This change is included in the completed full snapshot. See the [byte module continuation](docs/test262-byte-modules-continuation.md).
-
-Source-phase imports subsequently pass **2,645 / 2,645** selected module/import/intrinsic variants, gaining **13 combined passes with zero losses** versus `75c6857`. Static and dynamic source bindings and re-exports share cached host-branded objects without executing target modules. This is included in the completed full score. See the [source-phase continuation](docs/test262-static-source-imports-continuation.md).
-
-Async iterator disposal subsequently passes **1,788 / 1,788** selected resource-management and async generator variants, gaining **18 passes with zero losses**. AsyncIteratorPrototype now supplies `Symbol.asyncDispose`, awaiting return and forwarding rejection through intrinsic promise operations. This is included in the completed full score. See the [async disposal continuation](docs/test262-async-iterator-disposal-continuation.md).
-
-Object constructor metadata subsequently passes **7,984 / 8,001** selected Object, Function, and Reflect variants, gaining **12 passes with zero losses**. Object now owns ordered length/name properties and inherits Function.prototype. This is included in the completed full score. See the [Object metadata continuation](docs/test262-object-constructor-metadata-continuation.md).
-
-Object locale-string invocation subsequently passes **122 / 122** selected Object, Array, and TypedArray locale-string variants, gaining **two passes with zero losses**. Getter reads retain the original receiver and propagate accessor/proxy errors. This is included in the completed full score. See the [locale-string continuation](docs/test262-object-locale-string-continuation.md).
-
-Array string invocation subsequently passes **755 / 763** selected string and Proxy variants, gaining **two passes with zero losses**. All selected Array, Object, join, and typed-array string cases pass; eight Proxy failures are unchanged. Join accessors, intrinsic fallback, and proxy brand handling are corrected. This is included in the completed full score. See the [array string continuation](docs/test262-array-string-invocation-continuation.md).
-
-Sparse array indices subsequently pass **9,005 / 9,037** selected Array and property-reflection variants, gaining **30 passes with zero losses**. Large indices use traced sparse storage; logical length, descriptors, deletion, truncation, host writes, and map species results share the updated paths. All 369 core tests, 95 integration tests, strict workspace Clippy, and formatting pass. This remains outside the completed full snapshot. See the [sparse array continuation](docs/test262-sparse-array-indices-continuation.md).
-
-Logical Array lengths subsequently pass **9,027 / 9,037** selected Array and property-reflection variants, gaining **22 passes with zero losses**. Slice, splice, and concat retain safe-integer indices and species ordering; push and unshift preserve writes before array-length errors. All 369 core tests, 101 integration tests, strict workspace Clippy, and formatting pass. This remains outside the completed full snapshot. See the [logical length continuation](docs/test262-array-logical-lengths-continuation.md).
-
-Core constructor metadata subsequently passes **12,255 / 12,261** selected Array, String, Number, Boolean, and property-reflection variants, gaining **14 passes with zero losses**. Object, Array, String, Number, and Boolean share ordered own length/name metadata; Array unscopables excludes with. All **6,117 / 6,117** Array variants pass. All 369 core tests, 107 integration tests, strict workspace Clippy, and formatting pass. This remains outside the completed full snapshot. See the [core constructor continuation](docs/test262-core-constructor-metadata-continuation.md).
-
-TypedArray numeric keys subsequently pass **4,290 / 4,336** selected TypedArray and constructor variants, gaining **24 passes with zero losses**. Forty failures and six unchanged timeouts remain. Noncanonical numeric-looking keys use ordinary property semantics. This remains outside the completed full snapshot. See the [numeric-key continuation](docs/test262-typed-array-numeric-keys-continuation.md).
-
-Exact Math.sumPrecise subsequently brings the full Math selection to **654 / 654**, gaining **20 passes with zero losses**. Finite numbers accumulate exactly before one ties-to-even rounding; iterator closing, signed zero, and non-number rejection are verified. All 369 core tests, four native regressions, strict workspace Clippy, and formatting pass. This remains outside the completed full snapshot. See the [Math continuation](docs/test262-math-sum-precise-continuation.md).
-
-A detached clean checkout of `a5a2362` verifies **13,800 / 13,808** selected built-in and tagged-template variants, gaining **76 passes with zero losses** against an earlier measured worker. Array, String, Math, SharedArrayBuffer, TypedArrayConstructors, and the targeted capture-name regression all pass. Two tagged-constructor failures are fixed by subsequent `9d58dce`; six TypedArray timeouts remain. This source-verified focused result stays separate from the full score. See the [verified built-ins continuation](docs/test262-verified-builtins-continuation.md).
-
+Test262 (corpus `0b4e0812022b18236b5276d2804948fdd9f71603`, 102,992 variants):
+the latest complete run passes **102,975 / 102,992**, with one failure and 16
+timeouts. The failure is an
+[upstream-confirmed contradiction](https://github.com/tc39/test262/issues/5113)
+between two tests, so it cannot pass with the other. The timeouts are the
+Date DST-caching tests. Current status and remaining work:
+[`docs/test262-full-pass-plan.md`](docs/test262-full-pass-plan.md). Commands,
+report format and archived evidence: [`tools/test262/README.md`](tools/test262/README.md).
 
 ## License
 

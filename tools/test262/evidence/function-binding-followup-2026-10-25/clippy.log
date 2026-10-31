@@ -1,4 +1,0 @@
-$ cargo clippy --locked --profile ci -p napi-vm-core --all-targets -- -D warnings
-
-    Checking napi-vm-core v0.1.5 (/home/meme/Documentos/Default Project/node-vm/crates/napi-vm-core)
-    Finished `ci` profile [unoptimized] target(s) in 12.69s

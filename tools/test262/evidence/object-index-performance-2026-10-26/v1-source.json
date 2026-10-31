@@ -1,6 +1,0 @@
-{
-  "source_commit": "123ce93bbca543052d784691eb88c66c437e7f36",
-  "source_diff_sha256": "8811f65b545b7cf6ddb70a6a1786ad51a52ff9ae297454e9ecd2a305f6e2ea1c",
-  "engine_sha256": "4ec8a924262c3386a26f4af03036d586965f3549dbc35d9e65866b8af4ce4e4e",
-  "diagnostic": "Single Uint8Array makeArrayLike factory: approximately 0.099 seconds, preceding worker approximately 4.423 seconds. Full six variants still timeout at five seconds."
-}

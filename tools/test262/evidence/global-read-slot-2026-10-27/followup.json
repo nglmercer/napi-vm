@@ -1,5 +1,0 @@
-{
-  "realm_selection": "454/455 pass; strict TypedArray conversion variant timed out",
-  "conversion_repeat": "both variants passed at five seconds",
-  "interpretation": "Timing remains close to the deadline; the timeout is retained in the evidence."
-}

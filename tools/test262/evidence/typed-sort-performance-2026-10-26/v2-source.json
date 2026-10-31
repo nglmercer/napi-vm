@@ -1,6 +1,0 @@
-{
-  "base_commit": "df7188266baa7113339cc4d863c4445d680020af",
-  "source_diff_sha256": "765b249733052394bd5de5c91f2ad53dde37da50de7e7d2a30350f8fa1ef1a4f",
-  "worker_sha256": "57903219c400841e66f364137531ee0eaf5ff969373616cc2d8eee8a2217f02a",
-  "result": "Both targeted sort variants timed out at 5 seconds with 2 workers; no observed test262 gain."
-}

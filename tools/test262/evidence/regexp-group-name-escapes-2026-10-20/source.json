@@ -1,9 +1,0 @@
-{
-  "source_base": "8569c91059d0fcea11a77c4efe94c49dd00ce2e7",
-  "implementation_paths": [
-    "crates/napi-vm-core/src/regex/parse.rs",
-    "crates/napi-vm-core/tests/regexp_group_name_escapes.rs"
-  ],
-  "source_patch_sha256": "0a4942960657d46eeb872a14af2e3077a9290a31a484b2f81d78061e7cefb43e",
-  "debug_engine_sha256": "51e1ab14cf395ea0a3c1a9560898a8e667d968f3178da6c7bdf133654f4b56e8"
-}

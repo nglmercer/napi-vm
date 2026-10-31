@@ -181,5 +181,17 @@
       "language/expressions/coalesce",
       "language/expressions/arrow-function"
     ]
+  },
+  "smoke": {
+    "paths": [
+      "language/expressions/addition",
+      "language/literals/regexp",
+      "built-ins/Array/prototype/at",
+      "built-ins/Date/prototype/setTime",
+      "built-ins/RegExp/prototype/exec",
+      "built-ins/TypedArray/prototype/sort",
+      "annexB/language/function-code",
+      "staging/sm/TypedArray/sort_small.js"
+    ]
   }
 }
