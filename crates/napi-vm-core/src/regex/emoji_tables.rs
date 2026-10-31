@@ -1,8 +1,9 @@
 //! Generated RGI emoji tables. DO NOT EDIT.
 //!
-//! Produced by `python3 tools/emoji/generate_tables.py`; see that script
-//! for provenance. Validated exact against the pinned test262
-//! property-escape string tests by `tools/emoji/check_rgi_sets.py`.
+//! Produced by `cargo run -p napi-vm-generators --bin emoji-tables` from
+//! emoji-test.txt, keeping entries up to Emoji 17.0. The `rgi-check` tool
+//! reads these sets against the pinned test262 lists; tools/generators/README.md
+//! records its current mismatches.
 
 #![allow(clippy::all)]
 

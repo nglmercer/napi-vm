@@ -99,10 +99,11 @@ itself is not the bottleneck; the engine's startup and that workload are.
 - `groups.json`: named selections (`smoke` plus focused groups such as
   `realms` and `shared-memory`). Add a group here rather than in scripts.
 - `evidence/`: archived reports of the full runs referenced above.
-- `generate_number_data.py`, `generate_tz_data.py`: offline generators for the
-  committed CLDR number and IANA time-zone tables in
-  `crates/napi-vm-core/src/builtins/intl/cldr/`. They read pinned upstream
-  archives and are not part of validation.
+- Table generators for the Unicode, CLDR and IANA data the engine commits (number
+  patterns, time zones, emoji sets, locale data) are in
+  [`tools/generators`](../generators/README.md). They are offline and not part of
+  Test262 validation; `rgi-check` in that crate reads the corpus's emoji property
+  lists, and its current mismatches are recorded there.
 
 Experiment-by-experiment history of the earlier Python-based campaign is in
 [`docs/test262-history.md`](../../docs/test262-history.md).

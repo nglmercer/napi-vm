@@ -1,4 +1,4 @@
-// Generated from Unicode CLDR 48.0.0 by tools/test262/generate_number_data.py.
+// Generated from Unicode CLDR 48.0.0 by tools/generators (number-data).
 pub(super) const INDEX: &[(&str, usize, usize)] = &[
     ("aa", 0, 2246),
     ("aa-DJ", 2246, 4499),

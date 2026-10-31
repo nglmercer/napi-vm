@@ -1,4 +1,4 @@
-// Generated from IANA tzdata 2025b by tools/test262/generate_tz_data.py.
+// Generated from IANA tzdata 2025b by tools/generators (tz-data).
 pub(super) const ZONE_NAMES: &[&str] = &[
     "=","Africa/Abidjan","Africa/Accra","Africa/Addis_Ababa","Africa/Algiers","Africa/Asmara",
     "Africa/Bamako","Africa/Bangui","Africa/Banjul","Africa/Bissau","Africa/Blantyre","Africa/Brazzaville",
