@@ -11,7 +11,7 @@ output exactly, so a regeneration that changes nothing confirms the pins.
 | `number-data` | cldr-numbers-full, cldr-units-full and cldr-core 48.0.0 npm tarballs (renamed `numbers-48.tgz`, `units-48.tgz`, `core-48.tgz`) | `builtins/intl/cldr/number-pattern-*`, `LICENSE-CLDR.txt` | archive SHA-256 values in `number-pattern-sources.json` |
 | `emoji-tables` | `emoji-test.txt` (keeps entries up to Emoji 17.0) | `regex/emoji_tables.rs` | pinned entry counts per table |
 | `locale-data` | CLDR 48 release files over HTTPS | `builtins/intl/data.rs` | SHA-256 of every fetched file, listed in the output |
-| `rgi-check` | `emoji-test.txt`, `emoji-data.txt` (17.0), and the corpus `test/built-ins/RegExp/property-escapes/generated/strings` directory | nothing; exits nonzero on mismatch | see below |
+| `rgi-check` | `emoji-test.txt`, `emoji-data.txt` (17.0), and the corpus `test/built-ins/RegExp/property-escapes/generated/strings` directory | nothing; exits nonzero on any mismatch | 0 mismatches on the pinned corpus |
 
 ## Regenerating
 
@@ -34,24 +34,17 @@ byte-identical to that output.
 - `tz-data`, `number-data`, `emoji-tables` and `locale-data` reproduce the
   committed outputs exactly, except for the header comment that now names the
   Rust tool.
-- `rgi-check` produces the same report as the Python checker it replaces.
+- `rgi-check` exits 0: every set matches its test262 list exactly.
 
-## Known `rgi-check` mismatches
-
-With the inputs above, `rgi-check` reports these; the Python checker reported
-the same:
-
-- `Basic_Emoji`: 9 missing, including the five skin-tone modifiers
-  U+1F3FB..U+1F3FF that the report prints. The check derives the basic set
-  from `Emoji - Emoji_Component - Emoji_Modifier`, which excludes those code
-  points while the test262 list includes them.
-- `RGI_Emoji`: 207 missing, equal to the 207 `BASIC_EMOJI_PAIRS` in the
-  committed tables. The check's singles come only from single-code-point
-  entries, so the qualified pairs (`00A9 FE0F` and similar) are not in its set.
-
-The `RGI_Emoji` count matches the table size, which points at the checker's
-set definitions rather than the tables. Fixing the checker would change what
-it verifies, so that is a separate change.
+`rgi-check` replaces the Python checker, whose set definitions were wrong: its
+`Basic_Emoji` omitted the skin-tone modifiers and the other text-default
+singles, and its `RGI_Emoji` left out the basic pairs. The Rust checker defines
+`Basic_Emoji` as the fully-qualified single code points plus every text-default
+Emoji (Emoji minus Emoji_Presentation minus Emoji_Component) followed by U+FE0F,
+and `RGI_Emoji` as the union of the RGI families and that basic set. The singles
+still come from `emoji-test.txt`, the same file the tables are built from, so
+the check compares the tables against test262 but does not independently verify
+the emoji-test singles.
 
 ## Unit tests
 

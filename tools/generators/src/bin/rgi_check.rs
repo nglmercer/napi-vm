@@ -216,33 +216,32 @@ fn run(emoji_test: &Path, emoji_data: &Path, strings: &Path) -> Result<bool, Str
     ok &= check(strings, "RGI_Emoji_Tag_Sequence", &tag)?;
     ok &= check(strings, "RGI_Emoji_Modifier_Sequence", &modifier)?;
 
+    // Basic_Emoji: fully-qualified single code points, plus every text-default
+    // Emoji (Emoji minus Emoji_Presentation minus Emoji_Component) followed by
+    // U+FE0F, as in emoji-sequences.txt.
+    let (singles, _) = fully_qualified(emoji_test, MAX)?;
     let emoji = parse_ranges(emoji_data, "Emoji")?;
     let component = parse_ranges(emoji_data, "Emoji_Component")?;
-    let modifier_property = parse_ranges(emoji_data, "Emoji_Modifier")?;
     let presentation = parse_ranges(emoji_data, "Emoji_Presentation")?;
-    let mut basic = BTreeSet::new();
+    let mut basic: BTreeSet<Units> = singles.iter().map(|s| units(s)).collect();
     for cp in emoji
-        .difference(&component)
-        .filter(|cp| !modifier_property.contains(cp))
+        .difference(&presentation)
+        .filter(|cp| !component.contains(cp))
     {
-        if presentation.contains(cp) {
-            basic.insert(units(&[*cp]));
-        } else {
-            let mut sequence = units(&[*cp]);
-            sequence.push(0xFE0F);
-            basic.insert(sequence);
-        }
+        let mut sequence = units(&[*cp]);
+        sequence.push(0xFE0F);
+        basic.insert(sequence);
     }
     ok &= check(strings, "Basic_Emoji", &basic)?;
 
-    let (singles, _) = fully_qualified(emoji_test, MAX)?;
+    // RGI_Emoji: every RGI sequence family, with the basic set as its singles and pairs.
     let mut rgi: BTreeSet<Units> = BTreeSet::new();
     rgi.extend(flag);
     rgi.extend(tag);
     rgi.extend(modifier);
     rgi.extend(keycap);
     rgi.extend(zwj);
-    rgi.extend(singles.iter().map(|s| units(s)));
+    rgi.extend(basic);
     ok &= check(strings, "RGI_Emoji", &rgi)?;
     Ok(ok)
 }
