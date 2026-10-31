@@ -21,6 +21,19 @@ report variant for variant except for two bare-carriage-return fixtures that
 the runner's metadata parser had missed; those are fixed.
 Evidence: [`full-interpreter-overhead-2026-10-30`](../tools/test262/evidence/full-interpreter-overhead-2026-10-30/).
 
+## Alternative revisions evaluated
+
+The `staging/sm` tests were imported on 2024-05-06, and the annexB test
+contradicting one of them dates from 2017. Every revision from that import on
+contains both files, so the conflict cannot be avoided by choosing a later
+revision. Before the import (parent `d0bda4d26`, 2024-10-31 by author date),
+the conflict is absent, but the same corpus has 329 failures against this
+engine: Temporal calendar and API differences (84), Intl and
+DateTimeFormat, DataView TypeError behaviour, RegExp, and the annexB case. These
+expectations are older spec behaviour the engine intentionally does not
+implement, so that revision is not an error-free target either. The pin stays
+at `0b4e081`.
+
 ## What blocks a full pass
 
 1. **The failure cannot be fixed in the engine.**
