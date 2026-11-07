@@ -1,2 +1,0 @@
-$ SCHEDULER_BASELINE_DIR=/tmp/napi-vm-clean-baseline bash bench/run-scheduler.sh
-Benchmark JSONL and build logs: /workspace/napi-vm/artifacts/scheduler

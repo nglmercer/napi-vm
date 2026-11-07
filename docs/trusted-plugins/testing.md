@@ -60,9 +60,9 @@ runtime support from cross-compilation alone.
 
 ## Recorded evidence and measurements
 
-The [evidence index](evidence/README.md) links retained interoperability,
-package, compatibility, and benchmark captures. These records identify a past
-run; regenerate them when behavior or artifacts change. The workflow
+Historical interoperability, package, compatibility, and benchmark captures
+are available in Git history. Run the checks above against the current build
+to establish its results. The workflow
 [trusted-plugins.yml](../../.github/workflows/trusted-plugins.yml) defines the
 current CI matrix.
 

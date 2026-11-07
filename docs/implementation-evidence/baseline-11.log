@@ -1,2 +1,0 @@
-$ bash bench/run-scheduler.sh
-Benchmark JSONL and build logs: /tmp/napi-vm-clean-baseline/artifacts/scheduler

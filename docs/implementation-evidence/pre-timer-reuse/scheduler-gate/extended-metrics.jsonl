@@ -1,5 +1,0 @@
-{"workload":"real-time/timers","samples":2500,"throughput_jobs_s":18645.996917771958,"lateness_p50_us":55.72800000000022,"lateness_p95_us":84.252,"lateness_p99_us":106.37899999999956,"queue_depth_peak":100}
-{"workload":"wake/ingress","samples":10000,"throughput_events_s":2563228.4374815766,"latency_p50_us":6.3500000000000005,"latency_p95_us":16.175,"latency_p99_us":64.447,"wakeups":292,"queue_capacity":32,"idle_cpu_us_per_250ms":35.0}
-{"workload":"vm/timers","queue_depth_peak":1000}
-{"workload":"vm/cancel","queue_depth_peak":1}
-{"workload":"vm/promises","queue_depth_peak":1}

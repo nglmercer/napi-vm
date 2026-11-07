@@ -1,9 +1,0 @@
-   Compiling napi-vm v0.1.5 (/home/meme/Documentos/Default Project/node-vm)
-    Finished `release` profile [optimized] target(s) in 29.08s
-     Running tests/gc_public_lifecycle.rs (target/release/deps/gc_public_lifecycle-62673fe53e8a59ad)
-
-running 2 tests
-test debt_and_suspended_generator_barrier ... ok
-test pins_and_multiple_interpreters_survive_collection ... ok
-
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

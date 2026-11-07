@@ -1,1 +1,0 @@
-{"workload":"trivial-async","mode":"persistent","calls":500,"throughput_calls_s":37121.302393470214,"p50_ms":0.023786000000001195,"p95_ms":0.037800999999994644,"p99_ms":0.07191800000000015,"cpu_ms":11.751,"idle_cpu_ms_per_250ms":0.312,"allocations":null,"timer_lateness_ms":null,"queue_depth_peak":1,"wakeups":500}

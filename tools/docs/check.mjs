@@ -48,7 +48,7 @@ const inventory = { guides: [], packages: [], templates: [], generated: [], evid
 for (const name of files) {
   if (!fs.existsSync(path.join(root, name))) continue; // A tracked deletion is handled by Git.
   const kind = name.startsWith('packages/plugin-cli/templates/') ? 'templates' :
-    name.includes('/evidence/') || name.startsWith('docs/implementation-evidence/') ? 'evidence' :
+    name.includes('/evidence/') ? 'evidence' :
     name.includes('/generated/') ? 'generated' :
     /^(?:packages|crates)\//.test(name) ? 'packages' : 'guides';
   inventory[kind].push(name);

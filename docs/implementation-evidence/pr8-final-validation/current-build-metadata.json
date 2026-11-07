@@ -1,8 +1,0 @@
-{
-  "code_head": "dc612735aaa2eb10dd33201d32d24c6ba677a72a",
-  "binaries": {
-    "napi-vm.linux-x64-gnu.node": "49eb3e4155da4de33b86ee97203f212d98fe541012968e7e1e289ca26404b438",
-    "target/release/examples/call_metrics": "fb9a80a1320d8d08a20c858c4092b8c1fa6c611edf7d49625e1ea3d9d0c3c9b8",
-    "target/release/examples/timer_queue_matrix": "2f968ee32b3051fd20d66a10df959cf07dd9faa0d9e8b5dad81d05c716427a43"
-  }
-}

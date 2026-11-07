@@ -1,9 +1,0 @@
-Gnuplot not found, using plotters backend
-Benchmarking tiers/call_tiny_hot
-Benchmarking tiers/call_tiny_hot: Warming up for 1.0000 s
-Benchmarking tiers/call_tiny_hot: Collecting 30 samples in estimated 1.1341 s (930 iterations)
-Benchmarking tiers/call_tiny_hot: Analyzing
-tiers/call_tiny_hot     time:   [1.1848 ms 1.2164 ms 1.2534 ms]
-                        change: [+2.6705% +5.9013% +9.0112%] (p = 0.00 < 0.05)
-                        Performance has regressed.
-

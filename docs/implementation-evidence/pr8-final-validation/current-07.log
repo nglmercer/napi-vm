@@ -1,7 +1,0 @@
-npm notice run napi-vm@0.1.5 build:all
-npm notice run bun run build:esm && bun run build:commonjs
-$ bun x napi build --platform --release --esm --js index.mjs
-   Compiling napi-vm v0.1.5 (/home/meme/Documentos/Default Project/node-vm)
-    Finished `release` profile [optimized] target(s) in 2m 02s
-$ bun x napi build --platform --release --commonjs --js index.js
-    Finished `release` profile [optimized] target(s) in 0.10s

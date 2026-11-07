@@ -1,3 +1,0 @@
-The pre-index and index-candidate JSONL files are exploratory local trials, not commit-isolated comparisons. Use their isolated queue allocation counts as evidence for removing the reverse index; do not use their wall times to claim a controlled speedup. The final baseline-versus-implementation comparison is in baseline/modified JSONL files and machine.txt.
-Original baseline: 0fa987d8860d620cd1008a84f2a17c9b67c495cd
-Final implementation: b918b389f7f2c12cdca0844bbd45c0c86ca48d46

@@ -1,5 +1,0 @@
-npm notice run napi-vm@0.1.5 lint
-npm notice run bun run lint:rust && bun run lint:ts
-$ cargo fmt --all -- --check && cargo clippy --all-targets --all-features -- -D warnings
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.25s
-$ tsc --noEmit

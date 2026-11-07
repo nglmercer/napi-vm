@@ -44,9 +44,11 @@ wire references and their source definitions.
 
 The current guides are written from public types, implementation, executable
 examples, and recorded results. Old work plans and implementation checkpoints
-have been removed; Git history retains them. Raw reports remain under
-`bench/baselines/`, `tools/test262/evidence/`, and `docs/implementation-evidence/`.
-They describe the recorded build, not an automatic claim about a later build.
+and historical implementation logs, benchmark captures, and plugin validation
+reports have been removed; Git history retains them. Current conformance and
+performance references remain under `tools/test262/evidence/` and
+`bench/baselines/`. They describe the recorded build, not an automatic claim
+about a later build.
 
 When behavior changes, update its owning guide and runnable examples. Regenerate
 generated references from their source. Run `node tools/docs/check.mjs` and

@@ -1,3 +1,0 @@
-$ cargo build --release --no-default-features --example call_metrics --example timer_queue_matrix
-   Compiling napi-vm v0.1.5 (/workspace/napi-vm)
-    Finished `release` profile [optimized] target(s) in 1m 01s

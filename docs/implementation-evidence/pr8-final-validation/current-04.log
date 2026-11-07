@@ -1,8 +1,0 @@
-   Compiling napi-vm v0.1.5 (/home/meme/Documentos/Default Project/node-vm)
-    Finished `release` profile [optimized] target(s) in 1m 42s
-     Running tests/compiler_memory.rs (target/release/deps/compiler_memory-11d2b6fb3d6954cc)
-
-running 1 test
-test repeated_synthesized_compilation_releases_owned_ast_data ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
