@@ -1,0 +1,124 @@
+{
+  "schema": 1,
+  "utc": "2026-11-07T06:00:27.837969+00:00",
+  "git_head": "7b6aeef60ec1f1bb18151ba89d4b1d563164e1d2",
+  "review": {
+    "subagents": 3,
+    "scope": [
+      "Core frontend, AST/bytecode, properties, values, heap and builtins",
+      "Cross-engine benchmark methodology, raw evidence and current-source equivalence",
+      "Native/WASM bindings, runtime, LSP, plugin hosts/SDKs and tooling"
+    ],
+    "coverage": "Repository-wide architectural review and full Rust/TypeScript static-check evidence, with detailed review of changed paths; not an exhaustive per-line audit or benchmark of every path."
+  },
+  "retained_evidence_revalidated": {
+    "frozen_rust_inputs": 260,
+    "core_production_equivalent": true,
+    "normalization": "Only the exact recorded five lint attributes and cfg(test) bytecode module differ from frozen core inputs. Current marshal.rs matches the separately validated NAPI-only hardening.",
+    "validation_log_hashes": 18,
+    "test262": {
+      "report": {
+        "path": "bench/baselines/performance-review-2026-11-06/test262-report.json.gz",
+        "sha256": "fe9f12c76d673dc22162d1549910ca7d26f82c5a9c6f73b9195dff36e5e19192"
+      },
+      "unique_passing_variants": 102992,
+      "exact_baseline_variant_set": true,
+      "worker_sha256": "967f960ddf912454d9b3f64a77642facf7afa64cdd07b3a893fd744a4a4a0aa5",
+      "fresh_run": false,
+      "reason": "Core executable source equivalence and retained worker digest independently verified."
+    },
+    "wasm_artifact_hashes_match": true,
+    "native_addon_sha256": "8730c19884a8c8a78a10784e4c41e9e0733c70c5269a9b75a5fe905d6f5ca79b",
+    "rquickjs": {
+      "version": "0.14.0",
+      "workloads": 10,
+      "modes": [
+        "fresh_source",
+        "warm_source",
+        "warm_call"
+      ],
+      "rows_per_report": 60,
+      "paired_measurements_independently_recomputed": true,
+      "provenance_warnings": [
+        "Legacy dependency metadata is incomplete; dependency identity uses the matching Cargo.lock digest.",
+        "Legacy Cargo configuration fingerprints are incomplete; configuration identity is unverified."
+      ]
+    },
+    "paired_summaries": [
+      {
+        "path": "bench/baselines/performance-review-2026-11-06/criterion-paired-summary.json",
+        "sha256": "fc20555d379c831f59ca4888f8830bab9343adae030adc27db4844bb0a1d1e26"
+      },
+      {
+        "path": "bench/baselines/performance-review-2026-11-06/typed-array-paired-summary.json",
+        "sha256": "04d189716502723d66024c2b9771953077ba3a7fc1b905e34166ee488f774cc1"
+      },
+      {
+        "path": "bench/baselines/performance-review-2026-11-06/lsp-interleaved.json",
+        "sha256": "d7d5e90c74f83dc075f9cbeaa3652f71a224fa0a1ffd6057012e678c6380ddaa"
+      },
+      {
+        "path": "bench/baselines/performance-review-2026-11-06/rquickjs-interleaved.json",
+        "sha256": "5f210fac992b08eb36571859930e943d0cacdd475396175aed414460d0d79adb"
+      }
+    ]
+  },
+  "new_validation": {
+    "boundary_tests": {
+      "command": "node --test tests/node/property-updates.test.js tests/node/typed-array-subviews.test.js tests/wasm/browser-build.test.mjs",
+      "pass": 26,
+      "fail": 0,
+      "skip": 0,
+      "log": {
+        "path": "artifacts/performance/completion-boundaries-followup-2026-11-07.log",
+        "sha256": "9cbbb62a65c620525e6616fdfd7f6e44cc13d663bc5af23a65b6499de9130dff"
+      }
+    },
+    "sdk": {
+      "new_regressions": 8,
+      "baseline_expected_mutation_failures": 4,
+      "node": {
+        "pass": 142,
+        "skip": 1,
+        "fail": 0
+      },
+      "bun": {
+        "pass": 143,
+        "skip": 0,
+        "fail": 0
+      },
+      "typecheck": "passed",
+      "lint": "passed",
+      "logs_and_commands": "bench/baselines/performance-review-2026-11-06/plugin-event-queue.json"
+    },
+    "benchmark_validator_tests": {
+      "command": "python3 -B -m unittest discover -s bench/tests -v",
+      "passed": 5
+    },
+    "final_checks": [
+      "New JavaScript tools/tests syntax",
+      "git diff --check",
+      "Local documentation links"
+    ]
+  },
+  "new_performance": {
+    "report": {
+      "path": "bench/baselines/performance-review-2026-11-06/plugin-event-queue.json",
+      "sha256": "9f726662e3d25d28db43e691b38a9375ddf6b68506cbd60a22f5839c6c2e0464"
+    },
+    "cases": 6,
+    "independent_runs": 3,
+    "alternating_samples_per_phase": 21,
+    "events_per_sample": 64,
+    "all_samples_statistics_and_input_hashes_recomputed": true,
+    "timed_boundary": "In-process createHarness.emitHostEvent validation, queueing and all listener counters; no child transport or engine timing."
+  },
+  "changed_source_hashes": {
+    "packages/plugin-sdk/src/index.ts": "a8dda201eb01fad87c8a27ca46fbe45248c5793bb3be3a881cd81bd726de34ce",
+    "packages/plugin-sdk/test/event-queue.test.mjs": "86f1217f92b745427ee5199d66a5545529084210855239f471578ec912745fab",
+    "tools/plugins/benchmark-event-queue.mjs": "044c10622dac0d63be58a54523e52c2456c0e5d3a64e3376d581481d621a8e1b",
+    "tools/plugins/event-queue-contract.mjs": "78c487d4932b3df2e55250322a50cde386ebdb2961f619835a027e12115b2285",
+    "tests/fixtures/property-update-cases.cjs": "72a92be99149ffbf14c360874e78bcda8cae22c2da0db0f568c3acfb6603349f",
+    "docs/performance-review.md": "934d2c21faf496f22745c90c12f860908fb9fcfbc534af41b3388ff74219d3d2"
+  }
+}

@@ -1,0 +1,3326 @@
+{
+  "schema": 1,
+  "utc": "2026-11-07T05:58:48.590137+00:00",
+  "scope": "SDK event queue optimization only; rquickjs/core-engine comparisons are unchanged.",
+  "behavior": {
+    "change": "Serialize once per validated event and retain its enqueue-time byte count in a shared immutable queue entry. Dequeue subtracts that count. Clearing stopped queues resets bytes.",
+    "payloadSemantics": "Listeners still share the validated mutable payload; no cloning, freezing or subscriber isolation API change. Queue byte accounting measures serialized payload size at enqueue time.",
+    "regressions": "Four mutation regressions fail against the saved baseline and pass on the final SDK: harness and actual child-process tests for cycle mutation and premature OVERLOADED after a prior subscriber shrinks payloads. Four additional cases cover bounded queue count/bytes, blocked callbacks and listener/onError failure isolation."
+  },
+  "sourceEquivalence": {
+    "beforeMatchesGitRevision": "7b6aeef60ec1f1bb18151ba89d4b1d563164e1d2:packages/plugin-sdk/src/index.ts",
+    "afterMatchesCurrentSource": true,
+    "afterMatchesCurrentEmittedSdk": true,
+    "protocolAndTypescriptHashesUnchangedFromBeforeBuild": true,
+    "scriptAndAllRecordedInputsRevalidated": true
+  },
+  "snapshotInstructions": [
+    "Before editing, compile the current SDK to a new snapshot directory: node node_modules/typescript/bin/tsc -p packages/plugin-sdk/tsconfig.json --outDir <snapshot> --declaration false. Retain the SDK source as <snapshot>/index.ts and a package.json containing {\"type\":\"module\"}.",
+    "Write <snapshot>/build.json with source.sha256 and emitted.sha256 for index.ts/index.js, the exact command, Node/TypeScript version, Git state and source/config/dependency fingerprints. The builds embedded below show the retained format and exact commands.",
+    "After editing, repeat compilation/capture into another new directory. Keep the same emitted plugin-protocol package and lockfile; both snapshots must resolve it. The run command verifies hashes before and after timing and refuses a pre-existing output file.",
+    "Run Node 22.14+ tools/plugins/benchmark-event-queue.mjs --before <before>/index.js --after <after>/index.js --samples 21 --events 64 --output <new report>. Repeat in three new Node processes on a quiet host; phase order alternates within each process."
+  ],
+  "metadata": {
+    "gitHead": "7b6aeef60ec1f1bb18151ba89d4b1d563164e1d2",
+    "node": "v26.12.1",
+    "versions": {
+      "node": "26.12.1",
+      "acorn": "8.19.0",
+      "ada": "4.0.0",
+      "amaro": "1.1.11",
+      "ares": "1.34.9",
+      "brotli": "1.2.1",
+      "cldr": "48.0",
+      "icu": "78.3",
+      "libffi": "3.8.0",
+      "lief": "1.0.0",
+      "llhttp": "9.4.3",
+      "merve": "1.2.2",
+      "modules": "147",
+      "napi": "10",
+      "nbytes": "0.1.4",
+      "ncrypto": "0.0.1",
+      "nghttp2": "1.70.0",
+      "nghttp3": "",
+      "ngtcp2": "",
+      "openssl": "3.6.5",
+      "simdjson": "5.0.5",
+      "simdutf": "7.7.0",
+      "sqlite": "3.54.0",
+      "tz": "2026a",
+      "undici": "8.12.2",
+      "unicode": "17.0",
+      "uv": "1.53.0",
+      "uvwasi": "0.0.23",
+      "v8": "14.6.202.34-node.40",
+      "zlib": "1.3.1.zlib-ng",
+      "zstd": "1.5.7"
+    },
+    "platform": "linux",
+    "arch": "x64",
+    "osRelease": "7.3.0-4-cachyos",
+    "cpu": "AMD BC-250",
+    "logicalCpus": 12,
+    "fingerprints": [
+      {
+        "path": "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/plugin-event-queue-2026-11-07/before/index.js",
+        "sha256": "83e800ad7aba006d0f23deeedad600db6c312244d7a1becff81b42a663363035"
+      },
+      {
+        "path": "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/plugin-event-queue-2026-11-07/after/index.js",
+        "sha256": "288630e3f4db69215bc5629ef8883e0be4c6477f615c1c261643f69b2cfb94c2"
+      },
+      {
+        "path": "/home/meme/Documentos/Default Project/node-vm/packages/plugin-protocol/package.json",
+        "sha256": "01c909df6dd47af77ea871052a1b0e02da9606e8c9e0f59167c49f94c3269efd"
+      },
+      {
+        "path": "/home/meme/Documentos/Default Project/node-vm/packages/plugin-protocol/dist/index.js",
+        "sha256": "5d3eac477a02aa509b685052f96721abcf24e020c3e37ff587de4a8eb37099b0"
+      },
+      {
+        "path": "/home/meme/Documentos/Default Project/node-vm/package-lock.json",
+        "sha256": "906f9844ec9b6fbcdfd10cb8cb2f0b215090b01f7a37ceb35c510b8fd2cc9493"
+      },
+      {
+        "path": "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/plugin-event-queue-2026-11-07/before/index.ts",
+        "sha256": "5a277e6cb2998a35ed37c8acb74be1e1ef10b0b1554a6d15bf0023c5f3f41747"
+      },
+      {
+        "path": "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/plugin-event-queue-2026-11-07/before/build.json",
+        "sha256": "7f845c5242f851f8290b4e90ccec0300cb4d146035d64f9e6b10c2274a445563"
+      },
+      {
+        "path": "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/plugin-event-queue-2026-11-07/before/package.json",
+        "sha256": "1239d4d885dcad42201a27ed9324f8f0f760b78700d8db9ced39a511cffe7eae"
+      },
+      {
+        "path": "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/plugin-event-queue-2026-11-07/after/index.ts",
+        "sha256": "a8dda201eb01fad87c8a27ca46fbe45248c5793bb3be3a881cd81bd726de34ce"
+      },
+      {
+        "path": "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/plugin-event-queue-2026-11-07/after/build.json",
+        "sha256": "f362f00eb2865fb161341c63e2bf2ab0ed95bd5c041253a0449068374b89430d"
+      },
+      {
+        "path": "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/plugin-event-queue-2026-11-07/after/package.json",
+        "sha256": "1239d4d885dcad42201a27ed9324f8f0f760b78700d8db9ced39a511cffe7eae"
+      },
+      {
+        "path": "/home/meme/Documentos/Default Project/node-vm/tools/plugins/benchmark-event-queue.mjs",
+        "sha256": "044c10622dac0d63be58a54523e52c2456c0e5d3a64e3376d581481d621a8e1b"
+      },
+      {
+        "path": "/home/meme/Documentos/Default Project/node-vm/tools/plugins/event-queue-contract.mjs",
+        "sha256": "78c487d4932b3df2e55250322a50cde386ebdb2961f619835a027e12115b2285"
+      }
+    ],
+    "builds": {
+      "before": {
+        "utc": "2026-11-07T05:51:14.565451+00:00",
+        "gitHead": "7b6aeef60ec1f1bb18151ba89d4b1d563164e1d2",
+        "gitStatus": " M docs/performance-review.md\n M tests/fixtures/property-update-cases.cjs\n",
+        "command": "node node_modules/typescript/bin/tsc -p packages/plugin-sdk/tsconfig.json --outDir artifacts/performance/plugin-event-queue-2026-11-07/before --declaration false",
+        "node": "v26.12.1",
+        "inputs": {
+          "packages/plugin-sdk/src/index.ts": "5a277e6cb2998a35ed37c8acb74be1e1ef10b0b1554a6d15bf0023c5f3f41747",
+          "packages/plugin-sdk/tsconfig.json": "e5c1fb9b41307f755560aac25313954b151eb2f76c8c47b48cde3d743bb6d658",
+          "packages/plugin-protocol/src/index.ts": "e9afff5ec9aacdfb52d3b4d31950744f43109062cb3a427735c9e02528e5adc5",
+          "packages/plugin-protocol/dist/index.js": "5d3eac477a02aa509b685052f96721abcf24e020c3e37ff587de4a8eb37099b0",
+          "packages/plugin-protocol/package.json": "01c909df6dd47af77ea871052a1b0e02da9606e8c9e0f59167c49f94c3269efd",
+          "node_modules/typescript/package.json": "9332e97c30d3e53ed54910b89207ed657fb444066484df6e5b6965bf130865e9",
+          "artifacts/performance/plugin-event-queue-2026-11-07/before/index.js": "83e800ad7aba006d0f23deeedad600db6c312244d7a1becff81b42a663363035",
+          "contracts/trusted-plugins/generated/greeter.contract.json": "64c067dfb64208cc7496701ce80ea9e8ae75969f48cb79b04f56c3d4751421ab",
+          "contracts/trusted-plugins/generated/counter.contract.json": "8ce46de5d7bbf89c0a24feeeffe47f722c0c70925827db7ae5802b4d3d65e450"
+        },
+        "source": {
+          "path": "index.ts",
+          "sha256": "5a277e6cb2998a35ed37c8acb74be1e1ef10b0b1554a6d15bf0023c5f3f41747"
+        },
+        "emitted": {
+          "path": "index.js",
+          "sha256": "83e800ad7aba006d0f23deeedad600db6c312244d7a1becff81b42a663363035"
+        }
+      },
+      "after": {
+        "utc": "2026-11-07T05:56:08.623365+00:00",
+        "gitHead": "7b6aeef60ec1f1bb18151ba89d4b1d563164e1d2",
+        "gitStatus": " M docs/performance-review.md\n M packages/plugin-sdk/src/index.ts\n M tests/fixtures/property-update-cases.cjs\n?? packages/plugin-sdk/test/event-queue.test.mjs\n?? tools/plugins/benchmark-event-queue.mjs\n?? tools/plugins/event-queue-contract.mjs\n",
+        "command": "node node_modules/typescript/bin/tsc -p packages/plugin-sdk/tsconfig.json --outDir artifacts/performance/plugin-event-queue-2026-11-07/after --declaration false",
+        "node": "v26.12.1",
+        "inputs": {
+          "packages/plugin-sdk/src/index.ts": "a8dda201eb01fad87c8a27ca46fbe45248c5793bb3be3a881cd81bd726de34ce",
+          "packages/plugin-sdk/tsconfig.json": "e5c1fb9b41307f755560aac25313954b151eb2f76c8c47b48cde3d743bb6d658",
+          "packages/plugin-sdk/package.json": "16f185bde60d508c42f56c9bd7d424b6325419ca6032d3dbbfe5ff8eac41b4a2",
+          "packages/plugin-protocol/src/index.ts": "e9afff5ec9aacdfb52d3b4d31950744f43109062cb3a427735c9e02528e5adc5",
+          "packages/plugin-protocol/dist/index.js": "5d3eac477a02aa509b685052f96721abcf24e020c3e37ff587de4a8eb37099b0",
+          "packages/plugin-protocol/package.json": "01c909df6dd47af77ea871052a1b0e02da9606e8c9e0f59167c49f94c3269efd",
+          "package-lock.json": "906f9844ec9b6fbcdfd10cb8cb2f0b215090b01f7a37ceb35c510b8fd2cc9493",
+          "node_modules/typescript/package.json": "9332e97c30d3e53ed54910b89207ed657fb444066484df6e5b6965bf130865e9"
+        },
+        "source": {
+          "path": "index.ts",
+          "sha256": "a8dda201eb01fad87c8a27ca46fbe45248c5793bb3be3a881cd81bd726de34ce"
+        },
+        "emitted": {
+          "path": "index.js",
+          "sha256": "288630e3f4db69215bc5629ef8883e0be4c6477f615c1c261643f69b2cfb94c2"
+        }
+      }
+    },
+    "contract": {
+      "descriptor": {
+        "descriptorVersion": 1,
+        "id": "example.queue",
+        "version": "1.0.0",
+        "methods": {},
+        "errors": {},
+        "events": {
+          "changed": {
+            "payload": "#/$defs/Payload"
+          }
+        }
+      },
+      "schemas": {
+        "$defs": {
+          "Payload": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "index": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "text",
+              "index"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "digest": "bd99040733f98e8421e02f9890beec7a00b142897b5c9c206545960167a72f81"
+    },
+    "contractJsonSha256": "e0e1819eaaebf0ff873bd2500d7c0867cb914c1183b2381d2f751bb0f6801b35",
+    "sampleCount": 21,
+    "eventCount": 64,
+    "warmupBatchesPerPhase": 5,
+    "boundary": "createHarness.emitHostEvent validation + enqueue + all subscriber callbacks; reused harnesses; setup/shutdown/assertions excluded",
+    "limitations": [
+      "Same Node process and unchanged protocol module; alternating phase order.",
+      "Batch averages include Promise scheduling, validation and listener counters; no transport or child process is timed.",
+      "ASCII strings; payloadBytes is text length and serialized JSON payload is slightly larger.",
+      "No CPU affinity, forced GC or machine isolation; medians/MAD do not establish statistical significance."
+    ]
+  },
+  "runs": [
+    {
+      "run": 4,
+      "rawReport": "artifacts/performance/plugin-event-queue-2026-11-07/run-4.json",
+      "sha256": "5d9a764ce247c30e9532f736f86d4a6b51bafd8a3bf6072e91f3ebc94726f2f0",
+      "utc": "2026-11-07T05:56:46.503Z",
+      "arguments": [
+        "--before",
+        "artifacts/performance/plugin-event-queue-2026-11-07/before/index.js",
+        "--after",
+        "artifacts/performance/plugin-event-queue-2026-11-07/after/index.js",
+        "--samples",
+        "21",
+        "--events",
+        "64",
+        "--output",
+        "artifacts/performance/plugin-event-queue-2026-11-07/run-4.json"
+      ],
+      "gitStatus": " M docs/performance-review.md\n M packages/plugin-sdk/src/index.ts\n M tests/fixtures/property-update-cases.cjs\n?? packages/plugin-sdk/test/event-queue.test.mjs\n?? tools/plugins/benchmark-event-queue.mjs\n?? tools/plugins/event-queue-contract.mjs\n",
+      "loadAverageBefore": [
+        2.39,
+        6.89,
+        7.44
+      ],
+      "loadAverageAfter": [
+        2.39,
+        6.89,
+        7.44
+      ]
+    },
+    {
+      "run": 5,
+      "rawReport": "artifacts/performance/plugin-event-queue-2026-11-07/run-5.json",
+      "sha256": "42fe495fea1425529ef6dd49ffe1aeb46c7e4abce37e0c58a9d69a699ec1daee",
+      "utc": "2026-11-07T05:56:47.657Z",
+      "arguments": [
+        "--before",
+        "artifacts/performance/plugin-event-queue-2026-11-07/before/index.js",
+        "--after",
+        "artifacts/performance/plugin-event-queue-2026-11-07/after/index.js",
+        "--samples",
+        "21",
+        "--events",
+        "64",
+        "--output",
+        "artifacts/performance/plugin-event-queue-2026-11-07/run-5.json"
+      ],
+      "gitStatus": " M docs/performance-review.md\n M packages/plugin-sdk/src/index.ts\n M tests/fixtures/property-update-cases.cjs\n?? packages/plugin-sdk/test/event-queue.test.mjs\n?? tools/plugins/benchmark-event-queue.mjs\n?? tools/plugins/event-queue-contract.mjs\n",
+      "loadAverageBefore": [
+        2.39,
+        6.89,
+        7.44
+      ],
+      "loadAverageAfter": [
+        2.39,
+        6.89,
+        7.44
+      ]
+    },
+    {
+      "run": 6,
+      "rawReport": "artifacts/performance/plugin-event-queue-2026-11-07/run-6.json",
+      "sha256": "574d991d1a5d648fbebf15a30cb4d1d668f562ec80b30be02e02f88c875c2d05",
+      "utc": "2026-11-07T05:56:48.800Z",
+      "arguments": [
+        "--before",
+        "artifacts/performance/plugin-event-queue-2026-11-07/before/index.js",
+        "--after",
+        "artifacts/performance/plugin-event-queue-2026-11-07/after/index.js",
+        "--samples",
+        "21",
+        "--events",
+        "64",
+        "--output",
+        "artifacts/performance/plugin-event-queue-2026-11-07/run-6.json"
+      ],
+      "gitStatus": " M docs/performance-review.md\n M packages/plugin-sdk/src/index.ts\n M tests/fixtures/property-update-cases.cjs\n?? packages/plugin-sdk/test/event-queue.test.mjs\n?? tools/plugins/benchmark-event-queue.mjs\n?? tools/plugins/event-queue-contract.mjs\n",
+      "loadAverageBefore": [
+        2.39,
+        6.89,
+        7.44
+      ],
+      "loadAverageAfter": [
+        2.28,
+        6.79,
+        7.4
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "name": "harness_event_fanout/64_bytes/1_subscribers",
+      "payloadBytes": 64,
+      "serializedPayloadBytes": {
+        "min": 85,
+        "max": 86
+      },
+      "subscribers": 1,
+      "eventsPerSample": 64,
+      "unit": "ns/event delivered to all subscribers",
+      "runs": [
+        {
+          "run": 4,
+          "orders": [
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ]
+          ],
+          "afterOverBefore": 0.7535901116318937,
+          "before": {
+            "samples": [
+              6843.953125,
+              5007,
+              5457.6875,
+              4593.78125,
+              4283.140625,
+              5846.296875,
+              5000.15625,
+              4064.5,
+              4402.296875,
+              4032.703125,
+              5880.09375,
+              4043.40625,
+              4801.03125,
+              6274.296875,
+              4147.3125,
+              5229.640625,
+              4621.953125,
+              4002.203125,
+              3885.25,
+              4149.046875,
+              4099.890625
+            ],
+            "summary": {
+              "count": 21,
+              "median": 4593.78125,
+              "mad": 529.28125,
+              "min": 3885.25,
+              "max": 6843.953125
+            }
+          },
+          "after": {
+            "samples": [
+              4352.046875,
+              4848.28125,
+              4951.78125,
+              6089.6875,
+              3490.34375,
+              4150.03125,
+              6967.953125,
+              3459.890625,
+              3384.78125,
+              3336.828125,
+              3389.328125,
+              3353.8125,
+              3407.859375,
+              3360.21875,
+              3457.265625,
+              3376.046875,
+              3461.828125,
+              5938.78125,
+              3905.265625,
+              3404.65625,
+              6075.3125
+            ],
+            "summary": {
+              "count": 21,
+              "median": 3461.828125,
+              "mad": 108.015625,
+              "min": 3336.828125,
+              "max": 6967.953125
+            }
+          }
+        },
+        {
+          "run": 5,
+          "orders": [
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ]
+          ],
+          "afterOverBefore": 0.8460507577268545,
+          "before": {
+            "samples": [
+              5409.203125,
+              5074.828125,
+              4810.109375,
+              4461.1875,
+              4532.5625,
+              4465.453125,
+              4312.9375,
+              4478.203125,
+              4145.78125,
+              4157.78125,
+              6110.078125,
+              4169.53125,
+              4146.03125,
+              6420.625,
+              4680.796875,
+              4418.046875,
+              4609.75,
+              4284.921875,
+              4241.421875,
+              5139.140625,
+              4221.859375
+            ],
+            "summary": {
+              "count": 21,
+              "median": 4465.453125,
+              "mad": 243.59375,
+              "min": 4145.78125,
+              "max": 6420.625
+            }
+          },
+          "after": {
+            "samples": [
+              4320.578125,
+              4291.859375,
+              5342.671875,
+              5593.28125,
+              3731.890625,
+              3778,
+              7106.59375,
+              3557.421875,
+              3473.109375,
+              3647.3125,
+              3827.21875,
+              3442.8125,
+              4012.21875,
+              3538.125,
+              3752.375,
+              3429.390625,
+              3497.75,
+              7013.546875,
+              4473.203125,
+              3585.953125,
+              6719.65625
+            ],
+            "summary": {
+              "count": 21,
+              "median": 3778,
+              "mad": 304.890625,
+              "min": 3429.390625,
+              "max": 7106.59375
+            }
+          }
+        },
+        {
+          "run": 6,
+          "orders": [
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ]
+          ],
+          "afterOverBefore": 0.8491339521293221,
+          "before": {
+            "samples": [
+              5550,
+              4935.28125,
+              4879.15625,
+              4847.09375,
+              4299.34375,
+              4066.28125,
+              4103.3125,
+              4091.375,
+              4113.0625,
+              4138.328125,
+              5855.859375,
+              4093.625,
+              6113.21875,
+              6480.875,
+              4086.921875,
+              4071.640625,
+              4441.1875,
+              4017.546875,
+              3899.65625,
+              5855.359375,
+              4683.640625
+            ],
+            "summary": {
+              "count": 21,
+              "median": 4299.34375,
+              "mad": 281.796875,
+              "min": 3899.65625,
+              "max": 6480.875
+            }
+          },
+          "after": {
+            "samples": [
+              4506.375,
+              4494.390625,
+              4707.875,
+              5735.03125,
+              3559.828125,
+              3588.15625,
+              6857.984375,
+              3596.5,
+              3577.015625,
+              3427.078125,
+              3550.625,
+              3557.296875,
+              3650.71875,
+              3447.09375,
+              3422.03125,
+              4043.796875,
+              3485.078125,
+              5835.34375,
+              4831.875,
+              5675.28125,
+              6635.21875
+            ],
+            "summary": {
+              "count": 21,
+              "median": 3650.71875,
+              "mad": 228.6875,
+              "min": 3422.03125,
+              "max": 6857.984375
+            }
+          }
+        }
+      ],
+      "comparison": {
+        "basis": "Median of three independent-process median ratios; ranges retain between-run variation.",
+        "medianPairedAfterOverBefore": 0.8460507577268545,
+        "minPairedAfterOverBefore": 0.7535901116318937,
+        "maxPairedAfterOverBefore": 0.8491339521293221,
+        "medianPairedSpeedup": 1.181962182371625,
+        "beforeRunMedians": [
+          4593.78125,
+          4465.453125,
+          4299.34375
+        ],
+        "afterRunMedians": [
+          3461.828125,
+          3778,
+          3650.71875
+        ]
+      }
+    },
+    {
+      "name": "harness_event_fanout/64_bytes/8_subscribers",
+      "payloadBytes": 64,
+      "serializedPayloadBytes": {
+        "min": 85,
+        "max": 86
+      },
+      "subscribers": 8,
+      "eventsPerSample": 64,
+      "unit": "ns/event delivered to all subscribers",
+      "runs": [
+        {
+          "run": 4,
+          "orders": [
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ]
+          ],
+          "afterOverBefore": 0.5488748159745753,
+          "before": {
+            "samples": [
+              11192.5,
+              11186.953125,
+              10948.03125,
+              14003.484375,
+              11135.609375,
+              11013.515625,
+              13782.703125,
+              13811.328125,
+              14489.21875,
+              11464.3125,
+              13322.671875,
+              12035.53125,
+              15782.34375,
+              11950.421875,
+              11468.578125,
+              14235.171875,
+              11204.3125,
+              16215.78125,
+              11267.84375,
+              12531.40625,
+              13230.296875
+            ],
+            "summary": {
+              "count": 21,
+              "median": 12035.53125,
+              "mad": 1022.015625,
+              "min": 10948.03125,
+              "max": 16215.78125
+            }
+          },
+          "after": {
+            "samples": [
+              7206.796875,
+              8437.71875,
+              6325.140625,
+              6420.78125,
+              6306.859375,
+              6304.296875,
+              8768.953125,
+              7938.9375,
+              6862.375,
+              7728.28125,
+              7235.140625,
+              6606,
+              10192.234375,
+              8349.609375,
+              6588.015625,
+              11090.578125,
+              6176.453125,
+              6326.6875,
+              6111.9375,
+              5878.203125,
+              6288.96875
+            ],
+            "summary": {
+              "count": 21,
+              "median": 6606,
+              "mad": 494.0625,
+              "min": 5878.203125,
+              "max": 11090.578125
+            }
+          }
+        },
+        {
+          "run": 5,
+          "orders": [
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ]
+          ],
+          "afterOverBefore": 0.5414063210895084,
+          "before": {
+            "samples": [
+              11132.890625,
+              11213.5,
+              11809.640625,
+              14460.6875,
+              11492.328125,
+              12089.0625,
+              15723.90625,
+              14106.90625,
+              14768.8125,
+              12508.640625,
+              12420.203125,
+              11819.8125,
+              12167.59375,
+              15864.40625,
+              11408.5625,
+              11001.71875,
+              10970.3125,
+              19046.65625,
+              14118.796875,
+              12363.375,
+              13616.46875
+            ],
+            "summary": {
+              "count": 21,
+              "median": 12363.375,
+              "mad": 1230.484375,
+              "min": 10970.3125,
+              "max": 19046.65625
+            }
+          },
+          "after": {
+            "samples": [
+              6535.375,
+              8018.75,
+              6613.828125,
+              6560.765625,
+              7221.171875,
+              6693.609375,
+              7271.9375,
+              7931.078125,
+              7127.4375,
+              7041.359375,
+              6689.84375,
+              6358.140625,
+              9324.1875,
+              7367.375,
+              6310.75,
+              8137.78125,
+              6374.453125,
+              6531.40625,
+              6864.859375,
+              6328.875,
+              6129.625
+            ],
+            "summary": {
+              "count": 21,
+              "median": 6693.609375,
+              "mad": 364.734375,
+              "min": 6129.625,
+              "max": 9324.1875
+            }
+          }
+        },
+        {
+          "run": 6,
+          "orders": [
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ]
+          ],
+          "afterOverBefore": 0.5701925116918337,
+          "before": {
+            "samples": [
+              15973.859375,
+              11545.265625,
+              11760,
+              13651.6875,
+              11104.671875,
+              11282.71875,
+              11458.53125,
+              11857.234375,
+              16434.0625,
+              12028.46875,
+              12592.6875,
+              12593.859375,
+              12903.234375,
+              16100.828125,
+              11554.453125,
+              11580.234375,
+              11157.359375,
+              18152.84375,
+              11578.703125,
+              11246.546875,
+              13488.46875
+            ],
+            "summary": {
+              "count": 21,
+              "median": 11857.234375,
+              "mad": 699.875,
+              "min": 11104.671875,
+              "max": 18152.84375
+            }
+          },
+          "after": {
+            "samples": [
+              7040.671875,
+              8678.671875,
+              6670.4375,
+              6678.359375,
+              6485.46875,
+              6355.203125,
+              6760.90625,
+              11451.03125,
+              9636.234375,
+              6472.625,
+              7145.390625,
+              6676.5,
+              9049.984375,
+              6922.9375,
+              6232.953125,
+              8046.03125,
+              6401.0625,
+              6840.65625,
+              5968.09375,
+              7665.53125,
+              6695.671875
+            ],
+            "summary": {
+              "count": 21,
+              "median": 6760.90625,
+              "mad": 359.84375,
+              "min": 5968.09375,
+              "max": 11451.03125
+            }
+          }
+        }
+      ],
+      "comparison": {
+        "basis": "Median of three independent-process median ratios; ranges retain between-run variation.",
+        "medianPairedAfterOverBefore": 0.5488748159745753,
+        "minPairedAfterOverBefore": 0.5414063210895084,
+        "maxPairedAfterOverBefore": 0.5701925116918337,
+        "medianPairedSpeedup": 1.821909059945504,
+        "beforeRunMedians": [
+          12035.53125,
+          12363.375,
+          11857.234375
+        ],
+        "afterRunMedians": [
+          6606,
+          6693.609375,
+          6760.90625
+        ]
+      }
+    },
+    {
+      "name": "harness_event_fanout/4096_bytes/1_subscribers",
+      "payloadBytes": 4096,
+      "serializedPayloadBytes": {
+        "min": 4117,
+        "max": 4118
+      },
+      "subscribers": 1,
+      "eventsPerSample": 64,
+      "unit": "ns/event delivered to all subscribers",
+      "runs": [
+        {
+          "run": 4,
+          "orders": [
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ]
+          ],
+          "afterOverBefore": 0.6614607027215071,
+          "before": {
+            "samples": [
+              14511.796875,
+              8923.140625,
+              9279.8125,
+              16321.203125,
+              8917.984375,
+              8487.75,
+              8756.6875,
+              8860.984375,
+              9275.515625,
+              9429.265625,
+              8592.609375,
+              9342.25,
+              11926.109375,
+              8915.375,
+              9990.125,
+              12304.6875,
+              9475.890625,
+              10437.6875,
+              11296.640625,
+              8771.171875,
+              11366.5
+            ],
+            "summary": {
+              "count": 21,
+              "median": 9342.25,
+              "mad": 585.5625,
+              "min": 8487.75,
+              "max": 16321.203125
+            }
+          },
+          "after": {
+            "samples": [
+              12291,
+              6398.25,
+              11503.28125,
+              9555.421875,
+              5970.09375,
+              5933.625,
+              6004.234375,
+              6179.53125,
+              8314.84375,
+              10510.203125,
+              6193.34375,
+              6067.25,
+              6071.03125,
+              5918.609375,
+              6020.34375,
+              11981.21875,
+              6513.734375,
+              6143.25,
+              5985.921875,
+              6006.984375,
+              6665.9375
+            ],
+            "summary": {
+              "count": 21,
+              "median": 6179.53125,
+              "mad": 218.71875,
+              "min": 5918.609375,
+              "max": 12291
+            }
+          }
+        },
+        {
+          "run": 5,
+          "orders": [
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ]
+          ],
+          "afterOverBefore": 0.6901786370653532,
+          "before": {
+            "samples": [
+              14385.09375,
+              9029.71875,
+              9708.265625,
+              18776.734375,
+              10347.046875,
+              9397.328125,
+              9390.71875,
+              9250.1875,
+              9624.796875,
+              9352.0625,
+              8962.421875,
+              8964.203125,
+              10584.65625,
+              8861.46875,
+              8727.46875,
+              9226.375,
+              8858.984375,
+              8679.984375,
+              11296.15625,
+              9641.328125,
+              8906.203125
+            ],
+            "summary": {
+              "count": 21,
+              "median": 9352.0625,
+              "mad": 389.640625,
+              "min": 8679.984375,
+              "max": 18776.734375
+            }
+          },
+          "after": {
+            "samples": [
+              11745.421875,
+              6246.453125,
+              11681.28125,
+              10164.828125,
+              6557.75,
+              6364.0625,
+              6454.59375,
+              6060.140625,
+              6770.5,
+              9907.96875,
+              6141.671875,
+              5813.71875,
+              6205.359375,
+              5980.75,
+              5906.71875,
+              10827.640625,
+              6358.1875,
+              6038.40625,
+              6641.0625,
+              6579.546875,
+              6902.640625
+            ],
+            "summary": {
+              "count": 21,
+              "median": 6454.59375,
+              "mad": 394.453125,
+              "min": 5813.71875,
+              "max": 11745.421875
+            }
+          }
+        },
+        {
+          "run": 6,
+          "orders": [
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ]
+          ],
+          "afterOverBefore": 0.6553095814597025,
+          "before": {
+            "samples": [
+              15389.171875,
+              11770.0625,
+              10830.828125,
+              16633.703125,
+              9510.78125,
+              8835.15625,
+              8854.125,
+              8737.296875,
+              9377.109375,
+              9826.0625,
+              8879.609375,
+              9935.359375,
+              11423.609375,
+              10625.84375,
+              8936.75,
+              9486.09375,
+              9003.265625,
+              8867.40625,
+              10933.78125,
+              8695.84375,
+              8699.796875
+            ],
+            "summary": {
+              "count": 21,
+              "median": 9486.09375,
+              "mad": 650.9375,
+              "min": 8695.84375,
+              "max": 16633.703125
+            }
+          },
+          "after": {
+            "samples": [
+              13833.59375,
+              6569.859375,
+              10300.265625,
+              10106.3125,
+              6161.28125,
+              5840.15625,
+              6216.328125,
+              5866.75,
+              6043.28125,
+              8244.234375,
+              6091.125,
+              6241.6875,
+              6269.84375,
+              5953.015625,
+              8814.8125,
+              13228.09375,
+              6575.046875,
+              5948.640625,
+              6206.90625,
+              5957.296875,
+              6060.265625
+            ],
+            "summary": {
+              "count": 21,
+              "median": 6216.328125,
+              "mad": 267.6875,
+              "min": 5840.15625,
+              "max": 13833.59375
+            }
+          }
+        }
+      ],
+      "comparison": {
+        "basis": "Median of three independent-process median ratios; ranges retain between-run variation.",
+        "medianPairedAfterOverBefore": 0.6614607027215071,
+        "minPairedAfterOverBefore": 0.6553095814597025,
+        "maxPairedAfterOverBefore": 0.6901786370653532,
+        "medianPairedSpeedup": 1.511805608232825,
+        "beforeRunMedians": [
+          9342.25,
+          9352.0625,
+          9486.09375
+        ],
+        "afterRunMedians": [
+          6179.53125,
+          6454.59375,
+          6216.328125
+        ]
+      }
+    },
+    {
+      "name": "harness_event_fanout/4096_bytes/8_subscribers",
+      "payloadBytes": 4096,
+      "serializedPayloadBytes": {
+        "min": 4117,
+        "max": 4118
+      },
+      "subscribers": 8,
+      "eventsPerSample": 64,
+      "unit": "ns/event delivered to all subscribers",
+      "runs": [
+        {
+          "run": 4,
+          "orders": [
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ]
+          ],
+          "afterOverBefore": 0.2231479222332645,
+          "before": {
+            "samples": [
+              34040.734375,
+              30482.65625,
+              35584.21875,
+              40398.90625,
+              31928.828125,
+              33329.34375,
+              29115.015625,
+              29933.6875,
+              34605.984375,
+              31955.671875,
+              30677.734375,
+              29414.40625,
+              29396.21875,
+              30628.515625,
+              33415.09375,
+              31507.6875,
+              29325.453125,
+              42684.671875,
+              30793.625,
+              30103.796875,
+              31783.03125
+            ],
+            "summary": {
+              "count": 21,
+              "median": 31507.6875,
+              "mad": 1821.65625,
+              "min": 29115.015625,
+              "max": 42684.671875
+            }
+          },
+          "after": {
+            "samples": [
+              8711.640625,
+              8071.40625,
+              8619.15625,
+              8317.4375,
+              8998.921875,
+              8484.640625,
+              6841.28125,
+              8823.5625,
+              6934.625,
+              6808.25,
+              7160.578125,
+              6363.53125,
+              6730.4375,
+              12135.875,
+              6958.875,
+              6625.203125,
+              7030.875,
+              6920.59375,
+              6779.78125,
+              9672.15625,
+              6747.015625
+            ],
+            "summary": {
+              "count": 21,
+              "median": 7030.875,
+              "mad": 405.671875,
+              "min": 6363.53125,
+              "max": 12135.875
+            }
+          }
+        },
+        {
+          "run": 5,
+          "orders": [
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ]
+          ],
+          "afterOverBefore": 0.24741699591009667,
+          "before": {
+            "samples": [
+              35739.171875,
+              35886.546875,
+              30861.59375,
+              31769.734375,
+              31709.640625,
+              32138.546875,
+              33354.578125,
+              32488.875,
+              29281.296875,
+              28878.390625,
+              29391.1875,
+              29208.1875,
+              31384.703125,
+              31553.375,
+              29493.734375,
+              28583,
+              28894.234375,
+              29207.71875,
+              32502.21875,
+              31029.15625,
+              28515.625
+            ],
+            "summary": {
+              "count": 21,
+              "median": 31029.15625,
+              "mad": 1637.96875,
+              "min": 28515.625,
+              "max": 35886.546875
+            }
+          },
+          "after": {
+            "samples": [
+              8632.734375,
+              8158.703125,
+              12069.375,
+              11750.4375,
+              8994.0625,
+              10951.171875,
+              7254.09375,
+              6397.109375,
+              6998.09375,
+              6522.390625,
+              8307.15625,
+              10172.640625,
+              7691.3125,
+              7109.140625,
+              7677.140625,
+              6261.234375,
+              7104.9375,
+              9490.953125,
+              7316.359375,
+              7135.90625,
+              6945.203125
+            ],
+            "summary": {
+              "count": 21,
+              "median": 7677.140625,
+              "mad": 731.9375,
+              "min": 6261.234375,
+              "max": 12069.375
+            }
+          }
+        },
+        {
+          "run": 6,
+          "orders": [
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ]
+          ],
+          "afterOverBefore": 0.24890726330585397,
+          "before": {
+            "samples": [
+              36613.796875,
+              36908.09375,
+              30688.59375,
+              30539.921875,
+              31521.453125,
+              33225.421875,
+              33251.71875,
+              31786.234375,
+              29542.265625,
+              29368.171875,
+              29753.390625,
+              30092.203125,
+              31777.0625,
+              31025.171875,
+              30143.828125,
+              29724.296875,
+              30127.265625,
+              33968.53125,
+              31464.453125,
+              32303.390625,
+              29776.15625
+            ],
+            "summary": {
+              "count": 21,
+              "median": 31025.171875,
+              "mad": 1249.015625,
+              "min": 29368.171875,
+              "max": 36908.09375
+            }
+          },
+          "after": {
+            "samples": [
+              8546.3125,
+              8279.59375,
+              8399.296875,
+              8532.828125,
+              9473.578125,
+              11163.6875,
+              8408.625,
+              6339.875,
+              7047.25,
+              6664.078125,
+              7248,
+              10870.125,
+              6734,
+              7112.40625,
+              7570.90625,
+              7852.25,
+              6990.171875,
+              9449.015625,
+              6781.015625,
+              7722.390625,
+              7324.046875
+            ],
+            "summary": {
+              "count": 21,
+              "median": 7722.390625,
+              "mad": 732.21875,
+              "min": 6339.875,
+              "max": 11163.6875
+            }
+          }
+        }
+      ],
+      "comparison": {
+        "basis": "Median of three independent-process median ratios; ranges retain between-run variation.",
+        "medianPairedAfterOverBefore": 0.24741699591009667,
+        "minPairedAfterOverBefore": 0.2231479222332645,
+        "maxPairedAfterOverBefore": 0.24890726330585397,
+        "medianPairedSpeedup": 4.041759525539497,
+        "beforeRunMedians": [
+          31507.6875,
+          31029.15625,
+          31025.171875
+        ],
+        "afterRunMedians": [
+          7030.875,
+          7677.140625,
+          7722.390625
+        ]
+      }
+    },
+    {
+      "name": "harness_event_fanout/65536_bytes/1_subscribers",
+      "payloadBytes": 65536,
+      "serializedPayloadBytes": {
+        "min": 65557,
+        "max": 65558
+      },
+      "subscribers": 1,
+      "eventsPerSample": 64,
+      "unit": "ns/event delivered to all subscribers",
+      "runs": [
+        {
+          "run": 4,
+          "orders": [
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ]
+          ],
+          "afterOverBefore": 0.524958254568368,
+          "before": {
+            "samples": [
+              78658.71875,
+              77334.65625,
+              80844.640625,
+              76743.59375,
+              80848.578125,
+              76559.640625,
+              79766.921875,
+              79135.765625,
+              79733.296875,
+              79790.53125,
+              77514.390625,
+              80207.859375,
+              74501.609375,
+              86820.078125,
+              74764.875,
+              79350,
+              89196.140625,
+              82821.109375,
+              77490.75,
+              80293.5,
+              76111.125
+            ],
+            "summary": {
+              "count": 21,
+              "median": 79350,
+              "mad": 1835.609375,
+              "min": 74501.609375,
+              "max": 89196.140625
+            }
+          },
+          "after": {
+            "samples": [
+              43690.015625,
+              42005.0625,
+              39262.078125,
+              41897.3125,
+              41183.3125,
+              43120.984375,
+              40408.734375,
+              43045.109375,
+              39063.0625,
+              44117.71875,
+              44079.515625,
+              37577.65625,
+              41477.75,
+              39868.484375,
+              44494.359375,
+              39488.828125,
+              44228.109375,
+              39010.640625,
+              41655.4375,
+              38320.265625,
+              43560.28125
+            ],
+            "summary": {
+              "count": 21,
+              "median": 41655.4375,
+              "mad": 2034.578125,
+              "min": 37577.65625,
+              "max": 44494.359375
+            }
+          }
+        },
+        {
+          "run": 5,
+          "orders": [
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ]
+          ],
+          "afterOverBefore": 0.5062269576536575,
+          "before": {
+            "samples": [
+              79590.609375,
+              81961.375,
+              80696,
+              75655.734375,
+              85379,
+              75750.8125,
+              81539.34375,
+              80435.296875,
+              81164.9375,
+              80166.4375,
+              85423.609375,
+              100686.5625,
+              82467.4375,
+              79221.375,
+              79517.140625,
+              80578.84375,
+              76932.953125,
+              83486.40625,
+              79916.359375,
+              79443.375,
+              75666.21875
+            ],
+            "summary": {
+              "count": 21,
+              "median": 80435.296875,
+              "mad": 1213.921875,
+              "min": 75655.734375,
+              "max": 100686.5625
+            }
+          },
+          "after": {
+            "samples": [
+              40362.671875,
+              42265.203125,
+              38501.890625,
+              40558.40625,
+              39116.421875,
+              40720.359375,
+              38715.390625,
+              40737.34375,
+              40718.515625,
+              41976.015625,
+              43486.671875,
+              38544.09375,
+              43636.65625,
+              37977.546875,
+              44858.140625,
+              39638.984375,
+              46219.015625,
+              39297.46875,
+              42710.875,
+              38419.046875,
+              44631.65625
+            ],
+            "summary": {
+              "count": 21,
+              "median": 40718.515625,
+              "mad": 1992.359375,
+              "min": 37977.546875,
+              "max": 46219.015625
+            }
+          }
+        },
+        {
+          "run": 6,
+          "orders": [
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ]
+          ],
+          "afterOverBefore": 0.5258262537124274,
+          "before": {
+            "samples": [
+              77984.015625,
+              78356.5,
+              80385.40625,
+              76447.734375,
+              77807.578125,
+              75430.859375,
+              79604.40625,
+              76080.171875,
+              79171.265625,
+              79471.546875,
+              78988.375,
+              82845.203125,
+              75502.9375,
+              78444.28125,
+              76213.8125,
+              79385.109375,
+              76249.6875,
+              78105.140625,
+              78960.90625,
+              78373.796875,
+              80408.390625
+            ],
+            "summary": {
+              "count": 21,
+              "median": 78373.796875,
+              "mad": 1097.75,
+              "min": 75430.859375,
+              "max": 82845.203125
+            }
+          },
+          "after": {
+            "samples": [
+              39419.5625,
+              42665.453125,
+              39055.109375,
+              41409.234375,
+              39275.640625,
+              43694.578125,
+              39343.9375,
+              43445.6875,
+              42006.71875,
+              39058.46875,
+              40970.09375,
+              37778.9375,
+              42435.140625,
+              38971.6875,
+              43140.28125,
+              40261.59375,
+              41721.15625,
+              41211,
+              42935.453125,
+              37990.4375,
+              41848.765625
+            ],
+            "summary": {
+              "count": 21,
+              "median": 41211,
+              "mad": 1791.4375,
+              "min": 37778.9375,
+              "max": 43694.578125
+            }
+          }
+        }
+      ],
+      "comparison": {
+        "basis": "Median of three independent-process median ratios; ranges retain between-run variation.",
+        "medianPairedAfterOverBefore": 0.524958254568368,
+        "minPairedAfterOverBefore": 0.5062269576536575,
+        "maxPairedAfterOverBefore": 0.5258262537124274,
+        "medianPairedSpeedup": 1.9049133741543347,
+        "beforeRunMedians": [
+          79350,
+          80435.296875,
+          78373.796875
+        ],
+        "afterRunMedians": [
+          41655.4375,
+          40718.515625,
+          41211
+        ]
+      }
+    },
+    {
+      "name": "harness_event_fanout/65536_bytes/8_subscribers",
+      "payloadBytes": 65536,
+      "serializedPayloadBytes": {
+        "min": 65557,
+        "max": 65558
+      },
+      "subscribers": 8,
+      "eventsPerSample": 64,
+      "unit": "ns/event delivered to all subscribers",
+      "runs": [
+        {
+          "run": 4,
+          "orders": [
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ]
+          ],
+          "afterOverBefore": 0.12523631977073926,
+          "before": {
+            "samples": [
+              343290.359375,
+              339854.171875,
+              334656.25,
+              333116.640625,
+              338699.6875,
+              341852.640625,
+              328115.03125,
+              346464.078125,
+              359615.359375,
+              342056.140625,
+              335316.796875,
+              339613.90625,
+              338119.390625,
+              337900.84375,
+              336434.953125,
+              338221.1875,
+              336805.5,
+              334506.984375,
+              331231.6875,
+              331638.546875,
+              339279.25
+            ],
+            "summary": {
+              "count": 21,
+              "median": 338119.390625,
+              "mad": 3463.140625,
+              "min": 328115.03125,
+              "max": 359615.359375
+            }
+          },
+          "after": {
+            "samples": [
+              42851.734375,
+              41545.65625,
+              45421.890625,
+              40740.609375,
+              41729.296875,
+              45368.8125,
+              41437.15625,
+              41329.65625,
+              52391.03125,
+              47452.09375,
+              43677.296875,
+              47994.3125,
+              41637.3125,
+              46388.078125,
+              45099.5625,
+              40342.03125,
+              42314.796875,
+              45114.609375,
+              41418.109375,
+              40908.0625,
+              42344.828125
+            ],
+            "summary": {
+              "count": 21,
+              "median": 42344.828125,
+              "mad": 1436.765625,
+              "min": 40342.03125,
+              "max": 52391.03125
+            }
+          }
+        },
+        {
+          "run": 5,
+          "orders": [
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ]
+          ],
+          "afterOverBefore": 0.1283527623862686,
+          "before": {
+            "samples": [
+              332400.703125,
+              331423.59375,
+              332599.15625,
+              329663.703125,
+              330435.765625,
+              334712.53125,
+              342238.25,
+              343761.828125,
+              331326.46875,
+              330278.890625,
+              360940.4375,
+              386102.46875,
+              337452.40625,
+              330245.109375,
+              342114.875,
+              381373.015625,
+              344302.21875,
+              335578.578125,
+              336214.140625,
+              335927.796875,
+              329919.015625
+            ],
+            "summary": {
+              "count": 21,
+              "median": 335578.578125,
+              "mad": 5299.6875,
+              "min": 329663.703125,
+              "max": 386102.46875
+            }
+          },
+          "after": {
+            "samples": [
+              41339.21875,
+              40735.125,
+              44533.5,
+              40137.484375,
+              43306.359375,
+              43582.484375,
+              44957.328125,
+              41782.375,
+              44688.140625,
+              40459.90625,
+              41430.8125,
+              44525.03125,
+              41406.046875,
+              40911.078125,
+              63933.359375,
+              49306.53125,
+              41594.609375,
+              44616.109375,
+              41777.234375,
+              44591.421875,
+              43072.4375
+            ],
+            "summary": {
+              "count": 21,
+              "median": 43072.4375,
+              "mad": 1615.703125,
+              "min": 40137.484375,
+              "max": 63933.359375
+            }
+          }
+        },
+        {
+          "run": 6,
+          "orders": [
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ],
+            [
+              "after",
+              "before"
+            ],
+            [
+              "before",
+              "after"
+            ]
+          ],
+          "afterOverBefore": 0.1286108042920164,
+          "before": {
+            "samples": [
+              333125.953125,
+              346935.1875,
+              342209.40625,
+              338389.875,
+              340473.859375,
+              344687.078125,
+              333889.3125,
+              337581.375,
+              335703.796875,
+              337369.109375,
+              332987.5625,
+              331843.609375,
+              358330.75,
+              330923.28125,
+              333793,
+              339679.203125,
+              328863,
+              341272.203125,
+              334090.875,
+              336031.578125,
+              340608.59375
+            ],
+            "summary": {
+              "count": 21,
+              "median": 337369.109375,
+              "mad": 3576.109375,
+              "min": 328863,
+              "max": 358330.75
+            }
+          },
+          "after": {
+            "samples": [
+              43437.40625,
+              43948.015625,
+              46114.4375,
+              40643.8125,
+              43003.4375,
+              45167.21875,
+              43389.3125,
+              40422.8125,
+              43796.484375,
+              42073.609375,
+              46010.625,
+              44027.078125,
+              41920.1875,
+              43192.6875,
+              44628.515625,
+              42242.828125,
+              43073.71875,
+              45362.078125,
+              41956.53125,
+              46392.625,
+              40533.359375
+            ],
+            "summary": {
+              "count": 21,
+              "median": 43389.3125,
+              "mad": 1315.703125,
+              "min": 40422.8125,
+              "max": 46392.625
+            }
+          }
+        }
+      ],
+      "comparison": {
+        "basis": "Median of three independent-process median ratios; ranges retain between-run variation.",
+        "medianPairedAfterOverBefore": 0.1283527623862686,
+        "minPairedAfterOverBefore": 0.12523631977073926,
+        "maxPairedAfterOverBefore": 0.1286108042920164,
+        "medianPairedSpeedup": 7.791028267787259,
+        "beforeRunMedians": [
+          338119.390625,
+          335578.578125,
+          337369.109375
+        ],
+        "afterRunMedians": [
+          42344.828125,
+          43072.4375,
+          43389.3125
+        ]
+      }
+    }
+  ],
+  "validation": {
+    "checks": [
+      {
+        "name": "node",
+        "command": "npm run plugins:test:node",
+        "status": "passed",
+        "counts": {
+          "pass": 142,
+          "skip": 1,
+          "fail": 0
+        },
+        "log": "artifacts/performance/plugin-event-queue-2026-11-07/plugins-node.log",
+        "sha256": "d26d4c9c37537ca97dd5f56fcd2eb354358f6b90302f9757891b08ea0fd02d82"
+      },
+      {
+        "name": "bun",
+        "command": "npm run plugins:test:bun",
+        "status": "passed",
+        "counts": {
+          "pass": 143,
+          "skip": 0,
+          "fail": 0
+        },
+        "log": "artifacts/performance/plugin-event-queue-2026-11-07/plugins-bun.log",
+        "sha256": "e37656f82f846c3ad1db81f40e8df7da41280707d8ecdeb53c61246d5548be4b"
+      },
+      {
+        "name": "typecheck",
+        "command": "npm run plugins:typecheck",
+        "status": "passed",
+        "counts": null,
+        "log": "artifacts/performance/plugin-event-queue-2026-11-07/typecheck.log",
+        "sha256": "bdebb382da883ee83fb0dc01d3a76d4d6db3e2dcc7615cb62e8cadeb56636446"
+      },
+      {
+        "name": "lint",
+        "command": "npm run plugins:lint",
+        "status": "passed",
+        "counts": null,
+        "log": "artifacts/performance/plugin-event-queue-2026-11-07/lint.log",
+        "sha256": "82eb09747603addf6f440e7b7a1fe9ecc28990a451b0c234401746c03b260270"
+      },
+      {
+        "name": "baseline_mutation_regressions",
+        "command": "NAPI_VM_TEST_SDK=<immutable before module URL> node --test --test-name-pattern=\"shared payloads|original queued bytes|cyclic payload|enqueued size\" packages/plugin-sdk/test/event-queue.test.mjs",
+        "status": "four historical failures reproduced",
+        "counts": {
+          "expected_fail": 4,
+          "pass": 0
+        },
+        "log": "artifacts/performance/plugin-event-queue-2026-11-07/before-regressions.log",
+        "sha256": "f813cf92f500d865c72b762cdaab290c7361b28dd18eb240c0b1953fe3d2de78"
+      }
+    ],
+    "nodeSkipReason": "Existing managed Bun missing-package case requires an explicitly available Bun runtime; the Bun suite exercises it.",
+    "unchangedPublicTypeDeclarations": "QueuedEvent is internal; emitted public declaration contains no QueuedEvent export."
+  },
+  "limitations": [
+    "Only actual public createHarness event validation/enqueue/listener completion is timed; production child transport is tested for correctness but is not timed.",
+    "ASCII text payload sizes64,4096,65536 bytes and1/8 subscribers; each sample is an average of64 events. Setup, shutdown and assertions are excluded.",
+    "Three same-process alternating comparisons in independent Node processes retain21 batches per phase and5 warmup batches. No CPU affinity, forced GC or isolation; normal desktop background activity remains.",
+    "Absolute small-payload timings vary across processes. Ratios and medians/MAD are descriptive, not statistical significance claims.",
+    "Earlier runs1/2/3 and the short smoke are retained locally but excluded from this report because the benchmark script subsequently gained only its minimum-Node-version comment. Final runs4/5/6 match the current complete script hash."
+  ]
+}

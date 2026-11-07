@@ -15,7 +15,7 @@ UI rendering and every builtin need their own workloads before speed claims.
 | --- | --- |
 | Lexer/parser and caches | Exact-source parse caches already bound entry count and source bytes; cold-source comparison must bypass them deliberately. Character-at-a-time temporary strings in literal/template scanning remain a candidate for a separately measured frontend change. |
 | AST/bytecode, environments and calls | Inspect member-key conversion, property descriptors, verified slots, inline caches, activation and environment reuse. Preserve fallback and receiver semantics; benchmark AST and bytecode explicitly. |
-| Values, strings, heap and builtins | Preserve UTF-16 keys and surrogate escaping. Retain cycle collection in fresh interpreter measurements. Case conversion's per-scalar temporary strings and dictionary hashing remain candidates; no unmeasured gain is claimed. |
+| Values, strings, heap and builtins | Preserve UTF-16 keys and surrogate escaping. Retain cycle collection in fresh interpreter measurements. Guest case conversion already uses ICU with a single-scalar fast path; the allocation-heavy public `JsString::map_case` helper has no in-tree callers. Shape transition retention and dictionary hashing remain candidates; no unmeasured gain is claimed. |
 | NAPI/host marshalling and WASM adapters | Inspect copy boundaries, typed-array offsets and shared-memory rejection. Measure small views over large buffers separately from guest allocation. Core changes are shared with WASM; a rebuilt WASM regression suite is required. |
 | Optional runtime and schedulers | Existing baseline covers timer batches and legacy/persistent async calls. Permission checks and host I/O stay in the measured boundary. I/O operations cannot be represented by a core-engine comparison. |
 | Language service, LSP and live sessions | Inspect document updates, position conversions, source rescans and transport. Isolated position conversion is different from whole-request latency. |
@@ -32,11 +32,11 @@ future work can choose a workload and validate the relevant lifecycle first.
 | --- | --- | --- |
 | `crates/napi-vm-runtime/src/runtime/network.rs` | A new reqwest client and Tokio runtime per fetch prevent connection-pool reuse. | Repeated local HTTP requests, permission isolation, cancellation and runtime teardown. |
 | `src/lsp/server.rs` | Rebuilding the service after a runtime snapshot reparses open documents. | Multiple documents and frequent metadata changes, checking invalidation and diagnostics. |
-| `packages/plugin-sdk/src/index.ts` | Production and harness event queues serialize messages again when removing them to update byte accounting; the plugin host already retains each entry's byte count. | Bounded event fanout with multiple payload sizes and backpressure/error tests. |
 | `runtime/session.cjs` | Publishing metadata serializes the complete snapshot. | Subscriber count and payload-size latency; retain publication coalescing. |
 | `src/bindings/marshal.rs` | Map/Set entry discovery is repeated before construction. Cyclic Maps currently hit the depth guard, and repeated collection references lose identity. | Large collections plus cycles and identity checks at the host boundary. |
 | `crates/napi-vm-core/src/interpreter/call.rs` | Creating missing named properties still uses temporary descriptors; the measured class workload mostly takes this path. | Profile creation/prototype interception before extending the narrower numeric creation fast path. |
-| `crates/napi-vm-core/src/lexer.rs`, `js_string.rs` | Literal/template scanning and case conversion construct temporary strings per character. | Frontend and string workloads including lone surrogates, raw templates and case expansion. |
+| `crates/napi-vm-core/src/lexer.rs` | Literal/template scanning constructs temporary strings per character. | Frontend workloads including lone surrogates and raw templates. |
+| `crates/napi-vm-core/src/shape.rs` | Small-layout transitions retain strong child references. The 128-key depth threshold does not bound the number of distinct branches retained for an owner's lifetime. | Unique-key churn, retained memory, canonical sharing and inline-cache correctness before introducing bounded or weak transitions. |
 
 ## Reproducible comparison
 
@@ -150,6 +150,57 @@ call a previously defined guest function returning the same 16-byte view over
 64-byte, 8-MiB and 32-MiB backings. VM setup and correctness
 assertions are outside the timed calls. Each report identifies the exact addon
 and script; it does not measure backing-buffer construction or guest loops.
+
+### Trusted-plugin SDK event queues
+
+Production and harness subscriptions now retain the serialized byte count with
+each queued event and subtract that count before invoking the listener. The
+internal queue entry is shared across subscribers, avoiding a new allocation
+per subscriber. Listeners still receive the same validated payload reference;
+the change introduces no payload cloning or freezing.
+
+Previously, dequeueing serialized the payload again for every subscriber.
+Another listener could make it cyclic and prevent the next subscriber from
+running, or shrink it and leave stale byte counts that eventually caused a
+false `OVERLOADED` error on an empty queue. All four mutation regressions
+(cycle and shrink, through both harness and real child process) fail on the
+saved, freshly emitted pre-change SDK and pass on the new SDK. Four additional
+regressions preserve count/byte limits and listener/error isolation. Clearing
+a queue also resets its byte count on unsubscribe, overflow, error and shutdown.
+
+The [event-queue report](../bench/baselines/performance-review-2026-11-06/plugin-event-queue.json)
+retains three runs of 21 alternating before/after batches, each delivering 64
+events to one or eight subscribers. Each batch checks listener counts, event
+indices and payload contents. The timed boundary includes public
+`createHarness.emitHostEvent` validation, enqueueing, Promise scheduling and all
+listener counters; setup, shutdown and assertions stay outside. Both saved SDKs
+use the same protocol module in the same Node process. Source/build metadata,
+dependency fingerprints, raw samples and MAD are retained in the report.
+
+| Text payload, eight subscribers | Before (µs/event) | After (µs/event) | After/before range across runs |
+| --- | ---: | ---: | ---: |
+| 64 bytes | 12.036 | 6.694 | 0.541–0.570 |
+| 4 KiB | 31.029 | 7.677 | 0.223–0.249 |
+| 64 KiB | 337.369 | 43.072 | 0.125–0.129 |
+
+Times are medians of three run medians, per event delivered to **all eight**
+subscribers. Single-subscriber cases are also retained and have smaller gains.
+These measurements cover the in-process harness, without TCP transport or
+child-process startup. They are independent of the rquickjs engine comparison.
+No CPU isolation or forced GC is used; the report makes no significance claim.
+
+```sh
+node tools/plugins/benchmark-event-queue.mjs \
+  --before artifacts/performance/plugin-event-queue-2026-11-07/before/index.js \
+  --after artifacts/performance/plugin-event-queue-2026-11-07/after/index.js \
+  --samples 21 --events 64 --output artifacts/performance/event-queue-new.json
+```
+
+The runner needs Node.js 22.14+ and a new output path. Save freshly emitted SDK
+files with their source snapshots and `build.json` records before timing; the
+retained report embeds the exact build commands and hashes. The ignored local
+snapshot directories above are evidence from this run, not files supplied by a
+clean checkout.
 
 ## Repeated optimization measurements
 
@@ -330,3 +381,13 @@ subview run on the rebuilt addon retained microsecond-scale copies at every
 backing size; the original alternating runs remain the repeated speedup
 evidence. Core/WASM production inputs are unchanged, so their complete retained
 conformance and rebuilt WASM evidence remain applicable.
+
+The [follow-up audit](../bench/baselines/performance-review-2026-11-06/followup-audit.json)
+independently rechecks those hashes, every Test262 variant, and the paired
+summaries. It also records the SDK queue fix and its additional eight
+regressions, full plugin suites (142 Node passes with one existing Bun-specific
+skip; 143 Bun passes), plugin typechecking/lint, and 26 fresh native/WASM
+boundary passes with zero skips. The shared property fixture now asserts its
+actual UTF-16 code units and covers both lone surrogate halves. Core execution
+still matches the retained full conformance run; the new production change is
+confined to the trusted-plugin SDK.

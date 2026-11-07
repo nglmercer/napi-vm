@@ -2,13 +2,18 @@
 module.exports = [
   {
     name: 'mixed UTF-16 property updates and method calls preserve key identity',
-    source: String.raw`let keys=['plain','😀','\uD800','\uFFFD','\uFDD0sD800','#public'];
+    source: String.raw`let keys=['plain','😀','\uD800','\uDC00','\uFFFD','\uFDD0sD800','#public'];
+      if(keys[1].length!==2 || keys[1].charCodeAt(0)!==0xD83D || keys[1].charCodeAt(1)!==0xDE00 ||
+         keys[2].length!==1 || keys[2].charCodeAt(0)!==0xD800 ||
+         keys[3].length!==1 || keys[3].charCodeAt(0)!==0xDC00 ||
+         keys[4].length!==1 || keys[4].charCodeAt(0)!==0xFFFD ||
+         keys[5].length!==6 || keys[5].charCodeAt(0)!==0xFDD0)throw 'wrong fixture code units';
       let o={};
       for(let k of keys){o[k]=1;o[k]++;o[k]+=2;o[k]&&=5;}
       for(let k of keys){if(o[k]!==5)throw 'aliased update';}
       let methods={};
       for(let k of keys){methods[k]=function(){return this===methods;};}
-      methods.plain() && methods['😀']() && methods['\uD800']() &&
+      methods.plain() && methods['😀']() && methods['\uD800']() && methods['\uDC00']() &&
       methods['\uFFFD']() && methods['\uFDD0sD800']() && methods['#public']() &&
       Object.keys(o).length===keys.length && Object.keys(o).every((k,i)=>k===keys[i]);`,
     expected: 'true',
