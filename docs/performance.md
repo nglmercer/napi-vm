@@ -4,6 +4,9 @@ Measure before changing a hot path. A useful result identifies the source,
 binary, workload, unit, machine, build flags and noise. Conformance counts
 and historical speed tables are separate evidence.
 
+The [repository performance review and rquickjs comparison](performance-review.md)
+records the cross-engine methodology, measured optimizations and verification.
+
 ## Capture a baseline
 
 The finite baseline runner is currently implemented for Linux. It requires

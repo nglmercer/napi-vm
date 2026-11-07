@@ -429,9 +429,9 @@ same descriptor the data is read from, so the file cannot be swapped for a
 larger one between the check and the read, and non-regular files (devices,
 FIFOs) are refused rather than read forever.
 
-A custom `fs` implementation is responsible for its own limits — the VM's own
-16 MiB string ceiling only rejects the value after the host has already
-allocated it.
+A custom `fs` implementation is responsible for its own limits. The VM's
+string limit of 64 × 1024 × 1024 UTF-16 code units only rejects a value after
+the host has already allocated it.
 
 ## Layout
 

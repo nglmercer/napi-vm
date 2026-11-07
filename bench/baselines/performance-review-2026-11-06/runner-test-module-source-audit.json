@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "utc": "2026-11-07T05:32:15.945002+00:00",
+  "path": "tools/test262-runner/src/report.rs",
+  "before_snapshot": "artifacts/performance/report-test-module-move/report-before.rs",
+  "before_sha256": "c57234ef2019e82c42791f41280071414ac4f23a6e08ade9d8aa6a1f6579c49d",
+  "after_sha256": "acad7598e06e589ca13980ab2fb7b233a30b0ab914843e79eb12c3abdad251dd",
+  "test_block_sha256": "e7d82e1e0333715be46cdc6108f85ff4823dd2154e4705e87250f66872980918",
+  "test_count": 2,
+  "mechanical_change": "Moved the unchanged cfg(test) module from before detail() to the end of the file.",
+  "production_comparison": "Remove the exact test-module block from both versions, remove blank lines only, and compare the remaining text byte-for-byte.",
+  "production_text_equal_ignoring_blank_lines": true,
+  "normalized_production_sha256": "90bc737798fef928dd5288f96f6796e0f697ccb92758c159e3eedcde4d1ed6da",
+  "before_matches_git_head": true,
+  "validation": {
+    "workspace_clippy": {
+      "command": [
+        "cargo",
+        "clippy",
+        "--workspace",
+        "--all-targets",
+        "--all-features",
+        "--locked",
+        "--target-dir",
+        "target/performance-clippy",
+        "--jobs",
+        "1",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "log": "artifacts/performance/clippy-final.log",
+      "log_sha256": "b1e74b69ce1aec88a0883c46df3a51314b86e567e067a58bc51a2dc85a5ab521"
+    },
+    "runner_tests": {
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "napi-vm-test262-runner",
+        "--locked",
+        "--target-dir",
+        "target/performance-clippy",
+        "--jobs",
+        "1"
+      ],
+      "exit_code": 0,
+      "unit_tests_passed": 11,
+      "documentation_integration_tests_passed": 1,
+      "failed": 0,
+      "log": "artifacts/performance/test262-runner-tests.log",
+      "log_sha256": "9634ced5f4aa7c294714df1c8a0f8ff046159b6d0bbb096e98309af2024e1118"
+    }
+  }
+}

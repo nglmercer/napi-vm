@@ -3,6 +3,7 @@
  *
  * Run:   bun examples/crash.ts            (full matrix, one subprocess per case)
  *        bun examples/crash.ts --case deep-recursion   (single case, in-process)
+ *        bun examples/crash.ts --only oom-array,shared-result-formatting (isolated cases)
  *
  * Why subprocesses: historically several cases below were *genuine process
  * killers* — native Rust stack overflows (SIGSEGV) and memory exhaustion
@@ -141,11 +142,12 @@ const CASES: CrashCase[] = [
   // Every loop iteration consumes from a budget (default 100M, tunable
   // via vm.setLoopLimit, refilled on each vm.run), so infinite loops
   // throw a catchable RangeError instead of blocking the event loop.
-  // Array length and string size are hard-capped (MAX_ARRAY_LEN /
-  // MAX_STRING_LEN) with a catchable RangeError long before allocation
-  // can fail; the `ulimit -v 2GB` wrapper on the OOM cases is only a
-  // backstop for if a cap is ever bypassed. (Node v26 reserves ~1.5GB
-  // of virtual address space at startup, so the limit can't go lower.)
+  // Arrays have a dense-growth threshold and operation-specific materialization
+  // limits, not a universal logical-length or aggregate heap cap. Strings have
+  // bounded construction paths (64 Mi UTF-16 units) and result formatting has
+  // a 64 MiB output budget. The `ulimit -v 2GB` wrapper is a backstop if a guard
+  // regresses, not a total guest heap guarantee. Node v26 reserves ~1.5GB of
+  // virtual address space at startup, so this wrapper cannot go lower.
   {
     id: "infinite-loop",
     title: "while (true) {} — loop budget",
@@ -156,11 +158,11 @@ const CASES: CrashCase[] = [
   },
   {
     id: "oom-array",
-    title: "Unbounded array growth",
-    code: "let a = []; while (true) { a.push([1, 2, 3, 4, 5, 6, 7, 8]); }",
+    title: "Sorted-array materialization above its limit",
+    code: "Array.prototype.toSorted.call({ length: 262145 });",
     opts: { memLimitKb: 2_097_152, timeoutMs: 30_000 },
     expected: "THROWN",
-    note: "RangeError: Maximum array length exceeded at 262,144 elements",
+    note: "toSorted rejects materialization above 262,144 slots before reading entries",
   },
   {
     id: "oom-string",
@@ -168,16 +170,26 @@ const CASES: CrashCase[] = [
     code: "let s = 'x'; while (true) { s = s + s; }",
     opts: { memLimitKb: 2_097_152, timeoutMs: 30_000 },
     expected: "THROWN",
-    note: "RangeError: Maximum string length exceeded at 16MB",
+    note: "RangeError when doubling exceeds 64 Mi UTF-16 code units",
+  },
+  {
+    id: "json-array-element-budget",
+    title: "JSON array-element budget across duplicate object keys",
+    code: `
+      let part = '"a":[' + '0,'.repeat(32767) + '0],';
+      JSON.parse('{' + part.repeat(128) + '"a":[0]}');
+    `,
+    opts: { memLimitKb: 2_097_152, timeoutMs: 30_000 },
+    expected: "THROWN",
+    note: "4 Mi aggregate parsed-array elements; duplicate keys keep live storage small",
   },
   {
     id: "shared-result-formatting",
     title: "Shared graph result-formatting amplification",
     code: `
-      let child = [];
-      for (let i = 0; i < 10000; i++) child.push(1);
+      let child = ['x'.repeat(1024 * 1024)];
       let outer = [];
-      for (let i = 0; i < 2048; i++) outer.push(child);
+      for (let i = 0; i < 65; i++) outer.push(child);
       outer;
     `,
     opts: { memLimitKb: 2_097_152, timeoutMs: 30_000 },
@@ -186,7 +198,7 @@ const CASES: CrashCase[] = [
   },
   {
     id: "large-string-early-break",
-    title: "Maximum-sized string, first iterator item only",
+    title: "Large string, first iterator item only",
     code: `
       let s = 'x'.repeat(16 * 1024 * 1024);
       let first = '';
@@ -211,10 +223,15 @@ const CASES: CrashCase[] = [
   },
   {
     id: "indexed-array-cap",
-    title: "Indexed assignment beyond the array cap",
-    code: "let a = []; a[1000000000] = 1;",
-    expected: "THROWN",
-    note: "RangeError before any sparse-array resize or allocator pressure",
+    title: "Indexed assignment remains sparse beyond the dense growth threshold",
+    code: `
+      let a = []; a[1000000000] = 1;
+      if (a.length !== 1000000001 || a[1000000000] !== 1 || Object.keys(a).length !== 1)
+        throw new Error('Sparse array invariant failed');
+      'sparse';
+    `,
+    expected: "SURVIVED",
+    note: "large logical length stores one indexed slot without allocating intervening holes",
   },
   {
     id: "iterative-flat",
@@ -422,12 +439,12 @@ const ICON: Record<Verdict, string> = {
   HANG: "🕐",
 };
 
-async function main(): Promise<void> {
+async function main(cases: CrashCase[] = CASES): Promise<void> {
   console.log("=== napi-vm Crash-Safety Matrix ===\n");
   console.log("Each case runs in a disposable subprocess; the verdict says how it died.\n");
 
   const rows: Row[] = [];
-  for (const c of CASES) {
+  for (const c of cases) {
     process.stdout.write(`  running ${c.id} …`);
     const row = await runCase(c);
     rows.push(row);
@@ -477,6 +494,12 @@ if (args[0] === "--case" && args[1]) {
   void runChild(args[1]);
 } else if (args[0] === "--list") {
   for (const c of CASES) console.log(`${c.id.padEnd(28)} ${c.title}`);
+} else if (args[0] === "--only") {
+  if (!args[1]) throw new Error("--only requires comma-separated case IDs");
+  const requested = new Set(args[1].split(","));
+  const selected = CASES.filter((c) => requested.delete(c.id));
+  if (requested.size) throw new Error(`Unknown crash case(s): ${[...requested].join(", ")}`);
+  void main(selected);
 } else {
   main();
 }

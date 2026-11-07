@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "utc": "2026-11-07T05:34:10.711807+00:00",
+  "command": [
+    "env",
+    "CARGO_BUILD_JOBS=1",
+    "npm",
+    "run",
+    "test:wasm"
+  ],
+  "exit_code": 0,
+  "features": [
+    "wasm",
+    "runtime"
+  ],
+  "default_features": false,
+  "profile": "release",
+  "build_target": "wasm32-unknown-unknown",
+  "build_target_api": "web",
+  "git_head": "15803c9a7b75c8c509459e6cd38c4ac0588c74b4",
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)\nbinary: rustc\ncommit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4\ncommit-date: 2026-09-28\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.0\nLLVM version: 23.1.1",
+  "node": "v26.12.1",
+  "wasm_pack": "wasm-pack 0.15.0",
+  "playground_typecheck": {
+    "command": [
+      "tsc",
+      "--noEmit",
+      "-p",
+      "playground/tsconfig.json"
+    ],
+    "exit_code": 0
+  },
+  "browser_tests": {
+    "tests": 18,
+    "suites": 1,
+    "pass": 18,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0
+  },
+  "artifacts": {
+    "playground/pkg/napi_vm_bg.wasm": {
+      "sha256": "4ab2caeb1f19700abc6f618bfffa70346463de45aefe0d4f81f9e0294b1ae868",
+      "bytes": 19138531
+    },
+    "playground/pkg/napi_vm.js": {
+      "sha256": "10dda60572ad51da70df029dfd1bd248cf4d941ae4f9e542e9d77948abde3395",
+      "bytes": 22791
+    }
+  },
+  "log": {
+    "path": "artifacts/performance/validation-wasm.log",
+    "sha256": "6da63f4e35e024229070697d977818ecbced7190ad768eaa54a3710949226cbf"
+  }
+}

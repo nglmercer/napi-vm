@@ -1,0 +1,135 @@
+{
+  "schema": 1,
+  "metadata": {
+    "utc": "2026-11-07T05:07:39.479Z",
+    "bindingPath": "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/typed-array/after.node",
+    "addonSha256": "d4ee29ac695b9a7c3f2d7d7085b5687f0328e4ea197459647d56f926d3d9a203",
+    "scriptSha256": "ebb670f06b67ee43006324791b20d3d3b991e855c6c2b1be0b76b6adae5555be",
+    "node": "v26.12.1",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "AMD BC-250",
+    "samples": 21,
+    "iterationsPerSample": 50,
+    "limitations": [
+      "Per-sample averages of timed calls, excluding assertions and VM setup.",
+      "No CPU affinity or isolation."
+    ]
+  },
+  "results": [
+    {
+      "name": "node_binding/typed_array_subview_64",
+      "source": "\n      const backing = new ArrayBuffer(64);\n      const bytes = new Uint8Array(backing, backing.byteLength - 16, 16);\n      for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;\n      function getView() { return bytes; }\n    ",
+      "backingBytes": 64,
+      "visibleBytes": 16,
+      "unit": "ns/call",
+      "backend": "warm Vm.callFunction returning a fixed guest Uint8Array; correctness assertions excluded",
+      "samples": [
+        4059.94,
+        4776.12,
+        88632.62,
+        5434.1,
+        3703.08,
+        3795.92,
+        3007.78,
+        3355.54,
+        4038.68,
+        3012.74,
+        4408.96,
+        2926.36,
+        2829.22,
+        3100,
+        2802.7,
+        2787.12,
+        2824.94,
+        2910.34,
+        2776.22,
+        2790.46,
+        2794.08
+      ],
+      "summary": {
+        "median": 3012.74,
+        "mad": 225.6199999999999,
+        "min": 2776.22,
+        "max": 88632.62,
+        "count": 21
+      }
+    },
+    {
+      "name": "node_binding/typed_array_subview_8388608",
+      "source": "\n      const backing = new ArrayBuffer(8388608);\n      const bytes = new Uint8Array(backing, backing.byteLength - 16, 16);\n      for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;\n      function getView() { return bytes; }\n    ",
+      "backingBytes": 8388608,
+      "visibleBytes": 16,
+      "unit": "ns/call",
+      "backend": "warm Vm.callFunction returning a fixed guest Uint8Array; correctness assertions excluded",
+      "samples": [
+        3039.9,
+        3179.78,
+        2907.22,
+        2969.3,
+        2827.44,
+        2845.42,
+        2853.4,
+        2926.72,
+        2828.26,
+        2852.62,
+        2841.66,
+        2804.14,
+        2789.86,
+        3259.22,
+        2880.66,
+        2852.98,
+        2814.62,
+        2805.46,
+        2787.98,
+        2931.24,
+        2839.22
+      ],
+      "summary": {
+        "median": 2852.62,
+        "mad": 47.159999999999854,
+        "min": 2787.98,
+        "max": 3259.22,
+        "count": 21
+      }
+    },
+    {
+      "name": "node_binding/typed_array_subview_33554432",
+      "source": "\n      const backing = new ArrayBuffer(33554432);\n      const bytes = new Uint8Array(backing, backing.byteLength - 16, 16);\n      for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;\n      function getView() { return bytes; }\n    ",
+      "backingBytes": 33554432,
+      "visibleBytes": 16,
+      "unit": "ns/call",
+      "backend": "warm Vm.callFunction returning a fixed guest Uint8Array; correctness assertions excluded",
+      "samples": [
+        3521.22,
+        2958.18,
+        2918.22,
+        2960.98,
+        3363.48,
+        2917.82,
+        2903.42,
+        2885.86,
+        3099.78,
+        2862.02,
+        2847.98,
+        2856.78,
+        2881.66,
+        3073.46,
+        2834.54,
+        2811.76,
+        3311.66,
+        2908.16,
+        2873.96,
+        2865.44,
+        3378.22
+      ],
+      "summary": {
+        "median": 2908.16,
+        "mad": 51.379999999999654,
+        "min": 2811.76,
+        "max": 3521.22,
+        "count": 21
+      }
+    }
+  ]
+}

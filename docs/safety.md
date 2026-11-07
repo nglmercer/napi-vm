@@ -24,8 +24,8 @@ have separate trust and shutdown contracts.
 | Guest recursion | Call-depth limit; failures become guest errors |
 | Parsing | Nesting/depth limits |
 | Loops and execution | Loop/fuel budgets; cancellation and deadline mechanisms at execution checkpoints |
-| Arrays | Bounded materialized storage; large logical lengths may remain sparse |
-| Strings | Bounded construction paths, measured in UTF-16 units |
+| Arrays | Dense growth threshold of 262,144 slots, with sparse indices and operation-specific materialization limits |
+| Strings | Bounded construction paths at 64 × 1024 × 1024 UTF-16 code units; result formatting has a separate 64 MiB byte budget |
 | Cycles | Cycle-aware formatting and bounded JSON paths |
 | Teardown | Iterative value dropping and quiescent cycle collection |
 | Generators | Same-thread stackful coroutine lifecycle and reentry checks |
@@ -35,10 +35,15 @@ The constants and exact checks live in
 [`interpreter`](../crates/napi-vm-core/src/interpreter/mod.rs). A JavaScript
 array's logical length is not the same as its allocated storage. Do not
 infer an aggregate memory quota from either an array or string cap.
+JSON parsing also has a separate aggregate budget of 4 × 1024 × 1024 array
+elements across one parse, including arrays replaced by duplicate object keys.
+It does not reject every array crossing the dense growth threshold.
 
 Run `bun examples/crash.ts` for the executable safety catalogue and use the
 targeted tests listed in [development](development.md) after changing guards.
 A successful old run does not certify a new code change or host integration.
+Use `--only oom-array,json-array-element-budget,shared-result-formatting,indexed-array-cap`
+to run selected catalogue cases with the same subprocess isolation and timeouts.
 
 ## Capability hosts
 

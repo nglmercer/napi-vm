@@ -1070,7 +1070,7 @@ impl Interpreter {
         // String keys take the borrowed-key path below, which never allocates
         // a key `Value`. Only symbols, numbers, and exotic keys stay here.
         if let Value::String(key) = p {
-            return self.get_prop_value_str_with_receiver(o, &key.to_key(), receiver);
+            return self.get_prop_value_str_with_receiver(o, &key.to_key_cow(), receiver);
         }
         if !matches!(p, Value::Symbol(_)) {
             let key = self.property_key(p)?;
@@ -1443,7 +1443,7 @@ impl Interpreter {
         // String keys dispatch on the receiver alone in `prop_str_raw`; the
         // match below only sees symbols, numbers, and exotic keys.
         if let Value::String(k) = p {
-            return self.prop_str_raw(o, &k.to_key());
+            return self.prop_str_raw(o, &k.to_key_cow());
         }
         if matches!(p, Value::Symbol(_))
             && let Some(prototype) = self.primitive_reference_prototype(o)

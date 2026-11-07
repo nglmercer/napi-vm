@@ -135,54 +135,6 @@ fn indexed(report: &Json) -> Result<BTreeMap<(String, String), Json>, String> {
     Ok(rows)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn compare_rejects_invalid_outcomes() {
-        let report = |row| json!({"total": 1, "results": [row]});
-        let valid = json!({"test": "a.js", "variant": "script", "status": "pass"});
-        assert!(indexed(&report(valid.clone())).is_ok());
-        assert!(
-            indexed(&report(
-                json!({"test":"a.js", "variant":"metadata", "status":"harness_error"})
-            ))
-            .is_ok()
-        );
-        assert!(
-            indexed(&report(
-                json!({"test":"a.js", "variant":"metadata", "status":"pass"})
-            ))
-            .is_err()
-        );
-        for (field, value) in [
-            ("test", json!("")),
-            ("variant", json!("unknown")),
-            ("status", json!("passed")),
-            ("status", Json::Null),
-        ] {
-            let mut row = valid.clone();
-            row[field] = value;
-            assert!(indexed(&report(row)).is_err(), "accepted invalid {field}");
-        }
-        assert!(indexed(&json!({"total": 2, "results": [valid.clone(), valid]})).is_err());
-    }
-
-    #[test]
-    fn legacy_reports_are_original_and_reviewed_provenance_is_distinct() {
-        let legacy = json!({"revision": crate::corpus::BASE_REVISION});
-        let original = json!({"corpus_provenance": crate::corpus::provenance("original")});
-        let reviewed = json!({"corpus_provenance": crate::corpus::provenance("reviewed-5112")});
-        assert_eq!(provenance(&legacy), provenance(&original));
-        assert_ne!(provenance(&legacy), provenance(&reviewed));
-        assert_eq!(
-            provenance(&reviewed)["upstream_head"],
-            crate::corpus::REVIEW_HEAD
-        );
-    }
-}
-
 fn detail(row: &Json) -> String {
     let status = row["status"].as_str().unwrap_or("?");
     let message = row["engine"]["message"]
@@ -420,4 +372,52 @@ pub fn summary(options: &Options) -> Result<ExitCode, String> {
         write(Path::new(output), &document)?;
     }
     Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compare_rejects_invalid_outcomes() {
+        let report = |row| json!({"total": 1, "results": [row]});
+        let valid = json!({"test": "a.js", "variant": "script", "status": "pass"});
+        assert!(indexed(&report(valid.clone())).is_ok());
+        assert!(
+            indexed(&report(
+                json!({"test":"a.js", "variant":"metadata", "status":"harness_error"})
+            ))
+            .is_ok()
+        );
+        assert!(
+            indexed(&report(
+                json!({"test":"a.js", "variant":"metadata", "status":"pass"})
+            ))
+            .is_err()
+        );
+        for (field, value) in [
+            ("test", json!("")),
+            ("variant", json!("unknown")),
+            ("status", json!("passed")),
+            ("status", Json::Null),
+        ] {
+            let mut row = valid.clone();
+            row[field] = value;
+            assert!(indexed(&report(row)).is_err(), "accepted invalid {field}");
+        }
+        assert!(indexed(&json!({"total": 2, "results": [valid.clone(), valid]})).is_err());
+    }
+
+    #[test]
+    fn legacy_reports_are_original_and_reviewed_provenance_is_distinct() {
+        let legacy = json!({"revision": crate::corpus::BASE_REVISION});
+        let original = json!({"corpus_provenance": crate::corpus::provenance("original")});
+        let reviewed = json!({"corpus_provenance": crate::corpus::provenance("reviewed-5112")});
+        assert_eq!(provenance(&legacy), provenance(&original));
+        assert_ne!(provenance(&legacy), provenance(&reviewed));
+        assert_eq!(
+            provenance(&reviewed)["upstream_head"],
+            crate::corpus::REVIEW_HEAD
+        );
+    }
 }

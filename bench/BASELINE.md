@@ -1,5 +1,10 @@
 # Local performance baseline (2026-11-06)
 
+The subsequent [rquickjs comparison and optimization review](../docs/performance-review.md)
+contains paired before/after measurements for property writes, typed-array
+exports and LSP positions. The broader capture below predates those changes;
+its dated values remain a baseline rather than current speed claims.
+
 The [machine-readable capture](baselines/2026-11-06/baseline.json) contains 41
 representative workloads: 16 Criterion VM/frontend/plugin cases, 4 Node binding
 cases, 2 language-service cases, 10 Rust scheduler cases, 4 Node async scheduler

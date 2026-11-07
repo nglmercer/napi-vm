@@ -9,6 +9,10 @@ use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
+#[allow(
+    clippy::box_collection,
+    reason = "Keep unused collection fields one pointer wide; allocate the header only on first insertion."
+)]
 #[derive(Clone)]
 pub(crate) struct LazyMap<K, V>(Option<Box<HashMap<K, V>>>);
 
@@ -110,6 +114,10 @@ impl<K, V> LazyMap<K, V> {
     }
 }
 
+#[allow(
+    clippy::box_collection,
+    reason = "Keep unused collection fields one pointer wide; allocate the header only on first insertion."
+)]
 #[derive(Clone)]
 pub(crate) struct LazySet<T>(Option<Box<HashSet<T>>>);
 

@@ -371,10 +371,16 @@ fn make_typed_array(
             "a view over SharedArrayBuffer cannot cross the napi-vm Node-API binding without shared-memory support".into(),
         ));
     }
-    let source = view.buffer.snapshot();
-    let from = byte_offset.min(source.len());
-    let to = (from + byte_length).min(source.len());
-    let buffer = make_array_buffer(env, &source[from..to])?;
+    // A view may expose only a few bytes of a very large backing store.
+    // Snapshot only that range before copying it into host-owned memory.
+    let backing_length = view.buffer.len();
+    let from = byte_offset.min(backing_length);
+    let to = (from + byte_length).min(backing_length);
+    let source = view
+        .buffer
+        .read(from, to - from)
+        .ok_or_else(|| VmErr::Msg("typed array byte range is unavailable".into()))?;
+    let buffer = make_array_buffer(env, &source)?;
 
     unsafe {
         let mut out = ptr::null_mut();

@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import propertyUpdateCases from "../fixtures/property-update-cases.cjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const pkg = join(root, "playground", "pkg");
@@ -49,6 +50,10 @@ function run(source) {
 }
 
 describe("browser build", { skip: built ? false : "playground/pkg is not built" }, () => {
+  for (const { name, source, expected } of propertyUpdateCases) {
+    test(name, () => { assert.equal(run(source), expected); });
+  }
+
   test("persistent globals separate lexical bindings from object properties", () => {
     assert.equal(run("let lexical=1;globalThis.lexical=2;var objectSide=3;lexical;"), "1");
     assert.equal(run("globalThis.lexical;"), "2");

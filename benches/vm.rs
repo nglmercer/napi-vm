@@ -79,6 +79,12 @@ const WORKLOADS: &[(&str, &str)] = &[
          let r; for (let i = 0; i < 200; i++) { r = JSON.parse(JSON.stringify(o)); } \
          r.c.e.length + r.b.length;",
     ),
+    (
+        "property_updates",
+        "let o = { count: 0, total: 0 }; \
+         for (let i = 0; i < 2000; i++) { o.count++; o.total = o.total + o.count; } \
+         o.total;",
+    ),
 ];
 
 fn bench_run(c: &mut Criterion) {
@@ -91,6 +97,7 @@ fn bench_run(c: &mut Criterion) {
             "string_ops" => 1000.0,
             "closures" => 10001.0,
             "json_roundtrip" => 5.0,
+            "property_updates" => 2001000.0,
             _ => unreachable!(),
         };
         let mut check = Interpreter::with_builtins();
@@ -154,6 +161,32 @@ fn bench_class_methods(c: &mut Criterion) {
                     .run(black_box(&invocation))
                     .expect("class benchmark invocation should execute"),
             )
+        });
+    });
+    group.finish();
+}
+
+/// Exercise the AST member-key paths without VM startup or parsing in the
+/// timed region. Keep the prepared source distinct from the bytecode tier
+/// cases below so both execution paths have a property-update workload.
+fn bench_ast_property_updates(c: &mut Criterion) {
+    let setup = parse(
+        "function property_updates() { let o = { count: 0, total: 0 }; \
+         for (let i = 0; i < 2000; i++) { o.count++; o.total = o.total + o.count; } \
+         return o.total; }",
+    );
+    let invocation = parse("property_updates();");
+    let mut interp = Interpreter::with_builtins();
+    interp.run_program_body(&setup).unwrap();
+    assert!(matches!(
+        interp.run(&invocation).unwrap(),
+        napi_vm::Value::Number(2001000.0)
+    ));
+    let mut group = c.benchmark_group("warm");
+    group.bench_function("property_updates_ast", |b| {
+        b.iter(|| {
+            interp.begin_execution();
+            black_box(interp.run(black_box(&invocation)).unwrap())
         });
     });
     group.finish();
@@ -330,6 +363,7 @@ criterion_group!(
     bench_run,
     bench_frontend,
     bench_class_methods,
+    bench_ast_property_updates,
     bench_plugin_call,
     bench_tiers
 );

@@ -1,0 +1,172 @@
+{
+  "schema": 1,
+  "utc": "2026-11-07T05:36:25.445764+00:00",
+  "git_head": "15803c9a7b75c8c509459e6cd38c4ac0588c74b4",
+  "git_status": " M bench/BASELINE.md\n M bench/bench.js\n M benches/vm.rs\n M crates/napi-vm-core/src/bytecode/vm.rs\n M crates/napi-vm-core/src/interpreter/call.rs\n M crates/napi-vm-core/src/interpreter/env.rs\n M crates/napi-vm-core/src/interpreter/eval.rs\n M crates/napi-vm-core/src/interpreter/resolve.rs\n M crates/napi-vm-core/src/lazy_collections.rs\n M docs/performance.md\n M docs/plugins.md\n M docs/safety.md\n M examples/crash.ts\n M src/bindings/marshal.rs\n M src/lsp/text.rs\n M tests/builtins.test.js\n M tests/crash-safety.test.js\n M tests/plain_assignments.rs\n M tests/utf16.rs\n M tests/wasm/browser-build.test.mjs\n M tools/test262-runner/src/report.rs\n?? bench/baselines/performance-review-2026-11-06/\n?? bench/lsp-positions.py\n?? bench/performance/typed-array.cjs\n?? bench/rquickjs-compare.py\n?? bench/rquickjs.py\n?? bench/rquickjs/\n?? docs/performance-review.md\n?? tests/fixtures/property-update-cases.cjs\n?? tests/node/property-updates.test.js\n?? tests/node/typed-array-subviews.test.js\n",
+  "test262": {
+    "counts": {
+      "pass": 102992,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "engine_sha256": "967f960ddf912454d9b3f64a77642facf7afa64cdd07b3a893fd744a4a4a0aa5",
+    "worker_jobs": 2,
+    "timeout_seconds": 10.0,
+    "revision": "cff513bc172b79b97963046e83078e114b2a20ff",
+    "corpus_provenance": {
+      "profile": "reviewed-5112",
+      "base_revision": "0b4e0812022b18236b5276d2804948fdd9f71603",
+      "upstream_pr": 5112,
+      "upstream_head": "1f3d994e2658c2934a64781ffbb7a9b3782d3310",
+      "overlay_file": "test/annexB/language/function-code/block-decl-func-skip-arguments.js",
+      "overlay_blob": "33d4c24b0d0479e0c2199f7d629b9cc77ddd2d6d",
+      "patch_sha256": "49b8274367f0825cd0f09567c869fc8c339a295a5442945126595a31eebd0d2c"
+    }
+  },
+  "test262_variant_set": {
+    "count": 102992,
+    "unique": 102992,
+    "exactly_matches_baseline": true,
+    "zero_losses": true,
+    "full_report": "test262-report.json.gz",
+    "comparison": "test262-comparison.json",
+    "summary": "test262-summary.json"
+  },
+  "checks": [
+    {
+      "name": "core_unit",
+      "passed": 446,
+      "failed": 0,
+      "skipped": 0,
+      "evidence": "criterion-validation.json"
+    },
+    {
+      "name": "focused_rust_integration",
+      "passed": 95,
+      "failed": 0,
+      "skipped": 0,
+      "evidence": "criterion-validation.json"
+    },
+    {
+      "name": "node",
+      "passed": 77,
+      "failed": 0,
+      "skipped": 8,
+      "skip_reason": "Runtime/timer capabilities absent from default napi feature build."
+    },
+    {
+      "name": "bun",
+      "passed": 1427,
+      "failed": 0,
+      "skipped": 32,
+      "evidence": "guard-validation.json",
+      "skip_reason": "Existing optional runtime/capability cases."
+    },
+    {
+      "name": "wasm",
+      "passed": 18,
+      "failed": 0,
+      "skipped": 0,
+      "evidence": "validation-wasm.json"
+    },
+    {
+      "name": "test262_runner_unit_and_docs",
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "clippy",
+      "status": "passed",
+      "command": "cargo clippy --locked --workspace --all-targets --all-features --jobs 1 --target-dir target/performance-clippy -- -D warnings"
+    },
+    {
+      "name": "typescript",
+      "status": "passed",
+      "scope": "Root, trusted plugin workspaces/contracts, and playground after fresh WASM generation."
+    },
+    {
+      "name": "format_syntax_links",
+      "status": "passed",
+      "scope": "Workspace and standalone Rust formatting, plugin JS syntax, benchmark Python syntax, local Markdown links and whitespace."
+    }
+  ],
+  "artifacts": {
+    "native_addon": {
+      "path": "napi-vm.linux-x64-gnu.node",
+      "sha256": "d4ee29ac695b9a7c3f2d7d7085b5687f0328e4ea197459647d56f926d3d9a203",
+      "build_command": "CARGO_BUILD_JOBS=1 npm run build:all",
+      "generated_binding_changes": false
+    },
+    "wasm": {
+      "path": "playground/pkg/napi_vm_bg.wasm",
+      "sha256": "4ab2caeb1f19700abc6f618bfffa70346463de45aefe0d4f81f9e0294b1ae868"
+    },
+    "test262_runner": {
+      "path": "target/release/test262",
+      "sha256": "e480699194f7813a8dab17eb78b53931fe5fbb00663b6f4ca536a232d175d10f"
+    }
+  },
+  "source_equivalence_audits": [
+    "source-audit.json",
+    "runner-test-module-source-audit.json"
+  ],
+  "post_measurement_changes": "Only cfg(test) cache assertions, five targeted Clippy allowances, unchanged runner test-module relocation, safety tests/examples/docs. Exact executable-source equivalence is retained in audits; no operational engine changes after measurement.",
+  "logs": {
+    "typed-array/build.log": {
+      "path": "artifacts/performance/typed-array/build.log",
+      "sha256": "d69d1f3ce6adf85d00490c9f7ce4892a861cee25e7c199273a86468c836e867c"
+    },
+    "typed-array/regressions.log": {
+      "path": "artifacts/performance/typed-array/regressions.log",
+      "sha256": "082741b981fdce1e38f2895a622a1edef85f0bca8c8685bca1ab7c9e585400db"
+    },
+    "bun-tests-corrected.log": {
+      "path": "artifacts/performance/bun-tests-corrected.log",
+      "sha256": "03fd7819dc601199f4614580a509af715ccc4d7f5efcb7be1f5ef5a63192469a"
+    },
+    "node-tests.log": {
+      "path": "artifacts/performance/node-tests.log",
+      "sha256": "eb969875b9b13bd2e1591102306445af673d50fb66aa88958d45d3a8a2b47d83"
+    },
+    "validation-wasm.log": {
+      "path": "artifacts/performance/validation-wasm.log",
+      "sha256": "6da63f4e35e024229070697d977818ecbced7190ad768eaa54a3710949226cbf"
+    },
+    "member-keys/core-tests.log": {
+      "path": "artifacts/performance/member-keys/core-tests.log",
+      "sha256": "44da036edc9057b477de09755a66b39638dcda8d6f9a91991c117efd02fca6d5"
+    },
+    "member-keys/focused-tests.log": {
+      "path": "artifacts/performance/member-keys/focused-tests.log",
+      "sha256": "547bbbcf5a9e1499352ff6042caca183a18956d54c6d6ca970f3ab91a6209d8d"
+    },
+    "clippy-final.log": {
+      "path": "artifacts/performance/clippy-final.log",
+      "sha256": "b1e74b69ce1aec88a0883c46df3a51314b86e567e067a58bc51a2dc85a5ab521"
+    },
+    "test262-runner-tests.log": {
+      "path": "artifacts/performance/test262-runner-tests.log",
+      "sha256": "9634ced5f4aa7c294714df1c8a0f8ff046159b6d0bbb096e98309af2024e1118"
+    },
+    "test262-full.log": {
+      "path": "artifacts/performance/test262-full.log",
+      "sha256": "e99c8211eda684667496856220e40a0d58ddd921ec411bf43fd1120734e86ea2"
+    },
+    "plugin-typecheck.log": {
+      "path": "artifacts/performance/plugin-typecheck.log",
+      "sha256": "bdebb382da883ee83fb0dc01d3a76d4d6db3e2dcc7615cb62e8cadeb56636446"
+    },
+    "typescript.log": {
+      "path": "artifacts/performance/typescript.log",
+      "sha256": "b48c07aeff09eaa5b6fe2e209531fc2e71ce44d666b064e541960f13fac1c5e1"
+    },
+    "plugin-syntax.log": {
+      "path": "artifacts/performance/plugin-syntax.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}

@@ -1,0 +1,135 @@
+{
+  "schema": 1,
+  "metadata": {
+    "utc": "2026-11-07T05:07:33.805Z",
+    "bindingPath": "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/baseline-2026-11-06-verified/raw/napi-vm.node",
+    "addonSha256": "6ad68958cecf1f34a9c25ff1cc85d27e341ce1f59580428db8b3235642e52e06",
+    "scriptSha256": "ebb670f06b67ee43006324791b20d3d3b991e855c6c2b1be0b76b6adae5555be",
+    "node": "v26.12.1",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "AMD BC-250",
+    "samples": 21,
+    "iterationsPerSample": 50,
+    "limitations": [
+      "Per-sample averages of timed calls, excluding assertions and VM setup.",
+      "No CPU affinity or isolation."
+    ]
+  },
+  "results": [
+    {
+      "name": "node_binding/typed_array_subview_64",
+      "source": "\n      const backing = new ArrayBuffer(64);\n      const bytes = new Uint8Array(backing, backing.byteLength - 16, 16);\n      for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;\n      function getView() { return bytes; }\n    ",
+      "backingBytes": 64,
+      "visibleBytes": 16,
+      "unit": "ns/call",
+      "backend": "warm Vm.callFunction returning a fixed guest Uint8Array; correctness assertions excluded",
+      "samples": [
+        3608.18,
+        3796.98,
+        4847.12,
+        9761,
+        4967.42,
+        3409.66,
+        3339.64,
+        3845.7,
+        3153,
+        2977.46,
+        3883.72,
+        2904.7,
+        2771.3,
+        2756.36,
+        2750.96,
+        2758.08,
+        2772.08,
+        2756.62,
+        2757.2,
+        2837.62,
+        2775.08
+      ],
+      "summary": {
+        "median": 2977.46,
+        "mad": 221.0999999999999,
+        "min": 2750.96,
+        "max": 9761,
+        "count": 21
+      }
+    },
+    {
+      "name": "node_binding/typed_array_subview_8388608",
+      "source": "\n      const backing = new ArrayBuffer(8388608);\n      const bytes = new Uint8Array(backing, backing.byteLength - 16, 16);\n      for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;\n      function getView() { return bytes; }\n    ",
+      "backingBytes": 8388608,
+      "visibleBytes": 16,
+      "unit": "ns/call",
+      "backend": "warm Vm.callFunction returning a fixed guest Uint8Array; correctness assertions excluded",
+      "samples": [
+        236806.12,
+        323390.38,
+        235826.48,
+        248720.36,
+        246666.32,
+        269098.08,
+        243956.12,
+        233166.18,
+        246364.28,
+        230957.94,
+        253413.92,
+        231416.68,
+        235298.26,
+        260879.26,
+        232629.2,
+        243251.4,
+        245664.88,
+        231996.38,
+        231133.4,
+        254698.88,
+        272093.22
+      ],
+      "summary": {
+        "median": 243956.12,
+        "mad": 10742.76000000001,
+        "min": 230957.94,
+        "max": 323390.38,
+        "count": 21
+      }
+    },
+    {
+      "name": "node_binding/typed_array_subview_33554432",
+      "source": "\n      const backing = new ArrayBuffer(33554432);\n      const bytes = new Uint8Array(backing, backing.byteLength - 16, 16);\n      for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;\n      function getView() { return bytes; }\n    ",
+      "backingBytes": 33554432,
+      "visibleBytes": 16,
+      "unit": "ns/call",
+      "backend": "warm Vm.callFunction returning a fixed guest Uint8Array; correctness assertions excluded",
+      "samples": [
+        5472952.56,
+        5445181.84,
+        5422687.82,
+        5457429.14,
+        5434908.96,
+        5430372.94,
+        5460685.62,
+        5471285.68,
+        5460778.8,
+        5773715.08,
+        5425019.44,
+        5457760.42,
+        5455912.12,
+        5496682.18,
+        5519381.78,
+        5442078.48,
+        5557164.44,
+        5462958.24,
+        5487365.9,
+        5489001.16,
+        5503138.86
+      ],
+      "summary": {
+        "median": 5460778.8,
+        "mad": 25869.83999999985,
+        "min": 5422687.82,
+        "max": 5773715.08,
+        "count": 21
+      }
+    }
+  ]
+}

@@ -1,0 +1,134 @@
+{
+  "schema": 1,
+  "metadata": {
+    "utc": "2026-11-07T04:42:34.739524+00:00",
+    "git_head": "15803c9a7b75c8c509459e6cd38c4ac0588c74b4",
+    "git_status": "M bench/bench.js\n M benches/vm.rs\n M tests/utf16.rs\n?? bench/lsp-positions.py\n?? bench/rquickjs/",
+    "source_path": "/home/meme/Documentos/Default Project/node-vm/src/lsp/text.rs",
+    "source_sha256": "6c7d653811d6b70885f1288fd664dd4fc00d36372fb359019ae0dcede59dfa43",
+    "driver_sha256": "d9228c64aa97c59e469e7c7384a695c4be4922353b68b0303243cc6ca3232533",
+    "binary_sha256": "aa3da8089ee3c3b9f98ce8629834088da01f5d6b2bb3c48b5635193da1ab21ee",
+    "url_rlib_path": "/home/meme/Documentos/Default Project/node-vm/target/release/deps/liburl-89bcceda4accda39.rlib",
+    "url_rlib_sha256": "c22183f1220ed94a89784f331edd43da4d56f78df55de1a271a8cdc27294f735",
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)\nbinary: rustc\ncommit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4\ncommit-date: 2026-09-28\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.0\nLLVM version: 23.1.1",
+    "command": [
+      "rustc",
+      "--edition=2024",
+      "-C",
+      "opt-level=3",
+      "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/lsp-before/driver.rs",
+      "--extern",
+      "url=/home/meme/Documentos/Default Project/node-vm/target/release/deps/liburl-89bcceda4accda39.rlib",
+      "-L",
+      "dependency=/home/meme/Documentos/Default Project/node-vm/target/release/deps",
+      "-o",
+      "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/lsp-before/positions"
+    ],
+    "platform": "Linux-7.3.0-4-cachyos-x86_64-with-glibc2.44",
+    "cpu_count": 12,
+    "cpu": "AMD BC-250",
+    "affinity": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "load_average_at_end": [
+      1.548828125,
+      1.90576171875,
+      2.7177734375
+    ],
+    "samples": 11,
+    "iterations_per_sample": 500,
+    "boundary": "position_to_offset on a cursor in the last line; source construction, assertions and output excluded",
+    "limitations": [
+      "Isolated LSP position conversion, not full request latency.",
+      "No CPU isolation; compare repeated runs on the same machine."
+    ]
+  },
+  "results": [
+    {
+      "name": "ascii_200_lines",
+      "bytes": 3800,
+      "unit": "ns/conversion",
+      "samples": [
+        4745.698,
+        4738.128,
+        4852.786,
+        4727.248,
+        5847.566,
+        5657.854,
+        4774.136,
+        4742.198,
+        4738.85,
+        4736.07,
+        4753.836
+      ],
+      "summary": {
+        "median": 4745.698,
+        "mad": 9.628000000000611,
+        "min": 4727.248,
+        "max": 5847.566,
+        "count": 11
+      }
+    },
+    {
+      "name": "ascii_20000_lines",
+      "bytes": 380000,
+      "unit": "ns/conversion",
+      "samples": [
+        486552.114,
+        485863.354,
+        480668.174,
+        475655.808,
+        477453.76,
+        477166.656,
+        476190.606,
+        477744.458,
+        488832.434,
+        556696.046,
+        654939.556
+      ],
+      "summary": {
+        "median": 480668.174,
+        "mad": 5012.36599999998,
+        "min": 475655.808,
+        "max": 654939.556,
+        "count": 11
+      }
+    },
+    {
+      "name": "unicode_crlf_4000_lines",
+      "bytes": 96000,
+      "unit": "ns/conversion",
+      "samples": [
+        137391.432,
+        154516.392,
+        180276.794,
+        162966.96,
+        142406.97,
+        150729.912,
+        251894.658,
+        309430.678,
+        200591.322,
+        189790.366,
+        186915.192
+      ],
+      "summary": {
+        "median": 180276.794,
+        "mad": 25760.402000000002,
+        "min": 137391.432,
+        "max": 309430.678,
+        "count": 11
+      }
+    }
+  ]
+}

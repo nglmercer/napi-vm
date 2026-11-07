@@ -153,6 +153,10 @@ test("malformed URIs throw URIError", () => {
   expect(runCode("try { decodeURI('%ED%A0%80'); } catch(e) { e.name; }")).toBe("URIError");
   expect(runCode("try { encodeURI('\\uD800'); } catch(e) { e.name; }")).toBe("URIError");
   expect(
-    runCode("decodeURIComponent('%ED%A0%80%ED%B0%80') === '\\uD800\\uDC00';")
+    runCode("try { decodeURIComponent('%ED%A0%80%ED%B0%80'); } catch(e) { e.name; }")
+  ).toBe("URIError");
+  // A surrogate pair must use its scalar's four-byte UTF-8 encoding, not CESU-8.
+  expect(
+    runCode("decodeURIComponent('%F0%90%80%80') === '\\uD800\\uDC00';")
   ).toBe("true");
 });

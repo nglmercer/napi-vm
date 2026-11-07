@@ -1571,11 +1571,12 @@ impl Interpreter {
         }
         let key = self.ecmascript_to_property_key(property)?;
         let slot = self.property_key(&key)?;
-        // Plain objects with ordinary data slots can use their direct storage
-        // when the prototype chain cannot intercept a numeric assignment.
+        // An existing own data property shadows the prototype chain. With
+        // the same target and receiver, updating its value needs no temporary
+        // descriptor records or layout invalidation. Exotic own-property and
+        // accessor behavior still takes OrdinarySet below.
         if let Value::Object { props } = target
             && crate::interpreter::strict_equals(target, receiver)
-            && crate::value::array_index(&slot).is_some()
             && !props.meta.borrow().module_namespace
             && props.meta.borrow().boxed_primitive.is_none()
             && !props.meta.borrow().may_have_accessor(&slot)
@@ -1589,31 +1590,36 @@ impl Interpreter {
                 props.meta.borrow_mut().set_explicit_data(&slot, true);
                 return Ok(true);
             }
-            let mut prototype = self.prototype_of(target);
-            let mut clear = false;
-            for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
-                let Some(current) = prototype else {
-                    clear = true;
-                    break;
-                };
-                let Value::Object { props } = current.as_ref() else {
-                    break;
-                };
-                if props.meta.borrow().module_namespace
-                    || props.meta.borrow().boxed_primitive.is_some()
-                    || props.own_index(&slot).is_some()
-                {
-                    break;
+            // Preserve the narrower numeric fast path for creating a missing
+            // property. Named additions still use the complete prototype and
+            // receiver descriptor handling below.
+            if crate::value::array_index(&slot).is_some() {
+                let mut prototype = self.prototype_of(target);
+                let mut clear = false;
+                for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+                    let Some(current) = prototype else {
+                        clear = true;
+                        break;
+                    };
+                    let Value::Object { props } = current.as_ref() else {
+                        break;
+                    };
+                    if props.meta.borrow().module_namespace
+                        || props.meta.borrow().boxed_primitive.is_some()
+                        || props.own_index(&slot).is_some()
+                    {
+                        break;
+                    }
+                    prototype = self.prototype_of(current.as_ref());
                 }
-                prototype = self.prototype_of(current.as_ref());
-            }
-            if clear {
-                if props.meta.borrow().non_extensible {
-                    return Ok(false);
+                if clear {
+                    if props.meta.borrow().non_extensible {
+                        return Ok(false);
+                    }
+                    target.set_prop(slot.clone(), value)?;
+                    props.meta.borrow_mut().set_explicit_data(&slot, true);
+                    return Ok(true);
                 }
-                target.set_prop(slot.clone(), value)?;
-                props.meta.borrow_mut().set_explicit_data(&slot, true);
-                return Ok(true);
             }
         }
         // Dense array construction should not materialize descriptor objects
@@ -1888,7 +1894,7 @@ impl Interpreter {
             (Value::Function(function), Value::String(key)) => {
                 function.ensure_name_length_properties();
                 function.prototype_value(obj);
-                self.set_cell_property(obj, &function.properties, &key.to_key(), val)
+                self.set_cell_property(obj, &function.properties, &key.to_key_cow(), val)
             }
             (Value::Function(_), _) => {
                 let slot = self.property_key(prop)?;
@@ -1904,7 +1910,7 @@ impl Interpreter {
                 Ok(accepted)
             }
             (Value::HostFunction { properties, .. }, Value::String(key)) => {
-                self.set_cell_property(obj, properties, &key.to_key(), val)
+                self.set_cell_property(obj, properties, &key.to_key_cow(), val)
             }
             (Value::HostFunction { .. }, _) => {
                 let slot = self.property_key(prop)?;
@@ -1920,7 +1926,7 @@ impl Interpreter {
                 Ok(accepted)
             }
             (Value::Object { props }, Value::String(k)) => {
-                self.set_cell_property(obj, props, &k.to_key(), val)
+                self.set_cell_property(obj, props, &k.to_key_cow(), val)
             }
             // Any other key on an object is coerced to its slot name first:
             // `o[1] = v`, `o[sym] = v`, `o[{}] = v`.
@@ -1939,7 +1945,7 @@ impl Interpreter {
                 Ok(accepted)
             }
             (Value::Class(class), Value::String(k)) => {
-                self.set_cell_property(obj, &class.statics, &k.to_key(), val)
+                self.set_cell_property(obj, &class.statics, &k.to_key_cow(), val)
             }
             (Value::Class(_), _) => {
                 let slot = self.property_key(prop)?;
@@ -1985,13 +1991,15 @@ impl Interpreter {
                 Ok(accepted)
             }
             // `window.x = v` / `globalThis.x = v` define a real global.
-            (Value::GlobalObject, Value::String(k)) => self.set_global_property(&k.to_key(), val),
+            (Value::GlobalObject, Value::String(k)) => {
+                self.set_global_property(&k.to_key_cow(), val)
+            }
             // A non-index key on an array is a named property, not an
             // element: `strings.raw`, `arr.total = 3`.
             (Value::Array(_), Value::String(k))
                 if k != "length" && crate::value::array_index(k).is_none() =>
             {
-                self.set_member_str(obj, &k.to_key(), val)
+                self.set_member_str(obj, &k.to_key_cow(), val)
             }
             (Value::Array(cell), Value::Symbol(symbol)) => {
                 let slot = crate::interpreter::symbol_slot_key(symbol);

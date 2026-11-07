@@ -1,0 +1,129 @@
+{
+  "schema": 1,
+  "kind": "performance-review-engine-validation",
+  "utc": "2026-11-07T05:28:49.499343+00:00",
+  "git_head": "15803c9a7b75c8c509459e6cd38c4ac0588c74b4",
+  "profile": "ci-optimized",
+  "default_features": false,
+  "cargo_jobs": 1,
+  "test_threads": 2,
+  "core_features": [
+    "test-hooks"
+  ],
+  "integration_suites": [
+    "utf16",
+    "plain_assignments",
+    "public_hash_keys",
+    "mapped_arguments",
+    "empty_accessors",
+    "class_property_layout",
+    "compound_assignments",
+    "super_reference_order",
+    "optional_chain_references",
+    "numeric_property_names"
+  ],
+  "results": [
+    {
+      "name": "core-tests",
+      "status": "passed",
+      "suites": 1,
+      "passed": 446,
+      "failed": 0,
+      "ignored": 0,
+      "suite_counts": [
+        {
+          "passed": 446,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        }
+      ],
+      "raw_log": "artifacts/performance/member-keys/core-tests.log",
+      "raw_log_sha256": "44da036edc9057b477de09755a66b39638dcda8d6f9a91991c117efd02fca6d5"
+    },
+    {
+      "name": "focused-tests",
+      "status": "passed",
+      "suites": 10,
+      "passed": 95,
+      "failed": 0,
+      "ignored": 0,
+      "suite_counts": [
+        {
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        },
+        {
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        },
+        {
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        },
+        {
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        },
+        {
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        },
+        {
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        },
+        {
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        },
+        {
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        },
+        {
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        },
+        {
+          "passed": 19,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        }
+      ],
+      "raw_log": "artifacts/performance/member-keys/focused-tests.log",
+      "raw_log_sha256": "547bbbcf5a9e1499352ff6042caca183a18956d54c6d6ca970f3ab91a6209d8d"
+    }
+  ],
+  "test_only_expectation_update": "The old cache-counter test asserted every prepared named write invalidates the layout (zero hits). Existing-data writes intentionally preserve layout now; the test retains exact 8 hits/2 misses after first key addition, with a new current-value read/write test. Production prefix unchanged before later lint-only attributes; see linked source audits."
+}

@@ -1,0 +1,168 @@
+{
+  "schema": 1,
+  "order": [
+    "before-pair-0.json",
+    "after-pair-0.json",
+    "after-pair-1.json",
+    "before-pair-1.json",
+    "before-pair-2.json",
+    "after-pair-2.json"
+  ],
+  "script_sha256": "ebb670f06b67ee43006324791b20d3d3b991e855c6c2b1be0b76b6adae5555be",
+  "before_addon_build_provenance": {
+    "utc": "2026-11-07T04:22:30.220704+00:00",
+    "git_head": "6866a18ba5b624e12a960556125b8f101db6b5ba",
+    "git_status_porcelain_start": "M Cargo.toml\n M README.md\n M bench/run-scheduler.sh\n M benches/vm.rs\n M contracts/trusted-plugins/schema-profile.md\n M crates/napi-vm-plugin-conformance/README.md\n M docs/api.md\n M docs/audit-2026-10-23.md\n M docs/crate-architecture.md\n M docs/destructuring-assignment-checkpoint.md\n M docs/destructuring-declarations-checkpoint.md\n M docs/destructuring-name-inference-checkpoint.md\n M docs/destructuring-validation-checkpoint.md\n M docs/development.md\n M docs/editor.md\n M docs/engine-execution-validation.md\n M docs/getting-started.md\n M docs/iterator-compound-checkpoint.md\n M docs/json-host-conversion-depth.md\n M docs/native-addon-loader-plan.md\n M docs/next-implementations.md\n M docs/next-steps.md\n M docs/node-addon-runtime-plan.md\n M docs/node-addon-snapshot-reference-order.md\n M docs/optional-runtime.md\n M docs/plain-assignment-checkpoint.md\n M docs/plugins.md\n M docs/pr7-verification.md\n M docs/roadmap.md\n M docs/runtime-improvements.md\n M docs/runtime-plan.md\n M docs/runtime-protocol.md\n M docs/safety.md\n M docs/scheduler-benchmarks.md\n M docs/test262-full-pass-plan.md\n M docs/test262-full-pass-progress.md\n M docs/test262-history.md\n M docs/trusted-plugins/README.md\n M docs/trusted-plugins/compatibility.md\n M docs/trusted-plugins/contracts.md\n M docs/trusted-plugins/development.md\n M docs/trusted-plugins/protocol.md\n M docs/utf16-extraction-validation.md\n M examples/plugins/rust-napi-plugin/README.md\n M examples/scheduler_bench.rs\n M packages/plugin-protocol/src/index.ts\n M packages/plugin-sdk/README.md\n M playground/README.md\n M tools/ci/README.md\n M tools/generators/README.md\n M tools/test262/README.md\n M zed-extension/README.md\n?? bench/performance.py\n?? bench/performance/node.cjs\n?? docs/README.md\n?? docs/native-addons.md\n?? docs/performance.md\n?? tools/docs/check.mjs",
+    "git_status_porcelain_end": "M Cargo.toml\n M README.md\n M bench/run-scheduler.sh\n M benches/vm.rs\n M contracts/trusted-plugins/schema-profile.md\n M crates/napi-vm-plugin-conformance/README.md\n M docs/api.md\n M docs/audit-2026-10-23.md\n M docs/crate-architecture.md\n M docs/destructuring-assignment-checkpoint.md\n M docs/destructuring-declarations-checkpoint.md\n M docs/destructuring-name-inference-checkpoint.md\n M docs/destructuring-validation-checkpoint.md\n M docs/development.md\n M docs/editor.md\n M docs/engine-execution-validation.md\n M docs/getting-started.md\n M docs/iterator-compound-checkpoint.md\n M docs/json-host-conversion-depth.md\n M docs/native-addon-loader-plan.md\n M docs/next-implementations.md\n M docs/next-steps.md\n M docs/node-addon-runtime-plan.md\n M docs/node-addon-snapshot-reference-order.md\n M docs/optional-runtime.md\n M docs/plain-assignment-checkpoint.md\n M docs/plugins.md\n M docs/pr7-verification.md\n M docs/roadmap.md\n M docs/runtime-improvements.md\n M docs/runtime-plan.md\n M docs/runtime-protocol.md\n M docs/safety.md\n M docs/scheduler-benchmarks.md\n M docs/test262-full-pass-plan.md\n M docs/test262-full-pass-progress.md\n M docs/test262-history.md\n M docs/trusted-plugins/README.md\n M docs/trusted-plugins/compatibility.md\n M docs/trusted-plugins/contracts.md\n M docs/trusted-plugins/development.md\n M docs/trusted-plugins/protocol.md\n M docs/utf16-extraction-validation.md\n M examples/plugins/rust-napi-plugin/README.md\n M examples/scheduler_bench.rs\n M packages/plugin-protocol/src/index.ts\n M packages/plugin-sdk/README.md\n M playground/README.md\n M tools/ci/README.md\n M tools/generators/README.md\n M tools/test262/README.md\n M zed-extension/README.md\n?? bench/performance.py\n?? bench/performance/node.cjs\n?? docs/README.md\n?? docs/native-addons.md\n?? docs/performance.md\n?? tools/docs/check.mjs",
+    "source_sha256_start": "ad2b211128cca25547482748f82d16b387f377808e56101178142bdb76656a3e",
+    "source_sha256_end": "ad2b211128cca25547482748f82d16b387f377808e56101178142bdb76656a3e",
+    "build_inputs_sha256_start": "51a48d68875f0870afda9af2720cf1eaec40387150e6848e38a91efb782f0c71",
+    "build_inputs_sha256_end": "51a48d68875f0870afda9af2720cf1eaec40387150e6848e38a91efb782f0c71",
+    "platform": "Linux-7.3.0-4-cachyos-x86_64-with-glibc2.44",
+    "machine": "x86_64",
+    "cpu": "AMD BC-250",
+    "cpu_count": 12,
+    "load_average_at_end": [
+      6.08251953125,
+      5.1240234375,
+      4.72802734375
+    ],
+    "build_environment": {},
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)\nbinary: rustc\ncommit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4\ncommit-date: 2026-09-28\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.0\nLLVM version: 23.1.1",
+    "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+    "node": "v26.12.1",
+    "features": {
+      "library": "default (napi)",
+      "criterion": "default (napi), plus core test-hooks dev feature",
+      "scheduler_rust": "default plus runtime",
+      "trusted_process": "emitted TypeScript on Node"
+    },
+    "profile": "release / Cargo bench profile",
+    "criterion": {
+      "samples": 10,
+      "warmup_seconds": 0.2,
+      "measurement_seconds": 0.5
+    },
+    "backend_artifacts": {
+      "criterion_sha256": "d5d5ace904f182b0ccfda180bfacee1057c14af02e71809c0687937fb753419b",
+      "trusted_emitted_js_sha256": "3156a1c71019368132786c54a42604e84bbf1d626bc48e93efda9b8512e8f79b",
+      "addon_path": "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/baseline-2026-11-06-verified/raw/napi-vm.node",
+      "addon_sha256": "6ad68958cecf1f34a9c25ff1cc85d27e341ce1f59580428db8b3235642e52e06",
+      "built_library_sha256_at_build": "6ad68958cecf1f34a9c25ff1cc85d27e341ce1f59580428db8b3235642e52e06",
+      "scheduler_sha256": "acf4f4f359e615b7fd4d1cefcdb47654075731c9ba3d1e08c06f60aef1fa2a3b",
+      "lsp_sha256": "83ea3f7404ea2c04d812385e2b78fdc924126b1453f2a1d4e0c5f6fd26ace440"
+    },
+    "limitations": [
+      "Finite representative workloads, not full code coverage.",
+      "No CPU affinity or isolation; compare on the same quiet machine.",
+      "Criterion samples are per-iteration batch averages. Scheduler and trusted samples are independent whole-run summary medians, not per-call samples.",
+      "Trusted process measurement uses the current emitted TypeScript sources, including any dirty edits.",
+      "LanguageService cases use the NAPI binding; LSP transport is built and fingerprinted but not measured.",
+      "No filesystem/network runtime, wasm, Bun, or native trusted-process workload measured."
+    ]
+  },
+  "after_build_command": "CARGO_BUILD_JOBS=1 npm run build:all",
+  "after_build_environment": {},
+  "source_freeze": "validation-inputs.json hashes verified before final worker/measurements",
+  "summary_boundary": "Medians of three run medians; each run has 21 batches of 50 individually timed calls, assertions excluded. Ratios pair adjacent runs; no significance claim.",
+  "results": [
+    {
+      "name": "node_binding/typed_array_subview_64",
+      "unit": "ns/call",
+      "backing_bytes": 64,
+      "visible_bytes": 16,
+      "before_run_medians": [
+        3151.32,
+        2977.46,
+        3036.18
+      ],
+      "after_run_medians": [
+        3958.2,
+        2976.42,
+        3012.74
+      ],
+      "before_median": 3036.18,
+      "after_median": 3012.74,
+      "paired_ratios": [
+        1.2560450858687786,
+        0.9996507089935717,
+        0.9922797726090021
+      ],
+      "median_paired_ratio": 0.9996507089935717
+    },
+    {
+      "name": "node_binding/typed_array_subview_8388608",
+      "unit": "ns/call",
+      "backing_bytes": 8388608,
+      "visible_bytes": 16,
+      "before_run_medians": [
+        344170.1,
+        243956.12,
+        318424.36
+      ],
+      "after_run_medians": [
+        2844.4,
+        2874.3,
+        2852.62
+      ],
+      "before_median": 318424.36,
+      "after_median": 2852.62,
+      "paired_ratios": [
+        0.008264518039190505,
+        0.011782036867941662,
+        0.008958548271872164
+      ],
+      "median_paired_ratio": 0.008958548271872164
+    },
+    {
+      "name": "node_binding/typed_array_subview_33554432",
+      "unit": "ns/call",
+      "backing_bytes": 33554432,
+      "visible_bytes": 16,
+      "before_run_medians": [
+        4725138.68,
+        5460778.8,
+        4744588.3
+      ],
+      "after_run_medians": [
+        2901.26,
+        2867.74,
+        2908.16
+      ],
+      "before_median": 4744588.3,
+      "after_median": 2901.26,
+      "paired_ratios": [
+        0.0006140052592064876,
+        0.0005251521999023289,
+        0.0006129425391872251
+      ],
+      "median_paired_ratio": 0.0006129425391872251
+    }
+  ],
+  "retained_runs": [
+    {
+      "path": "typed-array-before-0.json",
+      "sha256": "169ad0e2462b031a30eb05b7acd0c9f1bb54e9c0caa5e07a8d4516fce7c2745f"
+    },
+    {
+      "path": "typed-array-after-0.json",
+      "sha256": "3ea2e963b16ae9495f81a3d3b8bf71737640c766d1a2c9f153417666b6ef98da"
+    },
+    {
+      "path": "typed-array-after-1.json",
+      "sha256": "ccf94e58c987e154c3cfa58a7abfafe080928c7423720f935ce552715d9d85d6"
+    },
+    {
+      "path": "typed-array-before-1.json",
+      "sha256": "8e50148fde15d3f784b67e4869897809cb7aea01a239755b32e7a6c4ecfc0353"
+    },
+    {
+      "path": "typed-array-before-2.json",
+      "sha256": "e7360ad19a6d6b1cc27238499551f4c4825e5db96daf242cf34528cad7e62596"
+    },
+    {
+      "path": "typed-array-after-2.json",
+      "sha256": "d71a4224fd74d62e9d9ae30c4fc90574f6a834a1c05d7906ae481d5e47984eb7"
+    }
+  ]
+}

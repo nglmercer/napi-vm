@@ -1,0 +1,136 @@
+{
+  "schema": 1,
+  "utc": "2026-11-07T05:17:05.022504+00:00",
+  "baseline_addon": {
+    "path": "artifacts/performance/baseline-2026-11-06-verified/raw/napi-vm.node",
+    "sha256": "6ad68958cecf1f34a9c25ff1cc85d27e341ce1f59580428db8b3235642e52e06"
+  },
+  "current_addon": {
+    "path": "napi-vm.linux-x64-gnu.node",
+    "sha256": "d4ee29ac695b9a7c3f2d7d7085b5687f0328e4ea197459647d56f926d3d9a203"
+  },
+  "original_tests_on_baseline": {
+    "log": "artifacts/performance/bun-existing-failures-baseline.log",
+    "sha256": "4be452a22f6f708974234af88ba5404c5da078fe3cf03c3ecffa8e0a3787b531",
+    "counts": {
+      "pass": 0,
+      "fail": 6
+    },
+    "failed_tests": [
+      "malformed URIs throw URIError",
+      "JSON.parse enforces the array cap and counts distinct object keys",
+      "ordinary String.replace enforces the string cap",
+      "Array.join enforces the string cap before building its result",
+      "return formatting cannot amplify a shared graph past the string cap",
+      "Interpreter-style string coercion is bounded for shared arrays"
+    ]
+  },
+  "corrected_focused_on_baseline": {
+    "log": "artifacts/performance/bun-guard-regressions-baseline-corrected.log",
+    "sha256": "f3f3aa770a51f802cd5b4eac7fb69c004e56a241f2fa46f3d8f79d311852c74d",
+    "counts": {
+      "pass": 68,
+      "skip": 1,
+      "fail": 0
+    },
+    "failed_tests": []
+  },
+  "corrected_focused_on_current": {
+    "log": "artifacts/performance/bun-guard-regressions-current.log",
+    "sha256": "19a29abf9f8cf7fbf6fa849c2277aec98fb7a754617cd5f3a9a370edac9d829e",
+    "counts": {
+      "pass": 68,
+      "skip": 1,
+      "fail": 0
+    },
+    "failed_tests": []
+  },
+  "corrected_full_bun": {
+    "log": "artifacts/performance/bun-tests-corrected.log",
+    "sha256": "03fd7819dc601199f4614580a509af715ccc4d7f5efcb7be1f5ef5a63192469a",
+    "counts": {
+      "pass": 1427,
+      "skip": 32,
+      "fail": 0
+    },
+    "failed_tests": []
+  },
+  "full_bun_command": [
+    "bun",
+    "test",
+    "./tests",
+    "--path-ignore-patterns",
+    "**/{node,wasm}/**"
+  ],
+  "source_sha256": {
+    "tests/builtins.test.js": "fb61b78a705554cbe0e527a7bf3871107f4721ee3a23bcaa44e6dfcc9cc80f76",
+    "tests/crash-safety.test.js": "c39d4830aa04b792b63c17030940a8087cd740d54a5eea0572658bd1fb5123cd",
+    "examples/crash.ts": "c1f4e090a13020ad62ff7c0b1c016bcf20ff96e8ccdd4098458ba41655aba6b0",
+    "docs/safety.md": "425557700a58fde94e8bb1295fe673786fd4278b825698888948f78a691b111a",
+    "docs/plugins.md": "80d8fa8fce1e5c9240dbb33783053b11f6d5602dcff0551d41761c007cc4a74a"
+  },
+  "core_source_unchanged": {
+    "files_verified": 209,
+    "reference_build": "artifacts/performance/rquickjs-after/build.json"
+  },
+  "node_uri_oracle": {
+    "node": "v26.12.1",
+    "decodeURI_and_decodeURIComponent": {
+      "%ED%A0%80%ED%B0%80": "URIError",
+      "%ED%A0%80": "URIError",
+      "%F0%90%80%80": "U+10000"
+    }
+  },
+  "correction_rationale": {
+    "URI": "CESU-8 encodes surrogate code points, which URI decoding must reject even when they form a UTF-16 pair. Proper four-byte UTF-8 remains accepted.",
+    "JSON": "262144 is the dense growth threshold, not a universal logical array-length bound. Preserve crossing behavior and distinct duplicate-key semantics; additionally assert the actual parser-wide 4194304-element budget using repeated duplicate-key arrays to keep live storage small.",
+    "strings": "The current construction guard is 67108864 UTF-16 code units, not the stale 16777216 expectation. Replacement and joining exceed the actual guard by one ASCII code unit. Unexpected success returns a boolean rather than a huge string.",
+    "shared_graph": "65 references to an array containing a shared 1 MiB string exceed the 64 MiB output guard with little traversal work, retaining amplification coverage without the former millions of numeric conversions and timeout.",
+    "catalog": "Selected cases run under Node subprocess isolation with expected-verdict checks. Materialization rejects toSorted length262145; large indexed assignment preserves sparse logical length; no unbounded array OOM workload is executed."
+  },
+  "catalog": {
+    "command": [
+      "bun",
+      "examples/crash.ts",
+      "--only",
+      "oom-array,oom-string,json-array-element-budget,shared-result-formatting,indexed-array-cap"
+    ],
+    "expected": {
+      "oom-array": "THROWN",
+      "oom-string": "THROWN",
+      "json-array-element-budget": "THROWN",
+      "shared-result-formatting": "THROWN",
+      "indexed-array-cap": "SURVIVED"
+    },
+    "log": "artifacts/performance/crash-catalog-corrected.log",
+    "log_sha256": "9deb6b92f89d05b3686172fed10c97da299c1321f426e0a74a1cd43c7b45c642",
+    "exit_code": 0,
+    "crashes": 0,
+    "hangs": 0,
+    "invalid_selection_checks": [
+      {
+        "args": [
+          "--only"
+        ],
+        "exit_code": 1,
+        "selected_cases_started": false
+      },
+      {
+        "args": [
+          "--only",
+          "not-a-real-case"
+        ],
+        "exit_code": 1,
+        "selected_cases_started": false
+      }
+    ]
+  },
+  "typecheck": {
+    "command": [
+      "./node_modules/.bin/tsc",
+      "--noEmit"
+    ],
+    "exit_code": 0,
+    "log": "artifacts/performance/tsc-after-guard-tests.log"
+  }
+}

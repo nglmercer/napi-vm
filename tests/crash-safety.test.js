@@ -2,6 +2,8 @@ import { test, expect } from "bun:test";
 import { Vm, runCode } from "../index.js";
 import { runtimeFixture } from "./runtime-fixture.mjs";
 const consoleRuntime = runtimeFixture({ console: true });
+// Mirrors the production string guard in crates/napi-vm-core/src/value.rs.
+const MAX_STRING_UNITS = 64 * 1024 * 1024;
 
 // Crash-safety regressions: every one of these used to kill the host process
 // (SIGSEGV / SIGTRAP) or freeze it forever. They must stay catchable. The
@@ -104,12 +106,12 @@ test("object array-destructuring rejects a missing iterator without materializin
   expect(() => vm.run('let o = {}; o["1000000000"] = 1; let [x] = o; x;')).toThrow(/Symbol.iterator/);
 });
 
-test("JSON.parse enforces the array cap and counts distinct object keys", () => {
+test("JSON.parse accepts arrays past the dense growth threshold and counts distinct keys", () => {
   const vm = new Vm();
   const arrayResult = vm.run(
-    "try { JSON.parse('[' + '0,'.repeat(262144) + '0]'); } catch (e) { e.message; }",
+    "let a = JSON.parse('[' + '0,'.repeat(262144) + '7]'); a.length === 262145 && a[0] === 0 && a[262144] === 7;",
   );
-  expect(arrayResult).toContain("Maximum array length exceeded");
+  expect(arrayResult).toBe("true");
 
   const objectResult = vm.run(
     "let p = '\"a\":0,'; Object.keys(JSON.parse('{' + p.repeat(1000) + '\"z\":0}')).length;",
@@ -117,20 +119,40 @@ test("JSON.parse enforces the array cap and counts distinct object keys", () => 
   expect(objectResult).toBe("2");
 });
 
+test("JSON.parse bounds aggregate array elements across duplicate object keys", () => {
+  const vm = new Vm();
+  const r = vm.run(`
+    // 128 arrays of 32768 entries consume the parser's 4 Mi-element budget.
+    // Reusing one object key releases each previous array, keeping live storage small.
+    let part = '"a":[' + '0,'.repeat(32767) + '0],';
+    try {
+      JSON.parse('{' + part.repeat(128) + '"a":[0]}');
+      false;
+    } catch (e) {
+      e instanceof RangeError && e.message === 'Maximum JSON array elements exceeded';
+    }
+  `);
+  expect(r).toBe("true");
+});
+
 test("ordinary String.replace enforces the string cap", () => {
   const vm = new Vm();
   const r = vm.run(
-    "let s = 'x'.repeat(16 * 1024 * 1024); try { s.replace('x', 'xx'); } catch (e) { e.message; }",
+    `let s = 'x'.repeat(${MAX_STRING_UNITS});
+     try { s.replace('x', 'xx'); false; }
+     catch (e) { e instanceof RangeError && e.message === 'Maximum string length exceeded'; }`,
   );
-  expect(r).toContain("Maximum string length exceeded");
+  expect(r).toBe("true");
 });
 
 test("Array.join enforces the string cap before building its result", () => {
   const vm = new Vm();
   const r = vm.run(
-    "let s = 'x'.repeat(16 * 1024 * 1024); try { [s, s].join(''); } catch (e) { e.message; }",
+    `let s = 'x'.repeat(${MAX_STRING_UNITS / 2});
+     try { [s, s].join('x'); false; }
+     catch (e) { e instanceof RangeError && e.message === 'Maximum string length exceeded'; }`,
   );
-  expect(r).toContain("Maximum string length exceeded");
+  expect(r).toBe("true");
 });
 
 test("Number.toFixed rejects unbounded precision", () => {
@@ -193,30 +215,34 @@ test("string doubling past the cap throws a catchable RangeError", () => {
 
 test("return formatting cannot amplify a shared graph past the string cap", () => {
   const vm = new Vm();
-  expect(() =>
+  let failure;
+  try {
     vm.run(`
-      let child = [];
-      for (let i = 0; i < 10000; i++) child.push(1);
+      let child = ['x'.repeat(1024 * 1024)];
       let outer = [];
-      for (let i = 0; i < 2048; i++) outer.push(child);
+      for (let i = 0; i < 65; i++) outer.push(child);
       outer;
-    `),
-  ).toThrow(/Maximum string length exceeded/);
+    `);
+  } catch (error) {
+    failure = error;
+  }
+  // Do not pass a potentially huge unexpected return value to Bun's matcher.
+  expect(failure?.message).toMatch(/Maximum string length exceeded/);
 });
 
 test("Interpreter-style string coercion is bounded for shared arrays", () => {
   const vm = new Vm();
   const r = vm.run(`
-    let child = [];
-    for (let i = 0; i < 10000; i++) child.push(1);
+    let child = ['x'.repeat(1024 * 1024)];
     let outer = [];
-    for (let i = 0; i < 2048; i++) outer.push(child);
-    try { '' + outer; } catch (e) { e.message; }
+    for (let i = 0; i < 65; i++) outer.push(child);
+    try { '' + outer; false; }
+    catch (e) { e instanceof RangeError && e.message === 'Maximum string length exceeded'; }
   `);
-  expect(r).toContain("Maximum string length exceeded");
+  expect(r).toBe("true");
 });
 
-test("for-of over a maximum-sized string is lazy and Unicode-safe", () => {
+test("for-of over a large string is lazy and Unicode-safe", () => {
   const vm = new Vm();
   expect(
     vm.run(`

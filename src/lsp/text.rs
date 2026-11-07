@@ -94,9 +94,14 @@ fn line_start(text: &str, line: usize) -> Option<usize> {
 /// The text of `line` (0-based), without its trailing `\r\n` / `\n`.
 pub fn line_text(text: &str, line: usize) -> Option<&str> {
     let start = line_start(text, line)?;
-    let rest = &text[start..];
+    Some(text_at_line_start(&text[start..]))
+}
+
+/// Slice one line after its start has already been found. Position conversion
+/// must not rescan the document prefix just to find the same line again.
+fn text_at_line_start(rest: &str) -> &str {
     let end = rest.find('\n').unwrap_or(rest.len());
-    Some(rest[..end].strip_suffix('\r').unwrap_or(&rest[..end]))
+    rest[..end].strip_suffix('\r').unwrap_or(&rest[..end])
 }
 
 /// Convert a UTF-16 code-unit column into a UTF-8 byte offset within `line`.
@@ -130,7 +135,7 @@ pub fn position_to_offset(text: &str, line: usize, utf16_column: usize) -> usize
     let Some(start) = line_start(text, line) else {
         return text.len();
     };
-    let line = line_text(text, line).unwrap_or("");
+    let line = text_at_line_start(&text[start..]);
     start + utf16_column_to_byte_offset(line, utf16_column)
 }
 
@@ -291,6 +296,25 @@ mod tests {
         let text = "const a = 1;\r\nevent.data.";
         assert_eq!(position_to_offset(text, 0, 12), 12);
         assert_eq!(position_to_offset(text, 1, 0), 14);
+    }
+
+    #[test]
+    fn positions_preserve_line_and_unicode_boundaries() {
+        let text = "prefix\r\n\r\na🔥é\r\n";
+        let start = "prefix\r\n\r\n".len();
+        assert_eq!(position_to_offset(text, 1, 9), "prefix\r\n".len());
+        assert_eq!(position_to_offset(text, 2, 0), start);
+        assert_eq!(position_to_offset(text, 2, 1), start + 1);
+        assert_eq!(position_to_offset(text, 2, 2), start + 1);
+        assert_eq!(position_to_offset(text, 2, 3), start + "a🔥".len());
+        assert_eq!(
+            position_to_offset(text, 2, usize::MAX),
+            start + "a🔥é".len()
+        );
+        assert_eq!(position_to_offset(text, 3, 0), text.len());
+        assert_eq!(position_to_offset(text, 4, 0), text.len());
+        assert_eq!(position_to_offset("", 0, 0), 0);
+        assert_eq!(position_to_offset("a\r", 0, 99), 1);
     }
 
     #[test]

@@ -2636,10 +2636,11 @@ impl Interpreter {
                 };
                 let function = if let Expr::String(key) = property.as_ref() {
                     checked_static_key(key)?;
-                    if !computed && key.to_key().starts_with('#') {
-                        self.get_private_member(&receiver, &key.to_key())?
+                    let key = key.to_key_cow();
+                    if !computed && key.starts_with('#') {
+                        self.get_private_member(&receiver, &key)?
                     } else {
-                        self.get_prop_value_str(&receiver, &key.to_key())?
+                        self.get_prop_value_str(&receiver, &key)?
                     }
                 } else {
                     let key = self.eval_expr(property)?;
@@ -2667,7 +2668,7 @@ impl Interpreter {
                 }
                 let key = self.eval_expr(property)?;
                 let function = if !computed
-                    && matches!(&key, Value::String(name) if name.to_key().starts_with('#'))
+                    && matches!(&key, Value::String(name) if name.to_key_cow().starts_with('#'))
                 {
                     self.get_private_member(&receiver, &self.property_key(&key)?)?
                 } else {
@@ -3496,11 +3497,12 @@ impl Interpreter {
                             };
                             if let Expr::String(key) = property.as_ref() {
                                 checked_static_key(key)?;
-                                let private = !computed && key.to_key().starts_with('#');
+                                let key = key.to_key_cow();
+                                let private = !computed && key.starts_with('#');
                                 let cur = if private {
-                                    self.get_private_member(&obj, &key.to_key())?
+                                    self.get_private_member(&obj, &key)?
                                 } else {
-                                    self.get_prop_value_str(&obj, &key.to_key())?
+                                    self.get_prop_value_str(&obj, &key)?
                                 };
                                 let new_val = if *op == UnOp::Inc {
                                     Value::Number(self.tn(&cur) + 1.0)
@@ -3508,9 +3510,9 @@ impl Interpreter {
                                     Value::Number(self.tn(&cur) - 1.0)
                                 };
                                 if private {
-                                    self.set_private_member(&obj, &key.to_key(), new_val.clone())?;
+                                    self.set_private_member(&obj, &key, new_val.clone())?;
                                 } else {
-                                    self.assign_member_str(&obj, &key.to_key(), new_val.clone())?;
+                                    self.assign_member_str(&obj, &key, new_val.clone())?;
                                 }
                                 return if *prefix { Ok(new_val) } else { Ok(cur) };
                             }
@@ -3619,12 +3621,13 @@ impl Interpreter {
                     && let Expr::String(key) = property.as_ref()
                 {
                     checked_static_key(key)?;
+                    let key = key.to_key_cow();
                     let receiver = self.eval_expr(object)?;
-                    let private = !computed && key.to_key().starts_with('#');
+                    let private = !computed && key.starts_with('#');
                     let current = if private {
-                        self.get_private_member(&receiver, &key.to_key())?
+                        self.get_private_member(&receiver, &key)?
                     } else {
-                        self.get_prop_value_str(&receiver, &key.to_key())?
+                        self.get_prop_value_str(&receiver, &key)?
                     };
                     let should_assign = match op {
                         LogicalAssignOp::And => self.truthy(&current),
@@ -3638,9 +3641,9 @@ impl Interpreter {
                     }
                     let assigned = self.eval_expr(value)?;
                     if private {
-                        self.set_private_member(&receiver, &key.to_key(), assigned.clone())?;
+                        self.set_private_member(&receiver, &key, assigned.clone())?;
                     } else {
-                        self.assign_member_str(&receiver, &key.to_key(), assigned.clone())?;
+                        self.assign_member_str(&receiver, &key, assigned.clone())?;
                     }
                     return Ok(assigned);
                 }
@@ -3753,7 +3756,7 @@ impl Interpreter {
                                 );
                             }
                             let private = !computed
-                                && matches!(property.as_ref(), Expr::String(key) if key.to_key().starts_with('#'));
+                                && matches!(property.as_ref(), Expr::String(key) if key.to_key_cow().starts_with('#'));
                             let key = if private {
                                 raw_key
                             } else {
@@ -3798,7 +3801,7 @@ impl Interpreter {
                             let object = self.eval_expr(object)?;
                             let raw_key = self.eval_expr(property)?;
                             let private = !computed
-                                && matches!(property.as_ref(),Expr::String(key) if key.to_key().starts_with('#'));
+                                && matches!(property.as_ref(),Expr::String(key) if key.to_key_cow().starts_with('#'));
                             let assigned = self.eval_expr(value)?;
                             let key = raw_key;
                             if private {
@@ -3830,21 +3833,22 @@ impl Interpreter {
                         let obj = self.eval_expr(object)?;
                         if let Expr::String(key) = property.as_ref() {
                             checked_static_key(key)?;
-                            let private = !computed && key.to_key().starts_with('#');
+                            let key = key.to_key_cow();
+                            let private = !computed && key.starts_with('#');
                             let fv = if let Some(bin) = op.bin_op() {
                                 let c = if private {
-                                    self.get_private_member(&obj, &key.to_key())?
+                                    self.get_private_member(&obj, &key)?
                                 } else {
-                                    self.get_prop_value_str(&obj, &key.to_key())?
+                                    self.get_prop_value_str(&obj, &key)?
                                 };
                                 self.bin_op(bin, &c, &v)?
                             } else {
                                 v
                             };
                             if private {
-                                self.set_private_member(&obj, &key.to_key(), fv.clone())?;
+                                self.set_private_member(&obj, &key, fv.clone())?;
                             } else {
-                                self.assign_member_str(&obj, &key.to_key(), fv.clone())?;
+                                self.assign_member_str(&obj, &key, fv.clone())?;
                             }
                             return Ok(fv);
                         }

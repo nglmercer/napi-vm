@@ -1,0 +1,336 @@
+{
+  "schema": 1,
+  "description": "Three adjacent before/after Criterion pairs, alternating order A/B B/A A/B. Medians summarize 20 per-iteration batch-average samples per run. Each iteration is the complete suite workload, not a single property operation.",
+  "pairs": [
+    [
+      "before-2",
+      "after-1"
+    ],
+    [
+      "before-3",
+      "after-2"
+    ],
+    [
+      "before-4",
+      "after-3"
+    ]
+  ],
+  "sample_size": 20,
+  "warmup_seconds": 0.3,
+  "measurement_seconds": 1,
+  "profile": "Cargo bench (release thin LTO, codegen-units=1)",
+  "features": "default napi plus core test-hooks via root dev-dependency",
+  "before_binary_sha256": "56e5cebd40b106ce1a1782e18fbecc8e657f645c25a9d73ee31b41fc2bee6f5c",
+  "after_binary_sha256": "26e98716587fd54e563610b3fe0b9b91a5d65761cb719655aa48e611fe66ca57",
+  "limitations": [
+    "Unisolated desktop machine; descriptive medians and MAD, no significance claim.",
+    "Initial before-1 eight-workload run is retained separately and excluded from paired results.",
+    "Combined borrowed-member-key + existing-own-data-write changes; no separate attribution percentages."
+  ],
+  "results": [
+    {
+      "name": "run/array_chain",
+      "unit": "ns/iteration",
+      "before_run_medians": [
+        12877168.5,
+        13365571.0,
+        13199255.125
+      ],
+      "after_run_medians": [
+        12693103.0,
+        12902056.5,
+        13272831.375
+      ],
+      "before_median": 13199255.125,
+      "after_median": 12902056.5,
+      "paired_ratios": [
+        0.9857060579738472,
+        0.9653202620374394,
+        1.0055742728891301
+      ],
+      "median_paired_ratio": 0.9857060579738472,
+      "before_within_run_mad": [
+        29726.5,
+        45571.625,
+        136345.25
+      ],
+      "after_within_run_mad": [
+        68327.125,
+        94150.375,
+        93767.875
+      ]
+    },
+    {
+      "name": "run/json_roundtrip",
+      "unit": "ns/iteration",
+      "before_run_medians": [
+        9134499.636363637,
+        8991771.688235294,
+        9264776.166666666
+      ],
+      "after_run_medians": [
+        9089971.583333332,
+        9194058.3,
+        9238121.921052631
+      ],
+      "before_median": 9134499.636363637,
+      "after_median": 9194058.3,
+      "paired_ratios": [
+        0.9951252882146886,
+        1.0224968581029894,
+        0.9971230556319393
+      ],
+      "median_paired_ratio": 0.9971230556319393,
+      "before_within_run_mad": [
+        53283.6363636367,
+        22072.292936149053,
+        122721.58333333302
+      ],
+      "after_within_run_mad": [
+        62616.833333333954,
+        55883.11666666623,
+        36364.68181818165
+      ]
+    },
+    {
+      "name": "run/property_updates",
+      "unit": "ns/iteration",
+      "before_run_medians": [
+        26113896.75,
+        26203814.0,
+        26376032.0
+      ],
+      "after_run_medians": [
+        7951469.519230769,
+        8489451.9875,
+        8470500.708333332
+      ],
+      "before_median": 26203814.0,
+      "after_median": 8470500.708333332,
+      "paired_ratios": [
+        0.3044918801415866,
+        0.3239777227658539,
+        0.3211438592557566
+      ],
+      "median_paired_ratio": 0.3211438592557566,
+      "before_within_run_mad": [
+        289027.25,
+        386260.75,
+        151076.25
+      ],
+      "after_within_run_mad": [
+        36852.14730094466,
+        38485.9692307692,
+        52441.03167420812
+      ]
+    },
+    {
+      "name": "tiers/call_tiny_hot",
+      "unit": "ns/iteration",
+      "before_run_medians": [
+        1360827.8541666665,
+        1347762.65,
+        1371806.9365530303
+      ],
+      "after_run_medians": [
+        1370946.6041666665,
+        1364533.4136904762,
+        1358916.9484375
+      ],
+      "before_median": 1360827.8541666665,
+      "after_median": 1364533.4136904762,
+      "paired_ratios": [
+        1.0074357311022242,
+        1.0124434103367357,
+        0.9906036427050594
+      ],
+      "median_paired_ratio": 1.0074357311022242,
+      "before_within_run_mad": [
+        6930.3984375,
+        2924.0,
+        7511.204166666605
+      ],
+      "after_within_run_mad": [
+        1584.7433035714785,
+        7573.268274853821,
+        10492.540178571478
+      ]
+    },
+    {
+      "name": "tiers/prop_mega_hot",
+      "unit": "ns/iteration",
+      "before_run_medians": [
+        1746622.0175438598,
+        1759330.1261574074,
+        1765094.7916666665
+      ],
+      "after_run_medians": [
+        1671141.9722222222,
+        1693367.4259259258,
+        1656900.2936507938
+      ],
+      "before_median": 1759330.1261574074,
+      "after_median": 1671141.9722222222,
+      "paired_ratios": [
+        0.9567851289154253,
+        0.9625069228050155,
+        0.9387032931451169
+      ],
+      "median_paired_ratio": 0.9567851289154253,
+      "before_within_run_mad": [
+        13942.725490196026,
+        10219.181712963036,
+        20282.10555555555
+      ],
+      "after_within_run_mad": [
+        4268.776709401747,
+        7410.903240740881,
+        4206.75
+      ]
+    },
+    {
+      "name": "tiers/prop_mono_hot",
+      "unit": "ns/iteration",
+      "before_run_medians": [
+        526121.4944444444,
+        525720.3928571428,
+        537433.1574074074
+      ],
+      "after_run_medians": [
+        529585.5787037037,
+        527654.2363315697,
+        522791.0090909091
+      ],
+      "before_median": 526121.4944444444,
+      "after_median": 527654.2363315697,
+      "paired_ratios": [
+        1.0065841907160953,
+        1.003678463876809,
+        0.9727554057380224
+      ],
+      "median_paired_ratio": 1.003678463876809,
+      "before_within_run_mad": [
+        4281.694444444438,
+        1716.9720238095033,
+        2685.232336182322
+      ],
+      "after_within_run_mad": [
+        2059.803451178479,
+        1221.6507936507696,
+        5819.039999999979
+      ]
+    },
+    {
+      "name": "tiers/shape_churn",
+      "unit": "ns/iteration",
+      "before_run_medians": [
+        1381128.78125,
+        1413276.25,
+        1418945.0148809524
+      ],
+      "after_run_medians": [
+        1381955.7687499998,
+        1363777.6634615385,
+        1375320.984375
+      ],
+      "before_median": 1413276.25,
+      "after_median": 1375320.984375,
+      "paired_ratios": [
+        1.000598776530637,
+        0.9649760005954522,
+        0.9692560105934672
+      ],
+      "median_paired_ratio": 0.9692560105934672,
+      "before_within_run_mad": [
+        4132.554487179499,
+        11559.979707792168,
+        8636.315972222248
+      ],
+      "after_within_run_mad": [
+        8132.562088815845,
+        5370.176169590675,
+        6711.879058441613
+      ]
+    },
+    {
+      "name": "warm/class_methods_reused_vm",
+      "unit": "ns/iteration",
+      "before_run_medians": [
+        11317804.9,
+        11460453.7,
+        11747244.3
+      ],
+      "after_run_medians": [
+        11293953.1,
+        11220455.2,
+        11417196.3
+      ],
+      "before_median": 11460453.7,
+      "after_median": 11293953.1,
+      "paired_ratios": [
+        0.9978925418656049,
+        0.9790585515824736,
+        0.9719042192729405
+      ],
+      "median_paired_ratio": 0.9790585515824736,
+      "before_within_run_mad": [
+        71889.29999999981,
+        98102.09999999963,
+        201268.4000000013
+      ],
+      "after_within_run_mad": [
+        204208.0,
+        78532.99999999907,
+        133826.7999999998
+      ]
+    },
+    {
+      "name": "warm/property_updates_ast",
+      "unit": "ns/iteration",
+      "before_run_medians": [
+        22025030.0,
+        22731150.0,
+        22800243.0
+      ],
+      "after_run_medians": [
+        4122126.75,
+        4370848.346153846,
+        4410792.701754386
+      ],
+      "before_median": 22731150.0,
+      "after_median": 4370848.346153846,
+      "paired_ratios": [
+        0.1871564647131014,
+        0.19228452349106165,
+        0.1934537584425914
+      ],
+      "median_paired_ratio": 0.19228452349106165,
+      "before_within_run_mad": [
+        104373.16666666605,
+        122578.33333333209,
+        121140.0
+      ],
+      "after_within_run_mad": [
+        20071.9451923077,
+        14911.88051470602,
+        11657.653801169712
+      ]
+    }
+  ],
+  "metadata": {
+    "utc": "2026-11-07T05:06:15.642470+00:00",
+    "git_head": "15803c9a7b75c8c509459e6cd38c4ac0588c74b4",
+    "platform": "Linux-7.3.0-4-cachyos-x86_64-with-glibc2.44",
+    "cpu": "AMD BC-250",
+    "cpu_count": 12,
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+    "build_environment": {},
+    "current_source_sha256": {
+      "benches/vm.rs": "f7587f88de4cea4593dcba3f06ceef6bf3f9c244bbc903bc0d1aef136a713832",
+      "crates/napi-vm-core/src/interpreter/call.rs": "54a5e4777c98cff2aa4f4081f0b605a390f9c295ed502ee0c1f59f9079356f45",
+      "crates/napi-vm-core/src/interpreter/eval.rs": "96f8d3d7c629e6d79b7df838b64d9eb634e341f10320a80166f1d38de7a732e3",
+      "crates/napi-vm-core/src/interpreter/resolve.rs": "1ba0aeff164490196614891465fcadbb2d98cb8d92f46c63abe803b512407651"
+    }
+  }
+}

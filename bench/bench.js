@@ -8,7 +8,9 @@
 
 "use strict";
 
-const { runCode } = require("../index.js");
+const { runCode } = process.env.NAPI_BENCH_BINDING
+  ? require(require("node:path").resolve(process.env.NAPI_BENCH_BINDING))
+  : require("../index.js");
 
 // How long to spend measuring each workload, in milliseconds.
 const MIN_MS = 250;
@@ -28,10 +30,10 @@ const WORKLOADS = [
   },
   {
     name: "recursion_fib",
-    src: "function fib(n) { return n < 2 ? n : fib(n - 1) + fib(n - 2); } fib(20);",
+    src: "function fib(n) { return n < 2 ? n : fib(n - 1) + fib(n - 2); } fib(10);",
     native: () => {
       const fib = (n) => (n < 2 ? n : fib(n - 1) + fib(n - 2));
-      return fib(20);
+      return fib(10);
     },
   },
   {
@@ -155,7 +157,7 @@ function main() {
       const vmOut = runCode(w.src);
       const nativeOut = String(w.native());
       if (vmOut !== nativeOut) {
-        console.error(`  !! ${w.name}: result mismatch vm=${vmOut} native=${nativeOut}`);
+        throw new Error(`${w.name}: result mismatch vm=${vmOut} native=${nativeOut}`);
       }
     }
 

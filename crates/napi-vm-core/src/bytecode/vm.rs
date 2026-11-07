@@ -244,6 +244,10 @@ fn tier_check(interp: &Interpreter, code: &BytecodeFunction, args: &[Value]) {
 /// evaluator's bodies. The frame environment carries the captured slots so
 /// nested closures observe them through the scope chain; locals stay in
 /// slots. The previous scope is restored on every path, including errors.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Keep activation inputs explicit on the hot bytecode-call boundary."
+)]
 pub(crate) fn run_function(
     interp: &mut Interpreter,
     code: &BytecodeFunction,
@@ -2432,7 +2436,7 @@ mod tests {
     }
 
     #[test]
-    fn prepared_assignment_writes_invalidate_loop_read_caches() {
+    fn prepared_assignment_writes_preserve_loop_read_caches_after_shape_addition() {
         let (result, module) = run_module(
             "let o = {x: 41}; let s = 0; \
              for (let i = 0; i < 10; i++) { s = s + o.x; o.y = i; } s;",
@@ -2441,10 +2445,27 @@ mod tests {
         let (hits, misses, mega, sites) = cache_stats(&module);
         assert_eq!(sites, 1, "expected the property read cache site");
         assert_eq!(mega, 0);
-        // Prepared writes invalidate the receiver's cache hints on every
-        // iteration, so the read site remains correct without cache hits.
-        assert_eq!(hits, 0);
-        assert_eq!(misses, 10);
+        // The initial layout and first `y` addition miss. Later writes only
+        // replace the existing value, so the unchanged layout keeps its cache.
+        assert_eq!(hits, 8);
+        assert_eq!(misses, 2);
+    }
+
+    #[test]
+    fn cached_property_reads_observe_repeated_value_writes() {
+        let (result, module) = run_module(
+            "let o = {x: 0}; let s = 0; \
+             for (let i = 0; i < 10; i++) { s = s + o.x; o.x = i + 1; } s;",
+        );
+        assert_eq!(num(&result), 45.0);
+        let (hits, misses, mega, sites) = cache_stats(&module);
+        assert_eq!(sites, 1, "expected the property read cache site");
+        assert_eq!(mega, 0);
+        assert!(
+            hits > 0,
+            "value-only writes must preserve cached slot reads"
+        );
+        assert_eq!(hits + misses, 10);
     }
 
     #[test]

@@ -1,0 +1,11 @@
+{
+  "file": "crates/napi-vm-core/src/bytecode/vm.rs",
+  "production_prefix_unchanged": true,
+  "production_prefix_sha256": "1723081864f666f6224ba90f40229b814889fabc5a2b6db80688f0b26acdc90f",
+  "before_sha256": "edeeca0dca48bf1bd0ec70fac9bda937170a54d884daf6f35b5045051bea3028",
+  "after_sha256": "3249404c32ff4dcd6c93a03ee58449e1729b19f5701ecff4e1ec8f55a67ee587",
+  "reason": "Test-only update from obsolete zero-cache-hit expectation to stable own-data-write cache behavior; added correctness test reading changed values through the cache.",
+  "git_head": "15803c9a7b75c8c509459e6cd38c4ac0588c74b4",
+  "before_matches_git_head": true,
+  "production_prefix_matches_git_head": true
+}

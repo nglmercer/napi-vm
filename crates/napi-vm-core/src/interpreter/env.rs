@@ -301,9 +301,17 @@ pub struct Environment {
     pub(crate) regexp_legacy: Option<Rc<RefCell<crate::builtins::regexp::LegacyState>>>,
     /// `Object.prototype` and `Array.prototype` links for allocations in this
     /// realm, tagged with the intrinsics generation they were read under.
+    #[allow(
+        clippy::type_complexity,
+        reason = "Keep the fixed cache generation, constructor and shared prototype link visible together."
+    )]
     allocation_prototypes: RefCell<[Option<(u64, Value, Rc<Value>)>; 3]>,
     /// The persistent global and module context of this frame's chain. Parent
     /// links of a live closure chain never change, so calls reuse this.
+    #[allow(
+        clippy::type_complexity,
+        reason = "Keep the weak global-owner link and its cached module context explicit at the field."
+    )]
     chain_context: RefCell<Option<(std::rc::Weak<RefCell<Environment>>, Option<String>)>>,
 }
 

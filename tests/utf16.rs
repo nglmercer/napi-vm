@@ -139,6 +139,35 @@ fn inline_caches_do_not_alias_surrogate_keys() {
 }
 
 #[test]
+fn member_key_updates_and_calls_preserve_lossless_encoding() {
+    check(
+        r#"let keys=['plain','😀','\uD800','\uFFFD','\uFDD0sD800','#public'];
+           let o={};
+           for (let k of keys) { o[k]=1; o[k]++; o[k]+=2; o[k]&&=5; }
+           for (let k of keys) { if(o[k]!==5)throw 'aliased update'; }
+           let methods={};
+           for (let k of keys) { methods[k]=function(){return this===methods;}; }
+           methods.plain() && methods['😀']() && methods['\uD800']() &&
+           methods['\uFFFD']() && methods['\uFDD0sD800']() &&
+           methods['#public']() && Object.keys(o).length===keys.length &&
+           Object.keys(o).every((k,i)=>k===keys[i])"#,
+    );
+}
+
+#[test]
+fn static_member_keys_keep_receivers_and_accessor_side_effects() {
+    check(
+        r#"let count=0;let stored=0;
+           let o={get plain(){count++;return stored;},set plain(v){count++;stored=v;},
+                  get '\uD800'(){count++;return stored;},set '\uD800'(v){count++;stored=v;},
+                  get '\uFDD0sD800'(){count++;return stored;},set '\uFDD0sD800'(v){count++;stored=v;}};
+           o.plain=1;o.plain++;o.plain&&=3;
+           o['\uD800']++;o['\uFDD0sD800']||=99;
+           stored===4 && count===8"#,
+    );
+}
+
+#[test]
 fn unicode_regex_last_index_inside_pair() {
     check(
         r#"let r=/./uy;r.lastIndex=1;let m=r.exec('😀');m.index===0 && m[0]==='😀' && r.lastIndex===2"#,
