@@ -1,32 +1,52 @@
 # Trusted process plugins
 
-This additive subsystem runs trusted plugins as supervised OS processes over private loopback TCP. It does not use the VM, remove legacy permission checks, or sandbox code. Choose this API explicitly; legacy manifests belong to the legacy host.
+Run a trusted plugin as a separate Node, Bun, or native executable, and communicate
+with it through validated asynchronous contracts. These packages are independent
+of the JavaScript VM and do not require embedding the engine.
 
-## Compatibility boundary
+The plugin is an ordinary process with the launching account's OS authority.
+The protocol supplies identity checks, bounded messages, deadlines, and lifecycle
+coordination; it does not sandbox plugin implementation code.
 
-| Host | JavaScript/TypeScript artifact | Rust native executable |
-|---|---|---|
-| Node or Bun TS host | Yes, under its declared Node/Bun runtime | Explicitly rejected |
-| Rust host | Yes, under its declared Node/Bun runtime | Yes, matching native target |
+## Choose your path
 
-A single compiled portable TS package is the interoperability target. A Rust host does not reinterpret TS or translate it into Rust. External-runtime profiles can depend on specific runtime/native dependencies; portable-js profiles reject native dependencies. See [compatibility](compatibility.md) for the execution boundary and evidence.
+| Task | Guide |
+| --- | --- |
+| Create and test a JavaScript, TypeScript, or Rust plugin | [Authoring](authoring.md) |
+| Launch plugins and provide host services | [Hosting](hosting.md) |
+| Define interfaces and shared data | [Contracts](contracts.md) |
+| Build and distribute relocatable artifacts | [Packaging](packaging.md) |
+| Implement or inspect the wire protocol | [Protocol](protocol.md) |
+| Run interoperability and package checks | [Testing](testing.md) |
 
-## Repository commands
+## Components
 
-- `npm ci --ignore-scripts`
-- `npm run plugins:generate` / `npm run plugins:check-generated`
-- `npm run plugins:build:ts` / `npm run plugins:typecheck`
-- `npm run plugins:build:rust`
-- `npm run plugins:test:node` / `npm run plugins:test:bun`
-- `npm run plugins:test:rust`
-- `npm run plugins:test:interop`
-- `npm run plugins:test:packaged`
-- `npm run plugins:test:consumers` / `npm run plugins:test:rust-consumer`
-- `npm run plugins:test:cargo-package` / `npm run plugins:check-assets`
-- `npm run plugins:bench`
+| JavaScript package | Rust crate | Role |
+| --- | --- | --- |
+| `@napi-vm/plugin-protocol` | `napi-vm-plugin-protocol` | Wire values, contract validation, errors, framing, RPC |
+| `@napi-vm/plugin-sdk` | `napi-vm-plugin-sdk` | Handlers, call contexts, lifecycle, event subscriptions, test harness |
+| `@napi-vm/plugin-host` | `napi-vm-plugin-host` | Discovery, launch, authentication, calls, reload, shutdown |
+| `@napi-vm/plugin-codegen` | Generated Rust adapters | Deterministic contract JSON, types, clients, and references |
+| `@napi-vm/plugin-cli` | Native host executable integration | Scaffolding, generation, explicit build/pack, development tools |
 
-Node-compatible build uses TypeScript directly. Bun is required only for its declared runtime matrix, and Cargo only for Rust builds. Existing VM scripts remain separate. New package names are local workspace names; no packages have been published.
+The current protocol is 1.0; manifests use version 2 and
+`execution: "trusted-process"`. This format is different from a VM plugin's
+`apiVersion: 1` manifest. Interface versions and digests must match exactly;
+there is no automatic method-version negotiation or retry.
 
-## Guides
+## Run the checkout examples
 
-[Architecture](architecture.md) · [Protocol](protocol.md) · [Manifest](manifest.md) · [Contracts](contracts.md) · [Development](development.md) · [Packaging](packaging.md) · [Testing](testing.md) · [Performance](performance.md) · [State migration](migration-ts-to-rust.md) · [Implementation status](implementation-status.md)
+```sh
+npm ci --ignore-scripts
+npm run plugins:generate
+npm run plugins:build
+npm run plugins:test:interop
+```
+
+Install Node, Bun, and the Rust toolchain for the full example matrix. The
+greeter examples call an `app.configuration` host service; the counter examples
+exercise state transfer. Generated bindings and contract artifacts are committed
+so a plugin author does not need to invent wire objects manually.
+
+For untrusted guest JavaScript evaluated under VM capabilities, use
+[VM plugins](../plugins.md) instead.

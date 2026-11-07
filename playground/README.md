@@ -1,15 +1,13 @@
-# napi-vm playground
+# Browser VM and playground
 
-The playground runs the Rust VM as WebAssembly in the browser. Vite serves a
-Preact/TypeScript frontend and the generated wasm package; JavaScript execution
-runs in the page. Completion, hover, and diagnostics use the shared Rust
-[language core](../crates/napi-vm-core/src/lang/).
+Run the Rust engine as WebAssembly and explore it through a Preact/TypeScript
+editor. Guest execution happens in the page. Completion, hover, and diagnostics
+use the shared Rust language core.
 
-## Build and run
+## Build and open
 
-Install Node.js and the repository dependencies, Rust with the
-`wasm32-unknown-unknown` target, and [wasm-pack](https://rustwasm.github.io/wasm-pack/).
-From the repository root:
+Install workspace dependencies, Rust, wasm-pack, and the browser target. From
+the repository root:
 
 ```sh
 npm ci --ignore-scripts
@@ -18,27 +16,49 @@ npm run playground:build
 npm run playground
 ```
 
-Open the URL printed by Vite (normally `http://localhost:3000`). The build
-writes generated wasm and JavaScript glue to the ignored `playground/pkg/`
-directory; rebuild it after changing the Rust core. The Vite configuration
-also writes production frontend output to `playground/dist/`.
+Open Vite's printed URL, normally `http://localhost:3000`. The WASM build writes
+`playground/pkg`; rebuild it after changing Rust. Vite's production frontend
+output is `playground/dist`. The configured development server listens on all
+interfaces, so choose local network exposure deliberately.
 
-For the browser API smoke test, install Bun and run `bun playground/smoke.ts`
-from the repository root after building the wasm package. The broader wasm
-checks are available as `npm run test:wasm`; frontend types can be checked
-with `npm run lint:playground`.
+## Embed the browser binding
 
-## Layout
+```javascript
+import init, { WasmVm } from './pkg/napi_vm.js';
+await init();
+const vm = new WasmVm();
+try {
+  const result = vm.run('6 * 7');
+  if (!result.ok) throw new Error(result.error);
+  console.log(result.value);
+} finally {
+  vm.free();
+}
+```
 
-- `vite.config.ts` configures the development server and `/pkg` alias.
-- `public/index.html` loads `public/src/main.tsx`; `components/`, `hooks/`,
-  `styles/`, and `i18n/` contain the frontend.
-- `public/src/vm.ts` initializes `WasmVm`, registers example modules and host
-  functions, and converts editor UTF-16 offsets to the UTF-8 byte offsets
-  used by the language service.
-- `public/examples/` contains the sample programs and modules.
-- `smoke.ts` exercises execution, logging, callbacks, modules, and language
-  services against the generated wasm package under Bun.
+Serve the generated JavaScript and `.wasm` file together. This is the web-target
+binding, not the native Node `Vm` API. `run` returns a result object with success,
+value/error, and logs; errors need checking. `run_file` supplies a file/module
+context for relative imports. Host functions and modules are registered
+explicitly through the binding.
 
-The playground exposes host callbacks explicitly. A browser-hosted VM does not
-provide Node.js APIs unless the host implements and exposes them.
+Timers require the runtime-enabled build and `enable_timers()`. Select a clock
+with `set_clock` and drive `advance_clock`/`poll_event_loop` as appropriate.
+The VM does not automatically expose Node APIs or arbitrary browser globals.
+Language-service offsets use UTF-8 bytes; the frontend converts editor UTF-16
+indices before analysis calls.
+
+## Verify and locate code
+
+```sh
+npm run test:wasm
+bun playground/smoke.ts
+```
+
+`test:wasm` rebuilds the WASM package, typechecks the frontend, and runs browser
+binding regressions under Node. The Bun smoke also requires a built package.
+These checks exercise the API, not visual browser rendering.
+
+`public/src/vm.ts` owns initialization and host registration; `components/`,
+`hooks/`, `styles/`, and `i18n/` own the UI. `public/examples/` contains programs.
+See [editor integration](../docs/editor.md) and [architecture](../docs/architecture.md).

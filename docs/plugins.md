@@ -1,27 +1,13 @@
-# Plugins
+# Host plugins inside VMs
 
-`plugins/` is a capability-based plugin host built on top of the VM. It lives
-entirely outside the Rust interpreter: the core knows nothing about manifests,
-globs, plugin roots or filesystems.
+The VM plugin host gives each plugin its own guest VM, installs selected
+capability modules, and calls a small lifecycle API. This is separate from
+[trusted process plugins](trusted-plugins/README.md), which execute as normal
+Node, Bun, or native applications.
 
-```text
-plugin.json
-     │
-     ▼
-PluginHost ── validates manifest, compiles permissions, resolves paths,
-     │        installs the granted capability modules, manages the lifecycle
-     ▼
-  napi-vm
-     │
-     ▼
- plugin.js
-```
+## Plugin layout
 
-```bash
-bun examples/plugins.ts
-```
-
-## Manifest
+A plugin directory contains `plugin.json` and an entry module:
 
 ```json
 {
@@ -29,652 +15,106 @@ bun examples/plugins.ts
   "version": "1.0.0",
   "apiVersion": 1,
   "entry": "./plugin.js",
-  "permissions": {
-    "fs": {
-      "read": ["./config.json", "./assets/**"],
-      "write": "./cache/**"
-    },
-    "path": true,
-    "crypto": true,
-    "timers": true,
-    "fetch": ["https://api.example.com"]
-  }
+  "permissions": { "path": true }
 }
 ```
 
-A manifest is validated when the plugin loads — name, version, `apiVersion`,
-entry (which must stay inside the plugin directory) and every permission
-pattern. Malformed patterns fail at load time, not on the first filesystem
-call.
+The entry exports an object, or a class the host can instantiate:
 
-Each `permissions` key is validated by the capability registered for it
-(one `defineCapability` call holds the manifest validator, the install
-shape and the guest module together) — the manifest module itself names no
-key, so new capabilities add keys without touching it. An unknown key fails
-the load: a typo'd permission is never silently ignored. The entry string
-is checked for shape at parse time and normalized plus containment-checked
-by the host (`validateEntryPath`, then `realpath`).
-
-| Value | Meaning |
-|-------|---------|
-| missing / `false` | denied |
-| `true` | same as `"*"` |
-| `"*"` | requests unrestricted access |
-| `"./assets/**"` | a plugin-relative subtree |
-| `"/usr/share/app/**"` | an absolute path (refused outside the plugin root) |
-| `["./a", "./b/**"]` | any of several patterns |
-
-Glob syntax is deliberately small: `*` matches within one path segment, `**`
-matches zero or more segments. Everything else is literal.
-
-## The manifest is a request, not a grant
-
-```text
-requested permissions  ∩  host policy  =  effective permissions
+```javascript
+export default {
+  onLoad(context) {
+    return { name: context.name, count: 0 };
+  },
+  onUnload(context) {
+    return { count: 1 };
+  },
+  onReload(context, previousState) {
+    return previousState ?? { count: 0 };
+  }
+};
 ```
 
-```ts
-import { PluginHost } from "napi-vm/plugins";
-import { nodePlatform } from "napi-vm/plugins/node";
+`onLoad` receives the plugin name/version. `onUnload` also receives a reason
+(`unload` or `reload`) and can return transferable state. `onReload` receives
+that previous state; absent a reload hook, the host uses the load hook.
+Guest lifecycle wrappers use `Vm.callFunction`, so results cross the structured
+conversion boundary rather than a generated source-evaluation envelope.
+
+## TypeScript host
+
+The `plugins/index.ts` entry exports portable platform and capability
+interfaces. Node/Bun-specific filesystem and native adapters live in
+`plugins/node.ts`. Run this checkout example with Bun after building the addon:
+
+```typescript
+import { PluginHost } from './plugins/index';
+import { nodePlatform } from './plugins/node';
 
 const host = new PluginHost({
   platform: nodePlatform(),
-  policy: {
-    capabilities: { path: true, timers: true },
-  },
+  policy: { capabilities: {} }
 });
+const loaded = host.load('./examples/plugins/example-plugin');
+host.reload(loaded.manifest.name);
+host.unload(loaded.manifest.name);
 ```
 
-A plugin asking for `"read": "*"` gets unrestricted reads *inside its own
-directory*; anything beyond that is refused — plugins are confined to their
-own root unconditionally, and every capability needs an explicit grant above.
+An empty dynamic policy still permits the TypeScript host's manifest-scoped
+filesystem substrate and requested path helpers. This fixture therefore works
+with its declared file/path permissions. A portable host supplies its own
+`HostPlatform`; the default missing-filesystem backend does not read disk.
 
-## Path resolution
+## Requests, grants, and runtime controls
 
-`"./"` is always the plugin root — never `process.cwd()`. Every privileged call
-resolves its path before checking anything:
+Dynamic capability requests are checked against host grants, their definition's
+`allows` rule, and capability kill switches. Unknown permission names fail
+validation unless registered. Definitions own request validation, resolution,
+installation, and teardown.
 
-```text
-guest path → fold separators → resolve . and .. → resolve against plugin root
-  → canonicalize (follow symlinks) → confinement gate → manifest permission → I/O
-```
+The TypeScript host treats `fs` as an always-installed substrate: manifest
+read/write patterns and unconditional plugin-root confinement control calls.
+It does not intersect those patterns with a separate filesystem policy grant.
+Its `path: true` rule is also manifest-only because path helpers do not perform
+I/O. Review/approve those manifest requests or inject a more restrictive
+filesystem backend before loading an untrusted package. Crypto, timers, fetch,
+and custom dynamic capabilities follow their registered grant rules.
 
-Because the check happens on the canonical path, `./cache/../../secret.txt` and
-a `cache/outside -> /etc` symlink are both refused, and an in-root symlink is
-matched by where it really points.
+The Rust host has separate host `fs_read`, `fs_write`, and `path` grants, which
+intersect with manifest requests. Do not assume the two host policies are
+identical. Native host modules execute with host privilege in either integration.
 
-Guest paths are POSIX on every host; the host converts to native paths when it
-performs I/O.
+For trusted operator extensions, use `defineCapability`; use
+`setCapabilityEnabled` to disable/re-enable supported capability installations.
+Review [capability-registry.ts](../plugins/capabilities/capability-registry.ts)
+and [plugin-host.ts](../plugins/core/plugin-host.ts) when adding a definition.
 
-## Guest API
+## Rust host
 
-```js
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { join, normalize, dirname, basename, extname } from "node:path";
-```
+`napi_vm::RustPluginHost` provides analogous manifest, policy, VM, and lifecycle
+ownership without a Node host. Try the complete fixture:
 
-`node:fs` is always available as a sandboxed facade — registering it grants nothing, since each
-function checks its own path. `node:path` is pure computation and is registered
-only when the manifest asks for `"path": true`.
-
-When the Rust plugin host's CommonJS loader is enabled for native addons,
-`require("fs")` and `require("node:fs")` return the same checked `node:fs`
-facade, and the matching `path` requests resolve to the installed `node:path`
-facade. The CommonJS form keeps the same manifest and host permission checks;
-it does not expose the desktop process's filesystem directly.
-
-Denied calls raise a catchable error carrying no host paths:
-
-```js
-try {
-  readFileSync("./secret.txt", "utf8");
-} catch (error) {
-  error.name;    // "PermissionDenied"
-  error.message; // 'fs.read is not permitted for "./secret.txt"'
-}
-```
-
-Guests never see `require`, `process`, `node:fs`, `Bun` or `Deno`.
-
-## Entry module
-
-The default export may be an object or a class; both are normalized to a single
-instance.
-
-```js
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-
-export default class ExamplePlugin {
-  onLoad(context) {
-    this.config = JSON.parse(readFileSync("./config.json", "utf8"));
-    writeFileSync(join("./cache", "status.json"), JSON.stringify({ plugin: context.name }));
-  }
-
-  onUnload(context) {
-    return { config: this.config }; // serializable state, survives a reload
-  }
-
-  onReload(context, previousState) {
-    this.config = previousState ? previousState.config : JSON.parse(readFileSync("./config.json", "utf8"));
-  }
-}
-```
-
-`context` carries `name` and `version` only — the plugin root is host-side
-information and is deliberately withheld. `onUnload` also receives
-`reason: "unload" | "reload"`. All three hooks are optional; a plugin without
-`onReload` falls back to `onLoad`.
-
-## Host API
-
-```ts
-const host = new PluginHost({ policy, platform: nodePlatform() });
-
-const plugin = host.load("./examples/plugins/example-plugin");
-plugin.loadResult;      // whatever onLoad returned
-plugin.status;          // "loaded" | "error"
-
-host.reload("example-plugin"); // fresh VM, state handed to onReload
-host.unload("example-plugin"); // returns onUnload's state
-host.get("example-plugin");
-host.list();
-host.unloadAll();
-```
-
-Reload never mutates a half-loaded environment: the old instance gets
-`onUnload({ reason: "reload" })`, its serializable return value is kept, the VM
-is discarded, and everything is rebuilt from disk — so edited source *and*
-edited permissions both take effect.
-
-Unload calls `onUnload`, then detaches the capabilities: the modules and the
-bridge globals are removed from the VM. A lifecycle hook that throws revokes
-them immediately as well — an errored plugin never keeps a live `node:fs` — and
-a failed `onUnload` still unloads the plugin. The registry keeps the errored
-entry so `reload()` can rebuild it from disk.
-
-## Rust desktop embedding
-
-The crate now exposes `RustPluginHost`, a Rust API for desktop applications
-that do not embed Node. It validates plugin manifests, creates an isolated
-`Interpreter` per plugin, installs permission-checked `node:fs` and optional
-`node:path` modules, loads relative ESM dependencies and packages already
-present under the plugin's `node_modules`, manages a host capability registry,
-and implements load/reload/unload with fresh interpreters and JSON-serializable
-state transfer.
-
-The Rust host resolves static bare ESM imports inside the plugin root, including
-conditional `exports` for `import`/`node`/`default`, exported subpaths, nested
-dependencies, and `module`/`main` entry fields. Guest code can also use the VM's
-CommonJS `require()` to load in-root JavaScript and JSON packages, even when no
-native addon backend is configured. Both paths register guest source under
-canonical module IDs and evaluate it inside napi-vm; neither delegates package
-execution to host `require()`. Package `imports` maps and computed dynamic ESM
-imports are not loaded by the static ESM graph yet. Install or vendor packages
-inside the plugin root before calling `load()`.
-
-Choose the smallest runtime path that covers the plugin:
-
-| Plugin need | Rust host setup | Guest API |
-| --- | --- | --- |
-| JavaScript plugin, files, and path helpers | Build with `--no-default-features` | Checked `node:fs` and `node:path` modules |
-| napi-rs or another Node-API addon | Build with `--no-default-features --features node-api-host`; pin each trusted `.node` file by SHA-256 | Ordinary `require("package.node")` or `require("./native/addon.node")` |
-| V8, NAN, Node C++ APIs, or direct libuv integration | Configure the Node sidecar and its Node executable | Node's native addon ABI |
-
-The in-process Rust backend needs a C compiler at build time but does not
-require a Node executable at runtime. It implements a selected Node-API
-surface, not the complete Node runtime or every function in Node-API v1-v10.
-Native libraries execute with the desktop
-process's OS privileges, so filesystem plugin permissions do not sandbox
-addon code. See the [native addon compatibility plan](native-addon-loader-plan.md)
-before enabling native addons in a distributable app.
-
-[`examples/rust_plugin_host.rs`](../examples/rust_plugin_host.rs) runs the
-existing `example-plugin` fixture through that public API. Its guest source is
-unchanged and uses the same `node:fs`, `node:path`, and lifecycle hooks as the
-TypeScript host.
-
-```bash
+```sh
 cargo run --no-default-features --example rust-plugin-host -- examples/plugins/example-plugin
 ```
 
-[`examples/plugins/rust-commonjs-plugin`](../examples/plugins/rust-commonjs-plugin)
-shows a Rust-hosted plugin that uses `require()` to load an in-root CommonJS
-package without configuring or embedding Node. The guest package calls the
-permission-checked `node:fs` and `node:path` facades; guest JavaScript still
-runs in napi-vm.
-
-```bash
-cargo run --no-default-features --example rust-plugin-host -- examples/plugins/rust-commonjs-plugin
-```
-
-Expose filesystem and path operations through checked Rust host functions and
-the guest-facing standard module names. They do not need `.node` addons or
-N-API. Filesystem access is denied by default. Each operation must match both
-the plugin's manifest patterns and the desktop host's `RustPluginPolicy`
-patterns, and paths stay inside the canonical plugin root. `node:path` also
-requires a manifest request and a host grant. Custom trusted Rust capability
-modules can be registered with `RustPluginHost::define_capability`; a module
-is installed only when both the plugin requests it and host policy grants it.
-
-```rust
-let policy = RustPluginPolicy::default()
-    .grant_fs_read("config.json")
-    .grant_fs_read("assets/**")
-    .grant_fs_write("cache/**")
-    .grant_path();
-let host = RustPluginHost::new(RustPluginHostOptions {
-    policy,
-    ..RustPluginHostOptions::default()
-});
-```
-
-The in-process Node-API option composes with the plugin bridge, so a plugin can
-use the checked filesystem facade and an allowlisted native addon in the same
-interpreter. Enable Cargo feature `node-api-host`, configure trusted addon
-digests before loading, and keep the guest's ordinary CommonJS call shape:
-
-```rust
-let mut host = RustPluginHost::new(RustPluginHostOptions {
-    policy: RustPluginPolicy::default()
-        .grant_fs_read("config.json")
-        .grant_path(),
-    ..RustPluginHostOptions::default()
-});
-host.configure_napi_addons(
-    "example-plugin",
-    RustPluginNapiOptions::default()
-        .allow_addon_with_sha256(addon_path, trusted_sha256),
-)?;
-host.load(plugin_directory)?;
-```
-
-For packages that publish platform prebuilds, the Rust host can select the
-current OS/architecture and still verify the selected file against trusted
-metadata. Use a bare alias when the package has no JavaScript wrapper, or the
-`node-gyp-build` option when its CommonJS entry calls that helper:
-
-```rust
-RustPluginNapiOptions::default()
-    .allow_native_prebuild_with_sha256(
-        "example-addon",
-        "node_modules/example-addon",
-        trusted_sha256,
-    );
-
-RustPluginNapiOptions::default()
-    .allow_native_package_prebuild_with_sha256(
-        "node_modules/example-addon",
-        trusted_sha256,
-    );
-```
-
-The package root is relative to the plugin directory unless it is absolute;
-the host rejects roots outside that directory. `node_gyp_build_prebuilds_only`
-can restrict selection to `prebuilds/<platform>-<arch>` when an application
-does not want the `build/Release` fallback.
-
-The VM exposes `require()` for the configured plugin entry, so its module can
-call `require("package.node")` for an installed package or
-`require("./native/addon.node")` for a direct file. The addon still must be
-inside that plugin's root and match the pinned digest. Native code runs with
-the desktop process's OS privileges; the VM cannot sandbox it.
-
-Native extensions are an optional second path. A Rust plugin can be authored
-with `napi-rs`, compiled to a Node-API `.node` library, and loaded by the
-in-process Rust backend when it uses the Node-API subset napi-vm implements.
-[`examples/rust_native_addon.rs`](../examples/rust_native_addon.rs) shows the
-Rust host setup, and the compiled napi-rs fixture is exercised by the
-Node/Bun/VM compatibility tests. This path requires the `node-api-host`
-feature, an explicit addon allowlist and trusted SHA-256. Node-API support is
-currently broad but partial; addons that need V8, NAN, Node C++ APIs, or
-libuv ABI compatibility need the Node sidecar. See the
-[Rust desktop native addon loader plan](native-addon-loader-plan.md) for historical design context; consult the current loader and tests for
-compatibility.
-
-[`examples/rust_plugin_napi.rs`](../examples/rust_plugin_napi.rs) runs a
-complete Rust-hosted plugin whose native module is itself written in Rust
-with napi-rs. The plugin imports checked `node:fs` and `node:path` facades,
-loads its allowlisted addon using ordinary `require()`, and awaits an
-`AsyncTask` from its asynchronous lifecycle hook. `RustPluginHost::load`,
-`reload`, and `unload` remain synchronous Rust calls; when a hook returns a
-Promise, the host drives the VM's existing event loop until that Promise
-settles. These calls wait for the hook before returning, so invoke them on a
-host thread where that wait is acceptable. If a hook awaits a Promise with no
-queued VM work or host event that can settle it, the VM returns an explicit
-error instead of treating the pending value as a completed result.
-
-On Linux, build and copy the native addon, then pass the digest from trusted
-application metadata to the host example:
-
-```bash
-cargo build --release --manifest-path examples/plugins/rust-napi-plugin/native/Cargo.toml
-mkdir -p examples/plugins/rust-napi-plugin/node_modules/rust-napi-plugin.node/build/Release
-cp examples/plugins/rust-napi-plugin/native/target/release/librust_napi_plugin_native.so examples/plugins/rust-napi-plugin/node_modules/rust-napi-plugin.node/build/Release/addon.node
-sha256sum examples/plugins/rust-napi-plugin/node_modules/rust-napi-plugin.node/build/Release/addon.node
-cargo run --no-default-features --features node-api-host --example rust-plugin-napi -- "$(sha256sum examples/plugins/rust-napi-plugin/node_modules/rust-napi-plugin.node/build/Release/addon.node | cut -d ' ' -f1)"
-```
-
-The `.node` copy step uses the cdylib filename produced for the target OS and
-architecture. The digest must come from trusted build or signing metadata;
-the plugin cannot authorize its own native code. `node:fs` and `node:path` are
-implemented by the Rust host, so ordinary filesystem and path use does not
-require a native addon.
-
-## Platforms: bringing your own outside world
-
-Everything the host touches goes through one injected `HostPlatform`
-(filesystem, paths, crypto, native loading), so the same permission logic
-runs on Node, Bun, Deno, a Tauri renderer or a Rust backend without the
-guest-facing API changing:
-
-```ts
-import { portablePlatform, type HostFileSystem } from "napi-vm/plugins";
-
-const tauriFs: HostFileSystem = { realpath, readText, writeText, exists };
-
-new PluginHost({
-  policy,
-  platform: portablePlatform(tauriFs), // POSIX paths + WebCrypto defaults
-});
-```
-
-Node and Bun hosts use the ready-made platform instead:
-
-```ts
-import { nodePlatform } from "napi-vm/plugins/node";
-
-new PluginHost({
-  policy,
-  platform: nodePlatform({ maxReadBytes: 1024 * 1024 }),
-});
-```
-
-A top-level `fs` option overrides just `platform.fs` (handy for tests and
-for byte-limit tuning without rebuilding the platform). With no platform at
-all the host fails fast on the first filesystem access, pointing at
-`nodePlatform()` — a host that cannot read its plugin directory is a wiring
-error, not a default worth guessing.
-
-### Size limits
-
-Permission to read a path is not permission to spend unbounded host memory on
-it. The default Node backend caps each read and write at 8 MiB and raises
-`ResourceLimitError` (`e.name === "ResourceLimit"` in guest code) past that:
-
-```ts
-import { PluginHost } from "napi-vm/plugins";
-import { createNodeFileSystem, nodePlatform } from "napi-vm/plugins/node";
-
-new PluginHost({
-  policy,
-  platform: nodePlatform({
-    maxReadBytes: 1 * 1024 * 1024,
-    maxWriteBytes: 256 * 1024,
-  }),
-});
-
-// …or keep your platform and swap only the backend:
-new PluginHost({
-  policy,
-  platform: nodePlatform(),
-  fs: createNodeFileSystem({ maxReadBytes: 1 * 1024 * 1024 }),
-});
-```
-
-The cap is deliberately separate from `PermissionDeniedError`: the path *was*
-authorized, and reporting a size problem as a permission failure sends plugin
-authors to their manifest instead of to the file. It is enforced against the
-same descriptor the data is read from, so the file cannot be swapped for a
-larger one between the check and the read, and non-regular files (devices,
-FIFOs) are refused rather than read forever.
-
-A custom `fs` implementation is responsible for its own limits. The VM's
-string limit of 64 × 1024 × 1024 UTF-16 code units only rejects a value after
-the host has already allocated it.
-
-## Layout
-
-```text
-plugins/
-  index.ts                  portable surface (no node:* anywhere below it)
-  node.ts                   Node/Bun adapter (nodePlatform, trusted packages)
-  platform.ts               HostPlatform/HostPath/HostFileSystem/HostCrypto
-                            + pure-POSIX paths and WebCrypto defaults
-  core/                     host engine (portable)
-    plugin-host.ts          load / reload / unload
-    manifest.ts             plugin.json types and validation
-    permissions.ts          compilation, policy intersection, enforcement
-    lifecycle.ts            guest-side bootstrap and hook wrappers
-    native-bridge.ts        loaded code → guest module bridge (allowlist)
-    errors.ts               error types
-  capabilities/             guest modules (portable; one defineCapability each)
-    capability-registry.ts  the single registry (validate/resolve/compile/
-                            allows/schema/install per capability)
-    filesystem-capability.ts  node:fs
-    path-capability.ts      node:path
-    crypto-capability.ts    node:crypto (primitives from platform.crypto)
-    timers-capability.ts    node:perf_hooks
-    fetch-capability.ts     standard fetch(), installed by the fetch capability
-  npm/                      pure guest source loader (portable)
-    resolver.ts             package exports and ESM entry resolution
-    module-graph.ts          dependency scanning and canonical linking
-    guest-package-loader.ts  validate, compile optionally, then defineModule
-    compiler.ts              identity and optional SWC adapters
-  node/                     Node-only platform pieces
-    node-platform.ts        nodePlatform (node:fs/path/crypto/module)
-    node-filesystem.ts      createNodeFileSystem
-  native/                   npm/`.node` downloading (Node-only, operator-gated)
-    trusted-modules.ts      pinned download + verify + require
-  fs/                       path support (portable)
-    checker.ts              confinement gate + manifest permission checks
-    path-rules.ts           guest path normalization and glob matching
-```
-
-Portable hosts import only the barrel (`napi-vm/plugins`); Node hosts add
-`napi-vm/plugins/node`. Internal cross-imports are relative
-(`../core/errors`, `../fs/path-rules`), so files can move between layers
-without touching consumers.
-
-The capability installers use `exposeFunction` + `registerModule` so the host
-runs against any published napi-vm build; `vm.registerHostModule()` (see the
-[API reference](api.md)) is the newer core shortcut for the same shape.
-
-Security regressions live in `tests/plugins/` — permissions, traversal,
-symlink escapes, policy intersection, lifecycle and reload.
-
-## The capability modules
-
-| Module | Grants | Manifest | Host policy |
-|--------|--------|----------|-------------|
-| `node:fs` | UTF-8 reads and string writes inside the granted patterns | `fs.read`, `fs.write` | — (always confined to the plugin root) |
-| `node:path` | Host path manipulation (no I/O) | `path: true` | — |
-| `node:crypto` | Random bytes, UUIDs, and SHA digests | `crypto: true` | `crypto: true` |
-| `node:perf_hooks` | Monotonic `performance.now()` | `timers: true` | `timers: true` or `{ resolutionMs }` |
-| `fetch()` | HTTP to named origins | `fetch: [...]` | `fetch: { allow, deny, ... }` |
-
-Every one of them is installed only when the manifest asks *and* the host
-policy permits. Neither side can widen the other, and the default policy
-grants none of them: a host that wants the network, the clock or a
-cryptographic source says so.
-
-## Dynamic capabilities
-
-Beyond the built-ins, a plugin requests `capabilities: { "<name>": true }`
-(or `{ "<name>": { ...options } }`). Names resolve against a host-side
-registry — there is no manifest enum to extend:
-
-```json
-{ "permissions": { "capabilities": { "greet": true } } }
-```
-
-```ts
-const host = new PluginHost({
-  policy: { capabilities: { greet: true } },
-});
-host.defineCapability(myCapability);   // trusted-operator API
-host.setCapabilityEnabled("greet", false); // runtime kill-switch
-```
-
-Request ∩ policy ∩ runtime switch = installed. Unknown names fail the load
-(a typo never becomes a silent grant); requested-but-ungranted names stay
-absent.
-
-### Authoring a capability (subplugin shape)
-
-Every capability — built-in or custom — is one `CapabilityDefinition`:
-a `name`, a manifest `validate` hook, an option `schema` with defaults, and
-an `install` that returns its own teardown. (`resolve`/`compile`/`allows`
-hooks cover the odd shapes: `fs` compiles to checker rules instead of
-installing, `capabilities` expands one map entry per install, `fetch`
-refuses empty requests.) There is no per-capability uninstall function; the
-host runs the returned teardowns in reverse install order on unload, reload
-and failed hooks:
-
-```ts
-import { defineCapability, unbindCapabilityModule } from "napi-vm/plugins";
-
-defineCapability({
-  name: "greet",
-  schema: { voice: { type: "string", default: "alto", enum: ["alto", "bass"] } },
-  install: ({ vm, options }) => {
-    // Already schema-validated with defaults by the host; the cast only
-    // recovers the static type.
-    const { voice } = options as { voice: string };
-    const globals = vm.registerHostModule("greet", {
-      hello: (name) => `${voice}: hi ${name}`,
-    });
-    return () => unbindCapabilityModule(vm, "greet", globals);
-  },
-});
-```
-
-Schema rules: `true` in the manifest means "defaults" (`{}` when no schema
-exists); unknown or mistyped options fail the load; numeric `min`/`max`,
-`integer`, string `enum` and string arrays are enforced. A definition
-without a schema takes no options at all. Policy-side extras (clock
-precision, fetch allowlists) arrive via the `grant`, never
-the manifest — guest-requested privilege would let the plugin choose its
-own limits.
-
-`node:fs` and `node:path` are the exception: they are substrate, not
-registry entries — installed unconditionally (`fs`) or by boolean flag
-(`path`) — because the permission checker itself stands on them.
-
-## Pure JavaScript npm packages
-
-`GuestPackageLoader` resolves npm metadata and reads package source as text.
-It registers canonical `/npm/name@version/path` module IDs with `defineModule`,
-so the package body executes only after guest code imports it. It never calls
-host `require()` or `import()` on a guest package:
-
-```ts
-import { Vm } from "napi-vm";
-import { GuestPackageLoader } from "napi-vm/plugins";
-import { nodePlatform } from "napi-vm/plugins/node";
-
-const vm = new Vm();
-const packages = new GuestPackageLoader(vm, {
-  platform: nodePlatform(),
-  compilerMode: "none",
-});
-
-await packages.loadPackage("valibot");
-vm.run(`import * as v from "valibot"; typeof v.object;`);
-```
-
-The loader resolves ESM `exports` conditions, relative imports, subpath
-exports, and dependencies, then rewrites resolved specifiers to canonical
-guest module IDs. CommonJS, native addons, and computed dynamic imports are
-reported as compatibility errors. The guest still has only the globals and
-host capabilities installed in its `Vm`.
-
-Compilation is independent from package resolution. `none` (the default)
-validates and registers source unchanged. `auto` uses source unchanged when
-`vm.validateModule()` accepts it, then tries an injected compiler or optional
-`@swc/core` only after a validation failure. `swc` always transforms first.
-Every transformed module is validated again by napi-vm before registration;
-SWC success alone never marks source executable.
-
-## Trusted native packages
-
-Native addons and other explicitly trusted host packages follow a separate
-operator controlled path. Their native code is `require`d on the host; the VM
-only ever sees wrapped functions through `registerHostModule`:
-
-```ts
-import { installTrustedPackage, nativePackageCapability } from "napi-vm/plugins/node";
-
-const loaded = await installTrustedPackage(
-  { dir: ".napi-vm/modules", allow: ["my-native-pkg"] },
-  { package: "my-native-pkg", version: "1.2.3",
-    integrity: "sha512-…" },   // pinned, verified before extraction
-);
-nativePackageCapability({ exposeAs: "greet", loaded, definition: {...} });
-```
-
-Fail-closed rules: exact pinned versions only (no ranges, no `latest`),
-integrity verified with `timingSafeEqual` before anything is written,
-tarball entries that escape their directory refused, and anything outside
-the `allow` list is refused before any network happens. Verified installs
-are cached on disk (`.verified.json`), so repeat loads need no network.
-
-### `node:crypto`
-
-`randomBytes`, `randomUUID` and `createHash`. Nothing here
-reaches outside the process or observes anything about it, so there is no path
-or origin to check — but it is still a capability, because a host may want to
-withhold a cryptographic source (a deterministic replay harness, or a plugin
-that has no business generating keys). One `randomBytes` call is capped, so a
-plugin cannot ask for a gigabyte of entropy. The primitives come from
-`platform.crypto`: the Node platform uses `node:crypto` (sync digests
-included), the portable default uses WebCrypto randomness and UUIDs while
-`createHash().digest()` reports itself unavailable — a host that needs digests off Node
-supplies its own `HostCrypto`.
-
-### `node:perf_hooks`
-
-`performance.now()`. The VM's own `setTimeout` has no
-wall clock — it orders callbacks without letting guest code observe or wait on
-real time — and this capability is the opposite choice, granted explicitly. A
-host that grants time at all can still deny *precise* time:
-
-```ts
-policy: { timers: { resolutionMs: 100 } }
-```
-
-rounds the clock down before the guest sees it, which is what makes timing
-side channels expensive to use.
-
-### `fetch()`
-
-The capability that actually reaches outside the machine, so its checks are
-the ones that matter:
-
-- A manifest entry grants an **origin**, not a path. `"https://api.example.com/v1"`
-  grants the origin; a same-origin path restriction is not a boundary a client
-  can enforce, so it is not offered.
-- Effective permission is requested ∩ policy, with the policy's `deny` checked
-  first. A policy with no `allow` list permits nothing — the capability has to
-  be opened deliberately, not by omission.
-- Redirects are followed by hand and **each hop is re-checked**, so a permitted
-  origin cannot bounce a request to a denied one.
-- Only `http:` and `https:`; the response body is capped.
-
-When the capability is granted, the VM installs the standard global
-`fetch()`, backed by the existing permission-checked async host call. Without
-the grant, the global is absent. It runs under `runAsync`:
-
-```ts
-await vm.runAsync(`
-  const response = await fetch("https://api.example.com/items");
-  const items = await response.json();
-  items.length;
-`);
-```
-
-The current facade supports string request bodies and the common `Headers`,
-`Request`, and `Response` operations. Unsupported body types fail explicitly;
-abort signals, streaming bodies, and the full Web Fetch surface are not
-implemented yet. The origin, redirect, timeout, and response-size checks stay
-in the host capability.
+`RustPluginPolicy` includes `grant_fs_read`, `grant_fs_write`, `grant_path`,
+and named capability `grant`/`deny` methods. `RustPluginCapability::export`
+registers trusted Rust callbacks. Pin guest values captured by those callbacks
+with `heap::RootPin`; closure captures are opaque to the collector.
+
+Use `call_json` for direct JSON requests where appropriate. Native addon support
+requires additional backend selection and digest policy; see
+[the Rust napi-rs fixture](../examples/plugins/rust-napi-plugin/README.md).
+
+## Loading packages and handling reloads
+
+The TypeScript guest-package layer resolves package metadata and source through
+injected filesystem/compiler interfaces. It evaluates guest source in the VM;
+it does not authorize arbitrary host `require`. Unsupported syntax and package
+assumptions need explicit handling. See [module loading](modules.md).
+
+Treat reload as lifecycle replacement with explicit state transfer. Hold onto
+the new loaded handle returned by reload, inspect failures, and release plugin
+resources on unload. A successful export-table update does not undo filesystem,
+network, or other host effects performed by an earlier lifecycle hook.

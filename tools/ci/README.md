@@ -1,34 +1,46 @@
-# CI tooling
+# Native build and CI tools
 
-The workflow definitions in [`.github/workflows`](../../.github/workflows/) are
-the source of truth for current matrices and commands. The shared
-[`setup-build`](../../.github/actions/setup-build/action.yml) action configures
-native linkers and Cargo caches after Rust is installed. It uses mold for Linux
-GNU targets, Rust's bundled `lld-link` for Windows MSVC, and the platform linker
-on macOS; Miri opts out of native linker configuration. Cache keys include the
-compiler, target and linker configuration, workload, and manifests.
+The [workflow files](../../.github/workflows/) define current jobs, targets,
+toolchains, prerequisites, and release artifacts. Shared setup scripts configure
+compilers/linkers and cache fingerprints; they do not replace the actual test
+or compatibility reports from a job.
 
-The [runtime matrix](../../.github/workflows/runtime-matrix.yml) builds and
-reuses native addons across its Node versions. The main
-[CI workflow](../../.github/workflows/ci.yml) has separate Rust, wasm, language
-server and Node-API checks; the [trusted plugin workflow](../../.github/workflows/trusted-plugins.yml)
-contains the process-plugin matrix. The [release workflow](../../.github/workflows/releases.yaml)
-checks and publishes platform assets. A workflow definition alone is not proof
-that its jobs ran successfully.
+## Build helpers
 
-Useful local entry points from the repository root:
+| Tool | Responsibility |
+| --- | --- |
+| `build-bindings.mjs` | Build the addon once and emit matching CommonJS, ESM, and declaration exports |
+| `node-headers.cjs` | Locate/download headers for native fixture builds |
+| `setup-mold.sh` | Configure the pinned fast linker for supported Linux GNU builds |
+| `setup-msvc.ps1`, `setup-lld.ps1` | Configure Windows compiler/SDK and linker |
+| `cache-key.cjs` | Fingerprint compiler, target, linker, and build configuration |
+| `lint-workflows.sh` | Run a pinned, checksum-verified actionlint binary |
+
+The [setup-build action](../../.github/actions/setup-build/action.yml) selects
+platform setup and caches. macOS uses the platform linker. Miri opts out of
+native-linker configuration. Workload-specific cache groups avoid conflating
+incompatible artifact configurations; Cargo still validates fingerprints.
+
+## Reproduce a job
+
+Install the workflow's selected toolchain/target and dependencies, then run its
+exact command and feature selection. Useful root-level entry points include:
 
 ```sh
 npm run test:rust
 npm run test:wasm
 npm run lsp:test
 npm run plugins:check
-RUNNER_TEMP="${TMPDIR:-/tmp}" bash tools/ci/lint-workflows.sh
 ```
 
-The workflow linter downloads a pinned, checksum-verified Linux x64 actionlint
-binary. Other commands have their own Rust, Node, Bun, wasm-pack, target, and
-fixture requirements; consult their scripts and workflow jobs before running
-them. See [trusted plugin testing](../../docs/trusted-plugins/testing.md) for
-plugin prerequisites. A local timing result does not establish CI performance
-on other runners.
+Each command has prerequisites. WASM needs wasm-pack and its target; plugin
+interop needs selected runtimes/build fixtures; native addon tests need platform
+compilers. Do not infer a runtime pass from successful cross-compilation.
+
+The workflow linter expects a supported Linux environment and downloads its
+pinned executable. Run `bash tools/ci/lint-workflows.sh` with the temporary
+directory environment required by that script when outside CI.
+
+For routine contributor commands and profiles, use
+[development](../../docs/development.md). For interpretation of platform and
+conformance evidence, use [validation](../../docs/validation.md).

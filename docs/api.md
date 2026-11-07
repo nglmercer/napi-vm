@@ -1,151 +1,128 @@
-# Node API
+# Node.js API
 
-[index.d.ts](../index.d.ts) is the generated signature reference. This page
-explains lifetimes, execution, and return-value differences. Rust ownership
-is documented in [crate architecture](crate-architecture.md).
+The binding is exported through [index.js](../index.js) and
+[index.mjs](../index.mjs). [index.d.ts](../index.d.ts) is the generated signature
+reference. Examples here run from a checkout; replace `./index.js` with
+`napi-vm` when importing an installed package.
 
-## Execution and values
+## Evaluate code
 
-<a id="vm"></a>
+| Entry point | Result | Lifetime |
+| --- | --- | --- |
+| `new Vm()` / `createVm()` | VM handle | Persistent guest globals and modules |
+| `runCode(source)` | Formatted string | Fresh evaluation |
+| `vm.run(source)` | Formatted string | Uses the existing VM |
+| `vm.runAsync(source)` | `Promise<string>` | Uses the existing VM's async bridge |
+| `vm.callFunction(name, args)` | Converted host value | Looks up and invokes a guest function |
 
-| API | Result and lifetime |
+`VM` is a type alias for `Vm`. A failed evaluation throws at the binding boundary;
+an asynchronous failure rejects its promise. Guest mutations performed before
+an error can remain visible. Use a fresh VM when an evaluation needs separate
+state.
+
+## Globals and host callbacks
+
+| Method | Behavior |
 | --- | --- |
-| `runCode(source)` | Display string from a fresh VM execution |
-| `new Vm()` / `createVm()` | Stateful guest VM |
-| `vm.run(source)` | Synchronous execution; returns a display string |
-| `vm.runAsync(source)` | Promise of a display string; uses the VM executor |
-| `vm.callFunction(name, args)` | Marshalled guest return value, including supported live bridge values |
-| `debugParse(source)` | Diagnostic AST string; does not execute source |
-| `vm.validateModule(source)` | Parse-only `{ valid, diagnostics }`; no registration or evaluation |
+| `setGlobal(name, value)` | Copies/converts a host value into a global property |
+| `getGlobal(name)` | Returns the formatted guest value as a string |
+| `hasGlobal(name)` / `removeGlobal(name)` | Inspect/remove the host-visible global entry |
+| `exposeFunction(name, callback)` | Installs a synchronous host callback |
+| `exposeAsyncFunction(name, callback)` | Installs an async callback for `runAsync` |
 
-`run` and `getGlobal` do not return arbitrary JavaScript objects. `setGlobal`
-and `callFunction` use the host bridge's supported value conversions. Prefer
-explicit host functions for privileged behavior, rather than transferring
-host objects with implicit capabilities.
+Global lexical declarations and global object properties are distinct. Removing
+a global property is not a general way to remove a guest `let` or `const`
+binding. Each callback is trusted application code. Its implementation owns
+argument checks, access policy, and external effects.
 
-Native `ArrayBuffer` and typed-array transfers copy bytes into owned storage;
-typed arrays copy only their visible range. Empty and detached host buffers
-and typed arrays import as empty copies. Typed arrays backed by a host
-`SharedArrayBuffer` are rejected because concurrent writes cannot be copied
-safely through this bridge. Guest shared buffers and views are also rejected.
+## Value conversion
 
-VMs retain state between calls and are isolated from one another. Overlapping
-operations on a `Vm` are rejected by its admission guard. Await `runAsync`
-before calling another operation on that instance. It uses a lazily created
-persistent executor, rather than a new OS thread for every call.
+Strings preserve JavaScript UTF-16 code units, including lone surrogates.
+Ordinary JSON-compatible values are appropriate for application messages.
+The native bridge also handles selected richer values such as BigInts, dates,
+regular expressions, collections, buffers, and typed views; this is not a
+general structured-clone contract.
 
-## Globals and callbacks
+ArrayBuffer/typed-array transfers produce owned copies. Exporting a view copies
+its effective visible range, rather than exposing the guest's backing memory.
+Host typed arrays backed by SharedArrayBuffer are rejected, including empty
+views and Node Buffers over shared memory. Conversion has depth/size guards;
+do not depend on arbitrary cycles or repeated Map/Set references retaining
+their identity. See [marshal.rs](../src/bindings/marshal.rs) and its
+[boundary regressions](../tests/node/typed-array-subviews.test.js).
 
-| Method | Purpose |
-| --- | --- |
-| `setGlobal(name, value)` | Install a supported structured value |
-| `getGlobal(name)` | Read a global as a display string |
-| `hasGlobal(name)` | Test presence |
-| `removeGlobal(name)` | Remove a binding or exposed function |
-| `exposeFunction(name, fn)` | Register a synchronous callback |
-| `exposeAsyncFunction(name, fn)` | Register a callback for asynchronous host work |
-| `setLoopLimit(n)` | Set the per-execution loop-iteration budget |
-| `setImportMetaMain(value)` | Configure `import.meta.main` |
-
-Host exceptions are propagated through the bridge. The host owns argument
-validation and permissions. Limits on guest loops do not preempt a blocking
-host callback. [Safety and limits](safety.md).
+```javascript verify
+const { Vm } = require('./index.js');
+const assert = require('node:assert/strict');
+const vm = new Vm();
+try {
+  vm.run('function bytes() { return new Uint8Array([2, 4, 6]); }');
+  const result = vm.callFunction('bytes', []);
+  assert(result instanceof Uint8Array);
+  assert.deepEqual([...result], [2, 4, 6]);
+} finally {
+  vm.dispose();
+}
+```
 
 ## Modules
 
-<a id="modules-and-revocation"></a>
-<a id="registerhostmodule"></a>
-
-| Method | Evaluation |
+| Method | Behavior |
 | --- | --- |
-| `defineModule(name, source)` | Store source; evaluate on first import |
-| `registerModule(name, source)` | Evaluate eagerly and replace exports on success |
-| `registerHostModule(name, exports, options?)` | Bridge named host functions and return their generated global names |
-| `removeModule(name)` | Remove resolution entry and retire its generated host bridges |
-| `hasModule(name)` / `listModules()` | Inspect registered names |
+| `validateModule(source)` | Parse-only `{ valid, diagnostics }`; does not register, resolve imports, or execute code |
+| `defineModule(name, source)` | Registers lazy source |
+| `registerModule(name, source)` | Evaluates eagerly and replaces exports only after success |
+| `registerHostModule(name, exports, { async? })` | Wraps host functions; returns generated global names |
+| `hasModule(name)`, `listModules()`, `removeModule(name)` | Inspect or revoke module resolution |
+| `setImportMetaMain(boolean)` | Selects the main-module flag for guest `import.meta` |
 
-Define all members of a cyclic module graph before importing one. Eager
-registration is transactional over exports: failed evaluation leaves the
-previous export record in place, and successful replacement drops removed
-exports. Guest global side effects are outside that transaction.
-
-Host-module exports must be functions with accepted binding-identifier names.
-`{ async: ['name'] }` marks asynchronous exports. The host functions enforce
-permissions; generated bridge names are a naming convention, not a security
-boundary. Existing guest references are not a general revocation mechanism:
-keep permission checks at the host operation itself.
-
-## Runtime capabilities
-
-`vm.enableRuntime({ console, timers, webApis, nodeCompat })` installs selected
-globals only when the corresponding Cargo features were compiled:
-
-| Option | Required feature |
-| --- | --- |
-| `console`, `timers` | `runtime` |
-| `webApis` | `runtime-web` |
-| `nodeCompat` (Buffer) | `runtime-node` |
-
-This call does not grant filesystem, network, process, environment or native
-addon permission. See [optional runtime](optional-runtime.md).
-
-## Diagnostics and disposal
-
-<a id="dispose"></a>
-
-`evaluationStats()` and `heapStats()` return JSON text describing engine
-counters; `collectCycles()` collects at a quiescent boundary and returns a
-count. Do not interpret individual allocation caps as an aggregate heap quota.
-
-Call `dispose()` in `finally` after using async callbacks or `runAsync`.
-It is idempotent and retires host resources so native handles do not keep
-Node alive. Outstanding work and bridge retirement are coordinated internally;
-disposal is not a reset operation that makes a VM fresh again.
-
-## Generators
-
-On the native target, generators suspend on a stackful coroutine running on
-the calling thread. Explicit closing, including leaving `for...of` early,
-runs the generator's `finally` handlers. Dropping an abandoned generator
-does not resume guest handlers. Reentrant `next()` is rejected. Test
-coroutine lifecycle changes on each target rather than assuming the native
-and WASM implementations have identical machinery.
+Eager replacement is transactional over exports, not arbitrary guest/global/host
+side effects. Removing a module prevents subsequent resolution and removes its
+installed bridge globals; previously captured guest references can survive.
+See [modules](modules.md) for complete lifecycle guidance.
 
 ## AsyncSession
 
-`new AsyncSession(options?)` provides separate asynchronous ownership. Its
-options include bounded command capacity, clock selection (`legacy`, `virtual`,
-`real-time`), fairness (`external-first`, `alternate`), maximum jobs per turn,
-auto-polling, and explicitly installed timers when compiled with runtime support.
+`new AsyncSession(options?)` provides an async-only owner worker and bounded
+command channel. Its `run` and `evaluate` return `Promise<string>`. Methods
+`exposeFunction`, `getGlobal`, `setGlobal`, `defineModule`, `advanceClock`,
+`pollEventLoop`, `setExecutionLimits`, `collectCycles`, and `evaluationStats`
+return promises. `cancel()`, `dispose()`, and `wakeups()` are synchronous.
 
-| Methods | Purpose |
-| --- | --- |
-| `run(source)`, `evaluate(source)` | Queue source execution; return `Promise<string>` |
-| `setGlobal`, `getGlobal`, `exposeFunction`, `defineModule` | Queue host/guest state operations |
-| `advanceClock(milliseconds)` | Advance virtual time |
-| `pollEventLoop(maxJobs)` | Return bounded turn status and next deadline |
-| `setExecutionLimits(fuel, timeoutMs?)` | Configure execution limits |
-| `cancel()` | Signal cancellation |
-| `evaluationStats()`, `collectCycles()`, `wakeups()` | Inspect or collect session state |
-| `dispose()` | Close the session and retire its host resources |
+Options are `commandCapacity`, `timers`, `clock`, `fairness`, `maxJobsPerTurn`,
+and `autoPoll`. Clocks accept `legacy`, `virtual`, or `real-time`; fairness
+accepts `external-first` or `alternate`. Timers require the runtime feature.
+Use [async execution](async.md) for runnable examples and scheduler semantics.
 
-Use [the event-loop guide](event-loop.md) for scheduling and shutdown rules.
-Do not mix `Vm` and `AsyncSession` lifetimes or assume that asynchronous
-methods allow reentrant calls from a callback into its own pending operation.
+## Limits, diagnostics, and disposal
+
+`Vm.setLoopLimit(n)` caps loop iterations. It is not an OS memory or CPU limit.
+`evaluationStats()` and `heapStats()` return diagnostic JSON strings.
+`collectCycles()` performs collection at a quiescent VM boundary and returns a
+count. These diagnostics do not grant safe concurrent access to guest values.
+
+Call `dispose()` in `finally`, especially after `runAsync` or async host-function
+registration. Async dispatch handles can otherwise keep Node's environment
+alive. Disposal is idempotent and retires bridge handles; do not use it as a
+transaction rollback or assume it reverses callbacks already running.
+
+## Optional runtime globals
+
+`vm.enableRuntime({ console, timers, webApis, nodeCompat })` selects globals
+that were compiled into the addon. It does not grant filesystem, networking,
+environment, process, or addon permissions. Missing build features are reported
+as errors. See [runtime feature selection](runtime.md).
 
 ## LanguageService
 
-The shared analysis service supports `open`, `update`, `close`, module
-registration, typed host-function metadata, runtime shapes, completion,
-hover, and diagnostics. `registerHostFunction` takes parameter metadata with
-`name` and `typeName`; generated declarations provide the exact types.
-`registerRuntimeShape` takes JSON metadata, not a live guest object.
-[Editor integration](editor.md) describes URI and position conventions.
+`new LanguageService()` analyzes documents without executing their source.
+`open(uri, source)`, `update(uri, source)`, and `close(uri)` manage documents.
+`complete(uri, offset)`, `hover(uri, offset)`, and `diagnostics(uri)` query them.
+Offsets are UTF-8 byte offsets in the Rust source, not JavaScript UTF-16 indices.
 
-## VmSession
+`registerModule`, `registerHostFunction`, and `registerRuntimeShape` add trusted
+metadata. They do not execute a runtime function. The [editor guide](editor.md)
+explains offsets, the standalone LSP, and live-session discovery.
 
-`runtime/session.cjs` exposes an opt-in `VmSession` for live metadata:
-`start`/`stop`, `attach`/`detach`, callback and module registration,
-`observeHandler`, and `snapshot`. Without a started session, no runtime
-locator is published. See [runtime protocol](runtime-protocol.md) for the
-transport contract and [editor integration](editor.md) for consumers.
+`debugParse(source)` exposes parser debugging text; it is not a stable AST wire
+format. Use `validateModule` when a host needs a structured syntax check.

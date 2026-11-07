@@ -1,159 +1,21 @@
-# Local implementation evidence
+# Historical implementation evidence
 
-Paths under `tools/test262/evidence/` and `artifacts/test262/` refer to Test262
-files removed in the 2026-10-30 cleanup; restore them with
-`git show 9bc2103:<path>`.
+This directory preserves raw build/test logs, machine contexts, comparison
+summaries, and scheduler measurements from earlier implementation work. The
+old narrative checkpoints and plans have been replaced by current guides;
+their original prose remains available in Git history.
 
-Read [results.md](results.md) for measured improvements, regressions, and the
-remaining release blockers. The patch is not release approved.
+| Record | How to use it |
+| --- | --- |
+| [baseline-results.json](baseline-results.json) | Identify baseline commands and outcomes |
+| [comparison-summary.json](comparison-summary.json) | Read the matching historical before/after analysis |
+| [scheduler-final-results.json](scheduler-final-results.json) | Inspect the recorded scheduler validation |
+| [pr8-final-validation](pr8-final-validation/README.md) | Native/ownership validation artifacts and context |
+| [pr8-final-performance](pr8-final-performance/README.md) | Paired lifecycle/runtime measurements |
+| [release-status.json](release-status.json) | Recorded release-gate state at that time |
 
-Reviewed revision: `cf9d240a99747e29d94b970c30483d14ad831e9f`.
-Machine details are in `baseline-environment.txt`; the activated Rust/Bun/Wasm
-versions are recorded separately in `toolchain-versions.txt`. The initial shell
-version probes predated toolchain activation. All Rust/Bun gate commands used
-the activated toolchains.
-
-- `baseline-results.json` and `baseline-00` through `baseline-11`: commands run
-  against a detached checkout of the reviewed revision. Pre-existing failures
-  include Bun worker-termination return semantics, unavailable native fixture
-  dependencies in offline builds, the initially missing wasm-pack tool, and an
-  unbounded fresh-AST Criterion workload killed by the OS.
-- `baseline-compiler-memory.log`: the new isolated memory regression copied
-  unchanged to that checkout; 20,000 synthesized compilations grow RSS from
-  4,040 to 75,396 KiB after warming. The implementation passes its 4 MiB limit.
-- `final-results.json`: all twelve full quality/release commands, with raw logs.
-- `recheck-results.json` and `last-results.json`: checks repeated after the final
-  lifecycle, panic-unwind and memory regression additions.
-- `closeout-results.json`: the latest eleven passing local commands after all
-  lifecycle and operand-borrowing changes. `closeout-release-all-features.log`
-  contains the additional final full release Rust run.
-- `pre-timer-reuse/` and `before-global-name-borrowing/`: earlier measurements
-  retained for investigation; use root samples for the final comparison.
-- `baseline/modified-*-N.jsonl`: seven interleaved process samples of allocation,
-  queue and public API workloads. No competing builds run during these samples.
-- `threshold-T-N.jsonl`: identical queue-only workloads compiled with thresholds
-  16, 32, 64 and 128. The timer queue implementation differs only in `SMALL_LIMIT`; variants are
-  all built before timing. Depths cover 1, 10, 32, 64, 100, 1,000 and 10,000.
-
-The cold AST Criterion helper now drops the result and interpreter, then collects
-through a separate live collector. The identical updated benchmark file is copied
-to the baseline. This measures a viable fresh-AST embedding lifecycle; it should
-not be compared to the earlier baseline's growing-memory timings. The AST mode
-remains explicit rather than silently switching the benchmark to bytecode.
-
-To reproduce the interleaved samples, copy `examples/call_metrics.rs`,
-`examples/timer_queue_matrix.rs` and `examples/support/allocations.rs` into the
-baseline checkout. Build native bindings and those examples in both checkouts
-before running:
-
-```bash
-cargo build --release --no-default-features --example call_metrics --example timer_queue_matrix
-python3 bench/compare-runtime.py --baseline /path/to/baseline --output /path/to/results
-```
-
-The public matrix covers fresh runCode, reused VM.run, compatible VM.runAsync,
-AsyncSession.run/evaluate, callFunction, guest-to-host calls and module import.
-Existing Criterion groups retain forced AST, prepared bytecode, plugin calls,
-monomorphic/megamorphic properties and shape churn. Existing scheduler artifacts
-cover virtual/real clocks, async host calls and idle CPU. Fields that cannot be
-measured at the JS layer (Rust allocations) are explicitly null there; the Rust
-allocation harness supplies their counts separately.
-
-At the time of measurement, remote matrix results and published PRs were unavailable:
-`gh auth status` rejected the configured CLI token. A later publication step
-can use the authenticated GitHub connector; this does not supply remote results
-for the recorded measurements. These logs establish local Linux
-x64 validation, not remote platform/release readiness.
-
-`recheck-03-before-final-library.log` preserves a failed check from overlapping
-source edits and compilation; the completed panic-cleanup implementation passes
-the subsequent library and release checks. Final comparisons run without builds.
-
-## Current Test262 full pass (2026-10-18)
-
-The final pinned-corpus run at working-tree source based on
-`c01a4fb7c8a739b36cecc36095ca6ffb10d8ae9a` passes **101,488 / 102,956
-variants (98.5741%)**, with 1,414 failures, 54 timeouts, and zero skips,
-crashes, or harness errors. Compared with the previous completed full run it
-gains 134 passes and loses none. The corpus is
-`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`; the release worker SHA-256 is
-`ba0fdfb17adc61dd7224a2248ec53bd34811cb2dafeec8d433359bf75e9f6d8d`.
-The combined ShadowRealm and `isPrototypeOf` selection passes 144/144.
-
-- Full report, triage, comparison, focused report, and source patch:
-  `tools/test262/evidence/shadow-realm-2026-10-18/` (removed in the 2026-10-30 Test262 cleanup)
-- Compact result: `tools/test262/latest.json` (removed in the 2026-10-30 Test262 cleanup)
-- Source patch SHA-256:
-  `9d76d3383f55620dc96f6091e50fec53e1bc580746263677a3df590eb4322250`
-
-Runner settings remain unchanged at four workers, five seconds per variant,
-and no feature skips. The 98.5741% result is a local pinned-corpus measurement;
-the top remaining clusters are listed in the ShadowRealm continuation.
-
-## Historical Test262 full pass (2026-10-15)
-
-A complete pinned-corpus run at source `aec3df4458ae7866ecb1f0182b61d39dd95cd9ab`
-(clean tree) reproduces the archived 95% snapshot exactly: **98,010 / 102,956
-variants (95.1960%)**, 4,944 failures, 2 timeouts, zero skips, crashes, or
-harness errors. Corpus `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`; worker
-SHA-256 `dda45144ab2a946433f3819ad4041fd103451de1d17e051f910907761b29ec9d`
-(freshly rebuilt, identical to the snapshot digest). Four workers, five-second
-timeout, resumable journal with zero resumed files.
-
-- Full rows: `artifacts/test262/full-results-2026-10-15.json`
-- Journal: `artifacts/test262/full-2026-10-15.checkpoint.jsonl`
-- Dashboard: `artifacts/test262/full-2026-10-15.html`
-- Triage: `artifacts/test262/full-2026-10-15-triage.json` (top clusters:
-  `built-ins/RegExp` 1,102, `intl402/NumberFormat` 500, `staging/sm` 271)
-- Comparison vs `tools/test262/evidence/unicode-annex-builtins/full.json.gz`:
-  `artifacts/test262/full-2026-10-15-comparison.json` (0 new passes, 0 lost)
-- Timeout rerun: `artifacts/test262/timeout-rerun-2026-10-15.json` — both
-  timeouts are `staging/sm/regress/regress-1507322-deep-weakmap.js`
-  (script + strict) and time out again in isolation, so they are genuine
-  over-budget cases, not flakes.
-
-Reproduce with the command in [tools/test262/README.md](../../tools/test262/README.md),
-adding `--checkpoint artifacts/test262/full-2026-10-15.checkpoint.jsonl`.
-Runner unit tests passed at that revision (`python3 -m unittest discover -s tools/test262`;
-that Python runner has since been replaced by `cargo test -p napi-vm-test262-runner`),
-12 tests OK). This establishes a local Linux x64 re-measurement, not a new
-conformance claim: remaining failures are unchanged from the archived triage.
-
-## Conformance clusters after the baseline (2026-10-15)
-
-Focused selections against the same pinned corpus, each compared to its own
-earlier selection run (all comparisons report zero lost passes):
-
-- v-mode string tables (`unicodeSets` + `property-escapes`, 1,454 variants):
-  570 pass, 156 fail, 728 timeout — **+24 passes, 0 lost** vs `sel5`.
-  Includes a first-unit index for string alternatives and a linear
-  repetition-layer loop (the 12k-unit RGI positive run dropped from >120s
-  to ~70ms). Evidence: `artifacts/test262/sel9-2026-10-15.json`,
-  `sel9-2026-10-15-comparison.json`; strings-only `sel8` is 56/56.
-- Annex B accessors (`__lookupGetter__/__lookupSetter__/__defineGetter__/
-  __defineSetter__`, 108 variants): **108/108**. Lookup and define now run
-  through proxy traps with abrupt `ToPropertyKey` and spec-order callable
-  checks. Evidence: `artifacts/test262/objab-2026-10-15.json`.
-- `Object.prototype.toString` (82 variants): **82/82**. Tags resolve from
-  prototype properties with internal-slot-only builtin fallbacks, Arguments
-  exotic detection, proxy-target brands, and dedicated Map/Set iterator
-  prototypes. Full `built-ins/Object` + `built-ins/Promise` (8,260 variants):
-  8,137 pass — **+32 passes, 0 lost** on the Object paths.
-  Evidence: `artifacts/test262/objts-2026-10-15.json`,
-  `artifacts/test262/objp-2026-10-15.json`.
-- Float16: `Math/f16round` + DataView `getFloat16`/`setFloat16`
-  (100 variants): **100/100**. `Math.f16round` reuses DataView's
-  round-ties-even conversion after the `half` crate mis-rounded
-  just-above-midpoint subnormals. Evidence:
-  `artifacts/test262/f16b-2026-10-15.json`.
-- URI codecs (342/346, 4 guest-loop-bound timeouts) and Array
-  slice/splice length handling were measured in earlier selections the same
-  day; each landed with a maintained regression test and zero lost passes.
-
-A first re-baseline (`full-results-2026-10-15c.json`, 98,525 / 102,956)
-ran on an intermediate build whose repetition layers broke greedy
-backtracking order (120 lost passes, all since recovered and verified on
-selections). This 2026-10-15 measurement has since been superseded by later
-full-corpus reports. The current measured state and evidence are maintained in
-`tools/test262/latest.json` and `tools/test262/evidence/shadow-realm-2026-10-18/`
-(removed in the 2026-10-30 Test262 cleanup).
+Keep the raw records immutable when updating user-facing docs. A command in an
+old log can reference an older API or file layout. Reproduce present behavior
+through [development](../development.md), assess compatibility through
+[validation](../validation.md), and use the current
+[performance workflow](../performance.md) for a new measurement.

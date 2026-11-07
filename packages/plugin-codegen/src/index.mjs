@@ -120,12 +120,36 @@ function rustOutput(c) {
  return '// Generated. Do not edit.\n'+definitions.join('\n')+'\npub const INTERFACE_ID: &str = '+rustLiteral(c.descriptor.id)+';\npub const INTERFACE_VERSION: &str = '+rustLiteral(c.descriptor.version)+';\npub const CONTRACT_DIGEST: &str = '+rustLiteral(c.digest)+';\npub const CONTRACT_JSON: &str = '+rustLiteral(JSON.stringify(c))+';\n'+adapters;
 }
 function apiDocs(c) {
- const d=c.descriptor;const lines=['# '+d.id+' '+d.version,'','Contract digest: `'+c.digest+'`','',d.description??'Generated asynchronous, data-only interface. Exact version and digest matching is required.','','## Methods',''];
- for(const [name,m]of Object.entries(d.methods))lines.push('### `'+name+'`','', '`'+tsType({$ref:m.input})+' → Promise<'+tsType({$ref:m.output})+'>`','',m.description??'', 'Declared domain errors: '+(m.errors.length?m.errors.map(e=>'`'+e+'`').join(', '):'none'),'', 'Idempotent metadata: '+String(m.idempotent??false)+'. Automatic retries are disabled.','');
- lines.push('## Types','');for(const [name,schema]of Object.entries(c.schemas.$defs))lines.push('### `'+safeName(name)+'`','',schema.description??'','```ts','type '+safeName(name)+' = '+tsType(schema)+';','```','');
- lines.push('## Errors and events','');for(const [name,e]of Object.entries(d.errors))lines.push('- Domain error `'+name+'`: `'+tsType({$ref:e.data})+'`'+(e.description?' — '+e.description:''));for(const [name,e]of Object.entries(d.events))lines.push('- Event `'+name+'`: `'+tsType({$ref:e.payload})+'`'+(e.description?' — '+e.description:''));if(!Object.keys(d.errors).length&&!Object.keys(d.events).length)lines.push('No domain errors or events declared.');
- if(d.state)lines.push('','## State','', 'Snapshot contract `'+d.state.contract+'`, state version '+d.state.version+', data `'+tsType({$ref:d.state.schema})+'`.');
- lines.push('','Generated validators enforce schema constraints not expressible in static types. Optional fields preserve absence; null is accepted only where explicitly declared.','');return lines.join('\n');
+ const d=c.descriptor;
+ const lines=['# '+d.id,'','Generated contract reference. Regenerate this page with its TypeScript, Rust, and JSON artifacts; do not edit it by hand.','',
+  '| Identity | Value |','| --- | --- |','| Interface version | `'+d.version+'` |','| Contract digest | `'+c.digest+'` |','| Descriptor version | '+d.descriptorVersion+' |','',
+  d.description??'An asynchronous interface exchanging validated data-only messages.','',
+  'Host and plugin must agree on the exact interface version and digest. A package version or matching method name alone is insufficient.','','## Methods',''];
+ if(!Object.keys(d.methods).length)lines.push('No callable methods are declared.','');
+ for(const [name,m]of Object.entries(d.methods)) {
+  lines.push('### `'+name+'`','');
+  if(m.description)lines.push(m.description,'');
+  lines.push('| Boundary | Type |','| --- | --- |','| Input | `'+tsType({$ref:m.input})+'` |','| Resolved output | `'+tsType({$ref:m.output})+'` |','',
+   'The JavaScript client returns a promise; the Rust client is asynchronous. Declared domain errors: '+(m.errors.length?m.errors.map(e=>'`'+e+'`').join(', '):'none')+'.','',
+   'Idempotent metadata: `'+String(m.idempotent??false)+'`. Peers do not automatically retry calls.','');
+ }
+ lines.push('## Data types','');
+ for(const [name,schema]of Object.entries(c.schemas.$defs)) {
+  lines.push('### `'+safeName(name)+'`','');
+  if(schema.description)lines.push(schema.description,'');
+  lines.push('```typescript','type '+safeName(name)+' = '+tsType(schema)+';','```','');
+ }
+ lines.push('## Domain errors','');
+ if(!Object.keys(d.errors).length)lines.push('No domain errors are declared.','');
+ for(const [name,e]of Object.entries(d.errors))lines.push('### `'+name+'`','',e.description??'A declared application error.', '', 'Data type: `'+tsType({$ref:e.data})+'`.','');
+ lines.push('## Events','');
+ if(!Object.keys(d.events).length)lines.push('No events are declared.','');
+ for(const [name,e]of Object.entries(d.events))lines.push('### `'+name+'`','',e.description??'A contract-validated event.', '', 'Payload type: `'+tsType({$ref:e.payload})+'`.','');
+ if(d.state)lines.push('## State transfer','', '| Field | Value |','| --- | --- |','| Snapshot contract | `'+d.state.contract+'` |','| State version | '+d.state.version+' |','| Data type | `'+tsType({$ref:d.state.schema})+'` |','');
+ lines.push('## Runtime validation','',
+  'Generated validators enforce schema bounds and wire encodings in addition to static types. Optional fields preserve absence; null is accepted only where declared. Wire data rejects cycles, functions, non-finite numbers, and unpaired Unicode surrogates.', '',
+  'Use the generated client/registration helpers with the matching SDK. Cancellation and deadlines are cooperative and do not reverse completed application effects.','');
+ return lines.join('\n');
 }
 export async function generate(file,outDir,{check=false}={}){const c=await normalize(file);outDir=resolve(outDir);const stem=basename(file).replace(/\.interface\.json$/,'');const outputs={[stem+'.contract.json']:canonical(c)+'\n',[stem+'.ts']:tsOutput(c),[stem+'.rs']:rustOutput(c),[stem+'.md']:apiDocs(c)};let temporary;if(check)temporary=await mkdtemp(join(tmpdir(),'napi-vm-codegen-'));else await mkdir(outDir,{recursive:true});try{for(const [name,bytes]of Object.entries(outputs)){const path=join(outDir,name);if(check){await writeFile(join(temporary,name),bytes);let old;try{old=await readFile(path,'utf8')}catch{fail(path,'generated output missing')}if(old!==bytes)fail(path,'generated output stale');}else await writeFile(path,bytes);}}finally{if(temporary)await rm(temporary,{recursive:true,force:true});}return {id:c.descriptor.id,digest:c.digest,files:Object.keys(outputs).map(n=>join(outDir,n))};}
 export async function generatePluginMetadata(plugin, outDir, {check=false}={}) {

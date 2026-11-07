@@ -1,7 +1,30 @@
 # napi-vm-plugin-sdk
 
-Rust authoring SDK for trusted process plugins, including handler registries, call contexts, event subscriptions, cooperative cancellation and tracked resources. Importing the library does not launch a process.
+Implement trusted native process plugins in Rust. The SDK provides registries,
+call contexts, lifecycle, subscriptions, tracked resources, a process session,
+and an in-process harness. It does not embed Node, Bun, or the JavaScript VM.
 
-Use `Registry` to register contract implementations and the SDK session API to connect a native executable to its host. Contracts and errors are re-exported from the protocol crate. Plugin executables require no Node, Bun or npm at runtime.
+Generate a Rust contract adapter, implement its `Handler` trait, register handlers
+in a `Registry`, and construct a `Plugin`. Keep the process entry separate from
+business logic. The CLI's Rust scaffold supplies a complete buildable example.
 
-Plugins are ordinary OS processes with the launching user's privileges. Track asynchronous work with SDK resources before quiescing and snapshotting; unmanaged threads and external effects are not automatically reversible. Deadline expiry requests cancellation and does not prove that a side effect was undone.
+`CallContext` propagates cancellation, deadlines, host-service invocation,
+events, logs, and declared resources. Track background tasks/cleanup resources
+before quiescing and snapshotting. Cancellation is cooperative and does not
+roll back completed external effects. Lifecycle hooks cover initialization,
+quiesce, snapshot, and shutdown.
+
+Use `Harness` for contract/lifecycle tests without transport, then exercise a
+packaged executable under a real Rust host. Executables need no JavaScript
+runtime unless their own implementation adds that dependency. They run with the
+launching account's OS privileges; protocol authentication is not a sandbox.
+
+## Develop
+
+Run `cargo test -p napi-vm-plugin-sdk` from the repository root. The independent
+Rust scaffold includes synchronized licensed copies of this crate and its
+protocol dependency; update the originals and synchronize assets instead of
+editing copied files.
+
+[Authoring guide](https://github.com/nglmercer/napi-vm/blob/main/docs/trusted-plugins/authoring.md) ·
+[Testing guide](https://github.com/nglmercer/napi-vm/blob/main/docs/trusted-plugins/testing.md)

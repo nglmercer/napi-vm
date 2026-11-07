@@ -1,9 +1,36 @@
-# Trusted greeter
+# Your TypeScript process plugin
 
-This process has your account's OS privileges. The creator copies the five installed local SDK/tooling packages into `vendor/` and rewrites their dependencies to relative `file:` paths. No unpublished package is fetched. Install the published TypeScript/type dependencies explicitly with npm or Bun.
+This project implements a trusted greeter interface. It runs as an ordinary
+Node/Bun child process with your account's OS privileges.
 
-Bun-first: `bun install`, `bun run dev`, `bun run typecheck`, `bun test`, `bun run build`, `bun run test:artifact`.
+## Install, test, and build
 
-Node: `npm install`, `npm run typecheck`, `npm run build`, `npm run test:node`, `napi-vm-plugin test . --artifact --runtime node`.
+Run from this generated project:
 
-Production loading runs existing emitted JS. It never installs or builds. `napi-vm-plugin pack . --out ../greeter-package` creates a checksummed relocatable directory; dependency links stay inside the project and are materialized into the package. Loading never installs dependencies.
+```sh
+npm install
+npm run typecheck
+npm test
+npm run build
+npm run test:artifact
+```
+
+`src/plugin.ts` contains handlers; `src/main.ts` starts the SDK session.
+`src/generated/greeter.ts` and `contracts/greeter.contract.json` are generated
+from the source descriptor/schema under `contracts/`. Change those inputs and
+run explicit code generation when the interface changes.
+
+`plugin.json` selects the built JavaScript entry. `plugin.build.json` configures
+compilation, and `plugin.test.json` declares artifact scenarios. `npm run dev`
+is an explicit compiler/watch/reload operation, not normal production loading.
+
+## Package
+
+```sh
+npx napi-vm-plugin pack . --out ../packaged-plugin
+npx napi-vm-plugin validate ../packaged-plugin
+```
+
+Test the relocated package in the actual target runtime. Always shut down a host
+in `finally`; cooperative cancellation does not roll back external effects.
+See the [authoring guide](https://github.com/nglmercer/napi-vm/blob/main/docs/trusted-plugins/authoring.md).

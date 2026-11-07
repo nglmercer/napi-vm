@@ -1,17 +1,47 @@
 # @napi-vm/plugin-host
 
-Launch and supervise trusted JavaScript process plugins under Node or Bun.
+Launch built trusted JavaScript plugins under a declared Node or Bun runtime,
+provide contract-validated services, and own calls, events, reload, and teardown.
+For native executable plugins, use the Rust host instead.
 
-Requires Node.js 22 or newer. Package version: `0.1.0`; wire protocol: `1.0`.
+## Load an artifact
 
-Trusted process plugins execute with the launching user’s OS privileges. They are **not sandboxed**. The protocol token authenticates the session; it does not restrict filesystem, network or process access.
-
-```js
-import { TrustedPluginHost } from "@napi-vm/plugin-host";
-const host = new TrustedPluginHost();
-await host.shutdown();
+```javascript
+import { TrustedPluginHost, readManifest } from '@napi-vm/plugin-host';
+const resolved = await readManifest('/path/to/plugin');
+const contract = resolved.contracts.find(c => c.descriptor.id === 'your.interface');
+if (!contract) throw new Error('Required contract artifact missing');
+const host = new TrustedPluginHost({ contracts: [contract] });
+try {
+  // Register any services named in requiresHost before load().
+  const plugin = await host.load(resolved.path, { runtime: 'node' });
+  const client = plugin.client(contract);
+  // Invoke a method declared by your contract through client or plugin.invoke().
+} finally {
+  await host.shutdown();
+}
 ```
 
-The JavaScript host supports JavaScript plugins under Node and Bun, not native executable plugins. Production loads verify package integrity by default. The host owns its direct child only; process-tree containment requires OS facilities. Native executable loading is available through the independent Rust host crate.
+`registerService` installs host handlers. `load` options can supply configuration,
+context, runtime paths, environment additions, services, and an instance ID.
+Handles provide `invoke`, `client`, `subscribe`, `emit`, `reload`, and `unload`.
+Use the new handle returned by reload.
 
-See the [trusted plugin documentation](https://github.com/nglmercer/napi-vm/tree/main/docs/trusted-plugins) for contracts, lifecycle and platform limits. Licensed under MIT; see LICENSE.
+Production loading requires an inventory lock and validates the
+manifest/contract agreement and recorded bytes. It does not compile or install
+dependencies. `readManifest` can inspect a source tree without a lock;
+`host.load` requires explicit development mode for that tree. Inventory hashes
+do not establish publisher authenticity.
+
+Each child is an ordinary trusted OS process. Bound RPC work and select OS
+containment separately. Cancellation is cooperative; neither a rejected call
+nor a killed child rolls back completed side effects.
+
+## Develop
+
+From the repository root, run `npm run plugins:build:ts`, then
+`npm run plugins:test:node`. Use `npm run plugins:check` for the complete
+cross-language/package gate with its Node/Bun/Rust prerequisites.
+
+[Hosting guide](https://github.com/nglmercer/napi-vm/blob/main/docs/trusted-plugins/hosting.md) ·
+[Packaging guide](https://github.com/nglmercer/napi-vm/blob/main/docs/trusted-plugins/packaging.md)

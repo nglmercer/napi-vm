@@ -1,140 +1,92 @@
-# Test262 validation
+# Run Test262 against the engine
 
-Every Test262 result comes from the isolated worker `napi-vm-test262`, one fresh
-process per variant with a hard deadline. The Rust tool `test262`
-(`tools/test262-runner`) drives it. No Python or other interpreter is needed
-for running or comparing tests.
+The Rust runner executes the pinned ECMAScript suite through the isolated
+`napi-vm-test262` worker. Each variant runs in a fresh process with a deadline,
+so a worker crash or hang becomes a reported outcome rather than stopping the
+entire campaign.
 
-Pinned corpus: `corpus.lock.json`. Test selections and named groups:
-`groups.json`.
+## Build and fetch
 
-## Setup
+From the repository root:
 
 ```sh
 cargo build --release --locked --no-default-features --bin napi-vm-test262
 cargo build --release --locked -p napi-vm-test262-runner
-target/release/test262 fetch              # clones the pinned revision into .napi-vm/test262
+target/release/test262 fetch --profile reviewed-5112
 ```
 
-`fetch` is idempotent: it leaves a checkout at the locked revision untouched.
-Runs refuse a corpus at another revision or with modified files, so every
-report is reproducible.
+The runner defaults to `target/release/napi-vm-test262`; select another artifact
+with `--engine FILE`. If you build into a separate target directory, pass that
+worker explicitly rather than accidentally running an older default binary.
 
-## Reviewed correction profile
+`corpus.lock.json` pins the upstream revision. Fetch is idempotent for a matching
+checkout. Runs validate corpus revision and modifications. Named selections
+are in `groups.json` rather than duplicated shell scripts.
 
-`--profile reviewed-5112` selects a separate corpus built from the original
-pin plus the corrected `block-decl-func-skip-arguments.js` from the reviewed,
-unmerged [Test262 PR #5112](https://github.com/tc39/test262/pull/5112).
-The original checkout and default corpus remain unchanged. This profile is
-an explicitly corrected Test262 corpus, not the unmodified upstream pin.
+## Choose a corpus profile
+
+`original` is the default pinned upstream corpus, left unchanged.
+`reviewed-5112` uses a separate checkout with one explicitly identified correction
+from upstream PR #5112. Profile metadata records the base revision, overlay blob,
+patch hash, and provenance. A reviewed-profile result is not a claim that the
+unmodified original corpus passed.
+
+The [retained reviewed run](evidence/reviewed-5112-full-2026-11-06/README.md)
+contains 102,992 passing variants with zero skips/non-passing outcomes.
+[Project validation](../../docs/validation.md) explains its scope.
+
+## Run a validation loop
 
 ```sh
-target/release/test262 fetch --profile reviewed-5112
+target/release/test262 run --profile reviewed-5112 --group smoke --jobs 2 \
+  --timeout 10 --output artifacts/test262-smoke.json
+target/release/test262 retest artifacts/test262-smoke.json \
+  --output artifacts/test262-retest.json
+target/release/test262 compare artifacts/test262-smoke.json \
+  artifacts/test262-retest.json --subset
+```
+
+The smoke group is a fixed cross-section. Retest runs only the base report's
+non-passing variants and reuses its worker count, timeout, profile, and skip
+list unless explicitly overridden. A subset comparison checks only the
+retested selection; it cannot prove no other variant regressed.
+
+For the complete selected-corpus gate:
+
+```sh
 target/release/test262 run --profile reviewed-5112 --jobs 2 --timeout 10 \
-  --output reviewed-5112-full.json --checkpoint reviewed-5112.checkpoint
+  --output artifacts/test262-full.json \
+  --checkpoint artifacts/test262-full.checkpoint
 ```
 
-Ten seconds is the existing CI timeout. Reports and checkpoints identify
-the profile and correction provenance. Keep corrected-profile results
-separate from original-corpus results; a corrected-profile full pass does
-not establish a full pass of the contradictory original corpus.
-The manual Test262 CI workflow exposes the same profile choice and labels
-its job and artifacts with that choice. Scheduled CI retains `original`.
+To resume, use the same configuration/checkpoint with `--resume`. A changed
+worker or run configuration is rejected. Whole runs can take tens of minutes;
+the CLI reports progress. The runner defaults to two workers and five seconds
+per variant; specify the ten-second CI deadline explicitly when reproducing
+the retained reviewed run.
 
-## Validation loop
+## Inspect and compare
 
-Use the cheapest step that answers the question.
+`summary REPORT` prints grouped counts and non-passing outcomes; `--json FILE`
+writes its summary. `compare BASELINE CURRENT` reports gains, losses, changes,
+additions, and removals, exiting with 1 when a previously passing variant loses
+its pass. Use `--allow-config-change` only after inspecting why configuration
+differs; it does not make mismatched results equivalent.
 
-| Step | Command | Time on the 2-core reference host |
-| --- | --- | --- |
-| Smoke: fixed cross-section, 1,014 variants | `target/release/test262 run --profile reviewed-5112 --group smoke --timeout 10 --output smoke.json` | about 16 s |
-| Retest: only the non-passing tests of a report | `target/release/test262 retest smoke.json --output retest.json` | under 1 s for one test |
-| Subset check: lost passes among retested variants | `target/release/test262 compare smoke.json retest.json --subset` | instant |
-| Gate: the complete selected corpus | `target/release/test262 run --profile reviewed-5112 --timeout 10 --output full.json` | about 25 min |
+Reports identify revision/corpus provenance, engine SHA-256, jobs, timeout,
+counts, and per-variant results. Outcome categories distinguish failure,
+timeout, crash, skip, and harness error. Check exact variant-set equality when
+claiming a complete no-regression result.
 
-`compare` exits with 1 when a variant that passed in the baseline no longer
-passes. Before committing an engine change, run the smoke group and retest its
-failures. The complete run remains the only gate for regressions in tests that
-passed before: the smoke group and retest cannot show them.
+## Focus or profile a workload
 
-## Commands
+| Command | Use |
+| --- | --- |
+| `run --path P --group G` | Select paths/groups; options can be repeated where supported |
+| `time PATH --variant script\|strict\|module` | Time individual variants; uncapped unless a timeout is supplied |
+| `request TEST --variant ... --output FILE` | Produce the exact worker input for a variant |
+| `bench FILE --harness --repeat N` | Time snippet files through the worker |
 
-```text
-test262 fetch [--profile original|reviewed-5112] [--corpus DIR]
-test262 run [--path P]... [--group G]... [--skip-feature F]... [--jobs N]
-            [--timeout S] [--output FILE] [--checkpoint FILE [--resume]]
-test262 retest BASE [--output FILE] [--jobs N] [--timeout S]
-test262 compare BASELINE CURRENT [--subset] [--output FILE] [--allow-config-change]
-test262 summary REPORT [--limit N] [--show N] [--slowest N] [--json FILE]
-test262 time PATH... [--timeout S] [--variant script|strict|module]
-test262 request TEST [--variant script|strict|module] [--output FILE]
-test262 bench FILE... [--harness] [--repeat N] [--timeout S]
-```
-
-- `run` defaults: `--jobs 2`, `--timeout 5` seconds per variant (the scheduled
-  workflow uses 10), the whole corpus when no `--path`/`--group` is given. It
-  prints progress with an estimate every 1,000 files.
-- `--checkpoint FILE` journals each finished file in order. After an
-  interruption, rerun the same command with `--resume`; a changed configuration
-  or worker binary is rejected.
-- `--profile` selects the corpus for corpus-reading commands. The default is
-  `original`; use `reviewed-5112` explicitly for the corrected corpus.
-- `retest` reuses the base report's profile, worker count, timeout and skip list.
-  Explicit job/timeout overrides change the comparison configuration.
-- `compare --subset` compares only the variants present in the second report.
-  `retest` output is checked this way against the report it came from.
-- `summary` prints counts, non-passing tests grouped by area (most first),
-  and every non-passing variant with its engine message. `--json` writes the
-  grouped counts for CI artifacts.
-- `time` runs without a cap unless `--timeout` is given, and prints one line per
-  variant.
-- `request` writes the exact worker input for one variant; pipe it to the
-  worker to profile a single test.
-- `bench` times snippet files through the worker, optionally with the harness.
-
-Report format: `domain`, `suite`, `revision`, `corpus_provenance`,
-`engine_sha256`, `worker_jobs`,
-`timeout_seconds`, `counts`, `pass_percentage`, and one `results` row per
-test variant with `test`, `variant`, `status`, `seconds`, and the engine
-report. Statuses: `pass`, `fail`, `skip`, `timeout`, `crash`, `harness_error`.
-
-## Reference numbers
-
-- Reviewed profile `reviewed-5112-full-2026-11-06`: **102,992 / 102,992 pass**;
-  zero failures, skips, timeouts, crashes or harness errors at two workers
-  and ten seconds. This is the user-selected one-file correction profile,
-  with the original corpus preserved. Evidence:
-  [`evidence/reviewed-5112-full-2026-11-06/`](evidence/reviewed-5112-full-2026-11-06/).
-- Full run `full-interpreter-overhead-2026-10-30`: 102,975 / 102,992 pass;
-  1 failure; 16 timeouts; no crashes or harness errors. Evidence:
-  [`evidence/full-interpreter-overhead-2026-10-30/`](evidence/full-interpreter-overhead-2026-10-30/).
-- Previous full run `full-new-revision-2026-10-27`: 102,957 pass. Evidence:
-  [`evidence/full-new-revision-2026-10-27/`](evidence/full-new-revision-2026-10-27/).
-- Failure: `annexB/language/function-code/block-decl-func-skip-arguments.js`
-  contradicts `staging/sm/lexical-environment/block-scoped-functions-annex-b-arguments.js`
-  in the same revision ([upstream issue 5113](https://github.com/tc39/test262/issues/5113)).
-  Both cannot pass.
-- The archived five-second baseline timed out on the 16
-  `staging/sm/Date/dst-offset-caching-*` variants. All 16 pass in the recorded
-  reviewed-profile run at the ten-second CI deadline.
-
-Where the time goes in a full run: process startup is about 10 ms per variant
-(about 1,100 seconds of worker time across 103,000 variants). The Unicode
-property-escape tests, `built-ins/RegExp/property-escapes`, are 1,226 variants
-taking about 1.1 seconds each: 1,309 of the 2,897 worker-seconds. The runner
-itself is not the bottleneck; the engine's startup and that workload are.
-
-## Files
-
-- `corpus.lock.json`: repository and revision of the pinned corpus.
-- `groups.json`: named selections (`smoke` plus focused groups such as
-  `realms` and `shared-memory`). Add a group here rather than in scripts.
-- `evidence/`: archived reports of the full runs referenced above.
-- Table generators for the Unicode, CLDR and IANA data the engine commits (number
-  patterns, time zones, emoji sets, locale data) are in
-  [`tools/generators`](../generators/README.md). They are separate from
-  Test262 validation; `rgi-check` in that crate reads the corpus's emoji property
-  lists. Consult that guide for each generator's input, network and validation requirements.
-
-Experiment-by-experiment history of the earlier Python-based campaign is in
-[`docs/test262-history.md`](../../docs/test262-history.md).
+Run `target/release/test262 help` for the complete argument list. Data-table
+generation is separate from conformance execution; see
+[the generators](../generators/README.md).

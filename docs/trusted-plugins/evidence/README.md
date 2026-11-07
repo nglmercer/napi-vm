@@ -1,17 +1,22 @@
-# Evidence provenance and reproduction
+# Trusted-plugin evidence index
 
-The six original JSON reports in this directory are inherited observations from the `feat/portable-plugin-hosts` implementation commit `d15888f` (base `238cf7c9de8e68601e13c401401c466a1feddf24`). Their original documentation dates the captures to 2026-10-01 on Linux x64 GNU with Node 24.19.0, Bun 1.4.2 and Rust/Cargo 1.98.1. The reports do not all contain a capture timestamp or source commit; artifact hashes, when present, identify tested bytes rather than proving a current checkout. These files have not been regenerated during documentation cleanup.
+These files are retained outputs of earlier validation and measurement runs.
+They describe their recorded artifacts/configurations; they are not live CI
+status or proof that a newly built package passed.
 
-| Report | Reproduction | Meaning |
-|---|---|---|
-| `interop-results.json` | `npm run plugins:test:interop` | Actual host/runtime routes, callbacks, events and state migration observations |
-| `package-results.json` | `npm run plugins:test:packaged` and `npm run plugins:test:consumers` | Relocation, inventory and independent consumer checks |
-| `benchmark-node.json`, `benchmark-bun.json` | [Performance commands](../performance.md) | Single-machine descriptive measurements, including workload and build-mode limitations |
-| `benchmark-rust-host.json` | `npm run plugins:bench:rust` | Counter workload observations; debug executable timings do not predict optimized performance |
-| `legacy-validation-report.json` | Existing root release build/tests | Historical regression diagnosis, including failed/blocked tests and no independently compiled baseline native binary |
+| Record | Boundary |
+| --- | --- |
+| [interop-results.json](interop-results.json) | Host/plugin interoperability scenarios |
+| [package-results.json](package-results.json) | Packaged/relocated artifact scenarios |
+| [compatibility-summary.json](compatibility-summary.json) | Recorded runtime/target availability |
+| [legacy-validation-report.json](legacy-validation-report.json) | Earlier plugin validation capture |
+| [benchmark-node.json](benchmark-node.json), [benchmark-bun.json](benchmark-bun.json) | Process-plugin measurements under selected JS runtimes |
+| [benchmark-rust-host.json](benchmark-rust-host.json) | Rust-host measurements |
 
-Build with `npm ci --ignore-scripts` and `npm run plugins:build` first. Required process runners fail if Node/Bun/native fixtures are missing. Fresh outputs are written under `artifacts/trusted-plugins/`; do not overwrite committed observations without recording the source revision, environment, commands and failures. See [testing](../testing.md) and [performance](../performance.md).
+Inspect each JSON record's commands, versions, units, samples, and limitations
+before comparing results. Buildable, distributed, and actually tested targets
+are different statuses. The SDK event-queue optimization has separate
+[repeated raw evidence](../../../bench/baselines/performance-review-2026-11-06/plugin-event-queue.json).
 
-Transient command logs and dated work diaries are intentionally excluded. These retained reports are not fresh validation of later changes, proof of remote CI success, or runtime evidence for macOS/Windows/other architectures. Remote CI status must be verified independently.
-
-`compatibility-summary.json` records fresh local reference checks on the source revision it names. Its skips, build preconditions and publication limits are explicit; it is separate from the six historical reports above.
+Reproduce current checks using [testing](../testing.md), and use
+[performance methodology](../../performance.md) before accepting a speed claim.

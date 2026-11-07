@@ -1,58 +1,83 @@
-# example.counter 1.0.0
+# example.counter
 
-Contract digest: `a6cc7c1e4c4ceedaaa1dde5626c052d5320c1b26ee21c63e3d581d4d972fc90f`
+Generated contract reference. Regenerate this page with its TypeScript, Rust, and JSON artifacts; do not edit it by hand.
 
-Generated asynchronous, data-only interface. Exact version and digest matching is required.
+| Identity | Value |
+| --- | --- |
+| Interface version | `1.0.0` |
+| Contract digest | `a6cc7c1e4c4ceedaaa1dde5626c052d5320c1b26ee21c63e3d581d4d972fc90f` |
+| Descriptor version | 1 |
+
+An asynchronous interface exchanging validated data-only messages.
+
+Host and plugin must agree on the exact interface version and digest. A package version or matching method name alone is insufficient.
 
 ## Methods
 
 ### `add`
 
-`AddInput → Promise<Count>`
+| Boundary | Type |
+| --- | --- |
+| Input | `AddInput` |
+| Resolved output | `Count` |
 
+The JavaScript client returns a promise; the Rust client is asynchronous. Declared domain errors: none.
 
-Declared domain errors: none
-
-Idempotent metadata: false. Automatic retries are disabled.
+Idempotent metadata: `false`. Peers do not automatically retry calls.
 
 ### `get`
 
-`Empty → Promise<Count>`
+| Boundary | Type |
+| --- | --- |
+| Input | `Empty` |
+| Resolved output | `Count` |
 
+The JavaScript client returns a promise; the Rust client is asynchronous. Declared domain errors: none.
 
-Declared domain errors: none
+Idempotent metadata: `true`. Peers do not automatically retry calls.
 
-Idempotent metadata: true. Automatic retries are disabled.
-
-## Types
+## Data types
 
 ### `AddInput`
 
-
-```ts
+```typescript
 type AddInput = { "amount": number };
 ```
 
 ### `Count`
 
-
-```ts
+```typescript
 type Count = { "count": string };
 ```
 
 ### `Empty`
 
-
-```ts
+```typescript
 type Empty = {  };
 ```
 
-## Errors and events
+## Domain errors
 
-- Event `changed`: `Count`
+No domain errors are declared.
 
-## State
+## Events
 
-Snapshot contract `example.counter.state`, state version 1, data `Count`.
+### `changed`
 
-Generated validators enforce schema constraints not expressible in static types. Optional fields preserve absence; null is accepted only where explicitly declared.
+A contract-validated event.
+
+Payload type: `Count`.
+
+## State transfer
+
+| Field | Value |
+| --- | --- |
+| Snapshot contract | `example.counter.state` |
+| State version | 1 |
+| Data type | `Count` |
+
+## Runtime validation
+
+Generated validators enforce schema bounds and wire encodings in addition to static types. Optional fields preserve absence; null is accepted only where declared. Wire data rejects cycles, functions, non-finite numbers, and unpaired Unicode surrogates.
+
+Use the generated client/registration helpers with the matching SDK. Cancellation and deadlines are cooperative and do not reverse completed application effects.

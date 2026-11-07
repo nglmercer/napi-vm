@@ -1,25 +1,31 @@
 # napi-vm-plugin-host
 
-Native Tokio host for independent trusted process plugins. It launches declared native executables directly, or declared JavaScript plugins through Node/Bun. Native executable loading does not invoke JavaScript tooling.
+Launch and manage trusted JavaScript or native executable plugins from a Rust
+application. The host owns process startup, authentication, exact contract
+agreement, invocation, events, reload/state transfer, logs, and shutdown.
+It is independent of the JavaScript VM.
 
-```no_run
-use napi_vm_plugin_host::{Host, LoadOptions};
+`Host` registers host services and loads a manifest with `LoadOptions`.
+`PluginHandle` exposes invocation, metadata, status/history, events, logs, and
+shutdown. JavaScript entries require a declared supported Node/Bun runtime;
+native entries must match the actual target and executable requirements.
+Normal load does not install dependencies or compile the plugin.
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let host = Host::default();
-    let plugin = host.load("./my-plugin/plugin.json", LoadOptions::default()).await?;
-    // Resolve contracts with plugin.contract(id), then invoke a declared method.
-    plugin.shutdown().await?;
-    host.shutdown().await?;
-    Ok(())
-}
-```
+Always shut down the host on error and success paths. Reload drains/quiesces,
+validates state, and returns a replacement handle. Deadlines and cancellation
+are cooperative; a failed call or process exit cannot undo external effects.
+Plugin processes execute with their OS account's authority.
 
-Register host callback implementations through `Host::register` before loading plugins that require them. `LoadOptions` carries runtime configuration, environment values and service connections; keep credentials out of package manifests and snapshots. Production loading verifies package integrity by default.
+Package inventory verification checks bytes relative to a supplied lock; it is
+not publisher authentication. Use trusted artifact delivery and OS containment
+as required by the application.
 
-The host owns and reaps its direct child only. Arbitrary descendant containment requires OS-specific facilities. **Trusted plugins are not sandboxed** and inherit the launcher's OS privileges. Keep the `Host` alive while using handles; handles do not extend its ownership. After host drop, handle shutdown is a no-op. Shutdown is explicit; dropping the host is emergency cleanup, not a substitute for awaiting shutdown. Reload preserves instance handles while replacing sessions. Cancellation is cooperative, with no automatic retry or transactional rollback of external effects.
+## Develop
 
-`services` provides explicitly opted-in native sidecar supervision with checksum/target preflight and loopback HTTP readiness. Sidecar output is drained and discarded; plugin retained output is bounded and known bootstrap, service-header and caller environment values and URL credentials are redacted, including known credentials in returned plugin errors. Avoid placing secrets in plugin-controlled errors or snapshots.
+Run `cargo test -p napi-vm-plugin-host` at the repository root. The
+`trusted-host-rust` example package provides command-line invocation and a
+JSONL development adapter. Cross-language and relocated-package checks belong
+to the full plugin gate.
 
-Startup handshake errors include the selected `runtime`, bounded and redacted `logs`, and `droppedLogBytes` in `RpcError.data`. Output pipes are drained before returning the error so CLI callers can report the plugin's final startup diagnostics.
+[Hosting guide](https://github.com/nglmercer/napi-vm/blob/main/docs/trusted-plugins/hosting.md) ·
+[Packaging guide](https://github.com/nglmercer/napi-vm/blob/main/docs/trusted-plugins/packaging.md)

@@ -1,15 +1,38 @@
 # @napi-vm/plugin-protocol
 
-Framed JSON protocol and strict contracts for trusted process plugins.
+Data validation and RPC transport primitives for trusted process plugins.
+This package does not execute guest JavaScript or launch a plugin.
 
-Requires Node.js 22 or newer. Package version: `0.1.0`; wire protocol: `1.0`.
+## Use it
 
-Trusted process plugins execute with the launching user’s OS privileges. They are **not sandboxed**. The protocol token authenticates the session; it does not restrict filesystem, network or process access.
-
-```js
-import { PluginError, validate } from "@napi-vm/plugin-protocol";
+```javascript
+import { wireValue, PluginError, FrameDecoder, encodeFrame } from '@napi-vm/plugin-protocol';
+const message = wireValue({ name: 'Ana', count: 2 });
+const encoded = encodeFrame(message);
+const decoded = new FrameDecoder().push(encoded);
 ```
 
-Exports framing, request correlation, contract validation and structured errors. Cancellation is cooperative and does not undo external side effects.
+`Contract`, `validate`, and `assertContract` describe and check normalized
+interfaces. `RpcPeer` manages bounded asynchronous requests, cancellation,
+deadlines, and notifications. `PluginError` carries stable protocol codes and
+schema-validated domain-error data. Prefer the SDK and host packages for ordinary
+application authoring rather than implementing startup/lifecycle manually.
 
-See the [trusted plugin documentation](https://github.com/nglmercer/napi-vm/tree/main/docs/trusted-plugins) for contracts, lifecycle and platform limits. Licensed under MIT; see LICENSE.
+Wire values are finite, data-only JSON with valid Unicode-scalar strings.
+Functions, getters, sparse arrays, cycles, symbols, arbitrary class instances,
+and non-finite numbers are rejected. Use declared encodings for 64-bit integers,
+bytes, and UTC datetimes. This wire format differs from the VM's UTF-16 value
+boundary.
+
+## Develop
+
+From the repository root:
+
+```sh
+npm run plugins:build:ts
+npm run plugins:test:node
+npm run plugins:typecheck
+```
+
+[Protocol guide](https://github.com/nglmercer/napi-vm/blob/main/docs/trusted-plugins/protocol.md) ·
+[Contract guide](https://github.com/nglmercer/napi-vm/blob/main/docs/trusted-plugins/contracts.md)

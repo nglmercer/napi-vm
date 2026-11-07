@@ -1,15 +1,53 @@
 # @napi-vm/plugin-sdk
 
-Define and run trusted JavaScript process plugins under Node or Bun.
+Author trusted JavaScript/TypeScript plugins that run in Node or Bun and expose
+validated asynchronous contracts. Importing the SDK does not launch a child
+process. The process entry calls `serve`; business logic can be tested separately.
 
-Requires Node.js 22 or newer. Package version: `0.1.0`; wire protocol: `1.0`.
+## Define handlers
 
-Trusted process plugins execute with the launching user’s OS privileges. They are **not sandboxed**. The protocol token authenticates the session; it does not restrict filesystem, network or process access.
+Generate a contract adapter, then implement its typed handler interface:
 
-```js
-import { definePlugin, createHarness } from "@napi-vm/plugin-sdk";
+```typescript
+import { register } from './generated/greeter.js';
+export const plugin = register({
+  async greet({ name }, context) {
+    context.throwIfCancelled();
+    return { message: `Hola, ${name}` };
+  }
+});
 ```
 
-Define handlers against a validated contract. `createHarness` runs an in-process test harness; `serve` starts the process endpoint for a host. Lifecycle hooks support initialization, quiescence, state snapshots and shutdown.
+In the entry module, call `serve(plugin, { metadata })` using metadata consistent
+with `plugin.json`. `definePlugin` is the lower-level contract/handler API;
+`PluginRegistry` groups multiple interfaces.
 
-See the [trusted plugin documentation](https://github.com/nglmercer/napi-vm/tree/main/docs/trusted-plugins) for contracts, lifecycle and platform limits. Licensed under MIT; see LICENSE.
+## Test and manage lifecycle
+
+`createHarness(plugin, options)` runs validated calls and lifecycle in-process.
+Use `harness.invoke`/`client`, `emitHostEvent`, `snapshot`, and `shutdown` to
+exercise the application. Always shut down in `finally`. Harness success does
+not prove child transport, artifact relocation, or runtime discovery.
+
+Call contexts expose cancellation/deadline information, host service invocation,
+events, subscriptions, logging, and tracked `spawnTask` work. Lifecycle hooks
+include initialize, quiesce, snapshot, and shutdown. Track background work before
+quiescing; deadline expiry cannot undo external effects already completed.
+
+Subscriber queues retain their enqueue byte sizes. Listeners should still treat
+payloads as application data and avoid relying on cross-listener mutation.
+Queue count/byte limits and listener failures are handled independently.
+
+## Develop
+
+```sh
+npm run plugins:build:ts
+npm run plugins:test:node
+npm run plugins:test:bun
+```
+
+Run these at the repository root. Plugins have the launching account's OS
+privileges; RPC authentication is not a sandbox.
+
+[Authoring guide](https://github.com/nglmercer/napi-vm/blob/main/docs/trusted-plugins/authoring.md) ·
+[Testing guide](https://github.com/nglmercer/napi-vm/blob/main/docs/trusted-plugins/testing.md)

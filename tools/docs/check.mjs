@@ -13,8 +13,7 @@ if (args.some((arg) => arg !== '--json')) {
 }
 const listed = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: root, encoding: 'utf8' });
 const files = [...new Set(listed.split('\0'))].filter((name) => name.endsWith('.md') &&
-  !name.startsWith('vendor/') && !name.includes('/node_modules/') &&
-  !name.startsWith('packages/plugin-cli/templates/')).sort();
+  !name.startsWith('vendor/') && !name.includes('/node_modules/')).sort();
 const cache = new Map();
 function document(name) {
   if (cache.has(name)) return cache.get(name);
@@ -45,12 +44,13 @@ function document(name) {
 }
 const errors = [];
 let checked = 0;
-const inventory = { current: [], historical: [], generated: [], evidence: [] };
+const inventory = { guides: [], packages: [], templates: [], generated: [], evidence: [] };
 for (const name of files) {
   if (!fs.existsSync(path.join(root, name))) continue; // A tracked deletion is handled by Git.
-  const kind = name.includes('/evidence/') || name.startsWith('docs/implementation-evidence/') ? 'evidence' :
+  const kind = name.startsWith('packages/plugin-cli/templates/') ? 'templates' :
+    name.includes('/evidence/') || name.startsWith('docs/implementation-evidence/') ? 'evidence' :
     name.includes('/generated/') ? 'generated' :
-    name.startsWith('bench/history/') || /^docs\/(?:.*-checkpoint|audit-.*|.*-validation|next-steps|next-implementations|runtime-plan|native-addon-loader-plan|node-addon-runtime-plan|scheduler-benchmarks|pr7-verification|test262-history)\.md$/.test(name) ? 'historical' : 'current';
+    /^(?:packages|crates)\//.test(name) ? 'packages' : 'guides';
   inventory[kind].push(name);
   const { text } = document(name);
   const searchable = text.replace(/`+[^`\n]*`+/g, '');
@@ -78,7 +78,7 @@ for (const name of files) {
   }
 }
 const report = { documents: Object.values(inventory).reduce((n, rows) => n + rows.length, 0), localLinksChecked: checked, inventory, errors,
-  exclusions: ['Vendored documentation', 'Copied CLI template documentation'],
+  exclusions: ['Third-party vendor/ documentation', 'node_modules/ documentation'],
   scope: 'Local Markdown targets and heading anchors; external URLs and fenced examples are not fetched or executed.' };
 if (args.includes('--json')) console.log(JSON.stringify(report, null, 2));
 else {

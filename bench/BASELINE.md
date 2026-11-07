@@ -1,40 +1,37 @@
-# Local performance baseline (2026-11-06)
+# Retained performance captures
 
-The subsequent [rquickjs comparison and optimization review](../docs/performance-review.md)
-contains paired before/after measurements for property writes, typed-array
-exports and LSP positions. The broader capture below predates those changes;
-its dated values remain a baseline rather than current speed claims.
+Use [the measurement guide](../docs/performance.md) for current commands,
+boundaries, interpretation, and limitations. Captures are dated observations;
+raw samples and build provenance identify what was measured.
 
-The [machine-readable capture](baselines/2026-11-06/baseline.json) contains 41
-representative workloads: 16 Criterion VM/frontend/plugin cases, 4 Node binding
-cases, 2 language-service cases, 10 Rust scheduler cases, 4 Node async scheduler
-cases, and 5 trusted-process Node plugin cases. It records the samples, medians,
-median absolute deviations, environment, feature selections, binary hashes and
-git state. See [performance methodology](../docs/performance.md) for commands,
-interpretation, and coverage limits.
+## Broad baseline: November 6, 2026
 
-| Workload | Median | Sample meaning |
-| --- | ---: | --- |
-| Lexer, large source | 4.84 ms/iteration | Median of 10 Criterion batch averages |
-| Fresh AST arithmetic | 9.25 ms/iteration | Median of 10 Criterion batch averages, including parse, VM setup and collection |
-| Warm bytecode monomorphic property access | 0.551 ms/iteration | Median of 10 Criterion batch averages |
-| Node binding arithmetic | 8.88 ms/call | Median of 20 calls, fresh VM and warmed source-template cache |
-| Language-service completion | 0.534 ms/call | Median of 20 calls on a cached document |
-| Rust scheduler, 1,000 VM timers | 6.18 ms/batch | Median of three independent run medians, each from 25 batches |
-| Persistent Node async, trivial call | 0.0104 ms/call | Median of three independent run medians, each from 500 calls |
-| Trusted Node plugin, 64-byte echo | 0.368 ms/call | Median of three independent run medians, each from 10 calls |
+[baseline.json](baselines/2026-11-06/baseline.json) contains 41 workloads:
+16 Criterion frontend/VM/plugin cases, four Node binding cases, two language
+service cases, ten Rust scheduler cases, four Node async cases, and five trusted
+Node plugin cases. It predates the subsequent optimizations.
 
-These numbers are measurements on an AMD BC-250 with background activity and
-no CPU isolation; they are not a performance guarantee or a comparison against
-an optimized implementation. Criterion measures batch averages; scheduler and
-trusted-process samples above are run-level medians, not individual latencies.
-The tracked JSON includes individual Node binding samples and the derived
-Criterion samples; full Criterion source samples, run logs, and the explicitly
-loaded addon are in the local ignored `artifacts/performance/baseline-2026-11-06-verified/raw/`
-directory. The snapshot was taken from a dirty checkout at commit
-`6866a18ba5b624e12a960556125b8f101db6b5ba`; the user's pre-existing
-`packages/plugin-protocol/src/index.ts` edit was included in the emitted trusted
-plugin code. The complete start/end status and input hashes are in the JSON.
+The capture identifies a dirty source tree, toolchains/features, addon and
+executable digests, per-workload units, samples, medians, and MAD. Some scheduler
+and process-plugin entries contain medians of independent run summaries rather
+than individual call latencies. Do not compare those units interchangeably.
 
-The [previous baseline](history/BASELINE-legacy.md) is retained as historical
-material and uses a different methodology.
+## Optimization and rquickjs review
+
+[performance-review-2026-11-06/](baselines/performance-review-2026-11-06/) retains:
+
+| Record | Meaning |
+| --- | --- |
+| [rquickjs-before.json](baselines/performance-review-2026-11-06/rquickjs-before.json), [rquickjs-after.json](baselines/performance-review-2026-11-06/rquickjs-after.json) | Ten shared workloads, three modes, both engines |
+| [rquickjs-interleaved.json](baselines/performance-review-2026-11-06/rquickjs-interleaved.json) | Repeated property/class comparisons |
+| [criterion-paired-summary.json](baselines/performance-review-2026-11-06/criterion-paired-summary.json) | AST/bytecode optimization and controls |
+| [typed-array-paired-summary.json](baselines/performance-review-2026-11-06/typed-array-paired-summary.json) | Native subview-copy optimization |
+| [lsp-interleaved.json](baselines/performance-review-2026-11-06/lsp-interleaved.json) | Isolated position conversion |
+| [plugin-event-queue.json](baselines/performance-review-2026-11-06/plugin-event-queue.json) | SDK event delivery, mutation regressions, and repeated samples |
+| [validation.json](baselines/performance-review-2026-11-06/validation.json), [followup-audit.json](baselines/performance-review-2026-11-06/followup-audit.json) | Correctness, source equivalence, and artifact/log provenance |
+
+Measurements continued into November 7; the directory date is the review's
+start date. Ignored `artifacts/performance/` directories can hold local logs and
+immutable binaries, but a clean checkout must rebuild rather than depend on
+those paths. Historical source hashes in retained reports continue to identify
+the original inputs even when documentation is subsequently rewritten.

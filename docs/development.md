@@ -1,117 +1,90 @@
-# Development
+# Develop and maintain the project
 
-## Prerequisites and ownership
+Run commands from the repository root. Install Rust, a native compiler/linker,
+Node.js 22+, npm, and Bun at the version in `.bun-version`. Browser builds also
+need wasm-pack and `wasm32-unknown-unknown`; Zed extension builds need
+`wasm32-wasip2`. The workflows pin CI toolchains and platform dependencies.
 
-Use Node.js 22+, npm, Rust, and Bun for the JavaScript regression suite.
-CI pins Rust in [ci.yml](../.github/workflows/ci.yml); check that workflow
-when reproducing CI. Browser builds also require `wasm-pack`, and Zed
-builds require the `wasm32-wasip2` target. Build native code before testing
-or benchmarking through Node so an old `.node` artifact cannot mask changes.
+## Install and build
 
 ```sh
 npm ci --ignore-scripts
-npm run build
+npm run build:all
 ```
 
-The [architecture guide](crate-architecture.md) explains engine/runtime
-boundaries. [Generated declarations](../index.d.ts) are build outputs;
-edit their Rust or wrapper source and regenerate them through the build scripts.
+`build:all` builds the addon once and emits CommonJS, ESM, and declaration files
+from the same export set. `build:debug` is useful for local native debugging.
+Cargo defaults to the facade workspace member; use `--workspace` or a package
+selection when changing other members. Core/runtime path dependencies also
+have their own tests.
 
-## Choose the smallest relevant check
+## Select verification for the change
 
-| Change | Commands |
+| Changed surface | Commands |
 | --- | --- |
-| Core engine | `cargo test -p napi-vm-core --lib`; relevant Rust integration tests |
-| Root Rust facade | `npm run test:rust` |
-| Node bridge | `npm run build`, `npm run test:node`, targeted Bun tests |
-| Full JavaScript suite | `npm test` (includes Node and WASM test invocations) |
-| Rust style and lints | `npm run lint:rust` |
-| Main TypeScript sources | `npm run lint:ts` |
-| Playground | `npm run test:wasm` |
-| Generated root bindings | `npm run check:generated` |
-| Test262 runner/profile | `cargo test -p napi-vm-test262-runner`; [profile smoke](../tools/test262/README.md) |
-| Trusted plugin SDKs | [Plugin development](trusted-plugins/development.md) |
-| Documentation | `node tools/docs/check.mjs` |
+| Core engine / facade Rust | `npm run test:rust`; `cargo test --profile ci --locked --no-default-features` |
+| Native Node boundary | Rebuild addon; `npm run test:node` |
+| Guest language behavior | `bun test ./tests --path-ignore-patterns '**/{node,wasm}/**'`; appropriate [Test262 gates](../tools/test262/README.md) |
+| WASM / shared engine behavior | `npm run test:wasm` |
+| LSP and live metadata | `npm run lsp:test`; `npm run runtime:smoke` |
+| Trusted plugin stack | `npm run plugins:check` |
+| Types and lint | `npm run lint`; `npm run lint:playground` after generating WASM |
+| Documentation | `node tools/docs/check.mjs`; `node tools/docs/verify-examples.mjs` |
 
-`lint:ts` uses the root TypeScript configuration. The playground has its own
-configuration and generated WASM imports; `test:wasm` builds those imports,
-type-checks the playground and runs the WASM regression suite. A successful
-Node build does not validate WASM-specific code.
+`npm test` runs the main Bun suite, Node boundary tests, and existing WASM
+regressions. `test:wasm` builds the browser package and typechecks it before
+running its tests; merely invoking the last suite can otherwise use stale or
+missing generated artifacts. A green narrow suite does not prove all language
+or host boundaries passed.
 
-The full local gate is:
+## Regenerate owned outputs
 
 ```sh
-npm run lint
-npm run check:generated
-npm run build
-npm test
-npm run test:rust
-npm run test:wasm
+npm run build:all
+npm run plugins:generate
+node packages/plugin-cli/scripts/sync-assets.mjs
+npm run plugins:check-generated
+npm run plugins:check-assets
 ```
 
-CI also tests the supported Node matrix, extracted crate configurations,
-and optional runtime/platform configurations. The workflows are the
-executable source for matrix values and toolchain versions.
+The first command owns `index.js`, `index.mjs`, and `index.d.ts`. Plugin
+generation owns contract JSON, TypeScript/Rust bindings, Markdown references,
+and example metadata. Asset synchronization owns copied scaffold contracts and
+independent Rust SDK sources. Commit changed generated files with their input
+or generator change. Do not edit scaffold vendor copies by hand.
 
-## Test262
+Unicode/CLDR/timezone generation is an explicit maintenance operation with
+pinned data provenance; use [the generator guide](../tools/generators/README.md).
 
-Build the isolated worker and runner, then iterate with a focused group or
-`retest`. Complete-corpus reports remain necessary for broad engine changes.
-Always identify the corpus profile, engine digest, worker count, timeout,
-and skipped features. The reviewed one-file correction profile and original
-upstream corpus are distinct validation targets.
+## Use the build profiles intentionally
 
-[Commands and evidence](../tools/test262/README.md) ·
-[completed reviewed-profile gate](../tools/test262/evidence/reviewed-5112-full-2026-11-06/README.md)
+`release` uses thin LTO and one codegen unit for shipped artifacts. `ci` inherits
+debug behavior while disabling debug data/incremental compilation. `ci-optimized`
+keeps release optimization without whole-program LTO and emits line tables.
+Tests of coroutine stack switching need the intended optimized target/profile;
+an unrelated debug result does not establish platform release behavior.
 
-## Measure before optimizing
+The CI setup action selects supported fast linkers and Cargo caches. See
+[build tooling](../tools/ci/README.md) before reproducing a target-specific
+failure. Native loading and teardown require platform runs; cross-compiling an
+artifact proves only that it built.
 
-Use [the performance workflow](performance.md) to build first, capture a
-baseline with raw samples and provenance, then compare a changed binary on
-the same host. Avoid competing builds or benchmarks while measuring. Keep
-cold startup, parsing, warm execution, host bridges, scheduling and plugin
-transport results separate. Correctness gates accompany a measured improvement.
+## Maintain the docs
 
-Blaze may be used for iteration when it supports a configuration. It failed
-on ICU provider types in the recorded Test262 build; the verified worker
-was built with Cargo. The project's pinned toolchain and CI remain the gate.
+Each topic has one owning guide linked from [the documentation index](README.md).
+Package READMEs should stand alone for package consumers. Mark self-contained
+checkout snippets with `javascript verify` or `rust verify`; the example runner
+executes those exact blocks. Generated contract prose belongs to the generator.
+Keep plans in issues or Git history instead of adding another current-status
+page that will drift from code.
 
-## Source map
+`npm run docs:check`, `npm run docs:test`, and `npm run docs:test:rust` are the
+package-script entry points. Build the addon and `plugins:build:ts` before
+executing examples. The Rust option also compiles/runs the marked Rust blocks;
+the default example check runs the marked Node blocks. See
+[documentation tooling](../tools/docs/README.md) for prerequisites and scope.
 
-| Path | Responsibility |
-| --- | --- |
-| `crates/napi-vm-core/src/` | Lexer, parser, bytecode VM, builtins, values, heap, language service |
-| `crates/napi-vm-runtime/src/` | Optional capabilities, permissions, runtime adapters and CLI |
-| `src/bindings/`, `src/wasm.rs` | Node and browser boundaries |
-| `src/lsp/`, `src/bin/napi-vm-lsp.rs` | Native language server |
-| `src/plugin_host.rs`, `plugins/` | Legacy guest-plugin hosting |
-| `crates/napi-vm-plugin-*`, `packages/plugin-*` | Trusted process protocols, hosts, SDKs, tools |
-| `runtime/`, `lsp/` | Opt-in live metadata sessions and compatibility tooling |
-| `playground/`, `zed-extension/` | Browser/editor integration |
-| `tests/`, `examples/` | Executable behavior and embedding examples |
-| `tools/test262-runner/`, `tools/generators/` | Validation runner and committed data generation |
-| `bench/`, `benches/` | Performance workloads and baseline tooling |
-
-## Stackful coroutine changes
-
-Generators run on the caller thread with a separate stack. For changes to
-coroutine lifecycle or ownership, run the targeted generator stress tests.
-A Linux ThreadSanitizer configuration is:
-
-```sh
-rustup component add rust-src --toolchain nightly
-RUSTFLAGS="-Zsanitizer=thread" cargo +nightly test -Zbuild-std \
-  --release --no-default-features --test generator_stress \
-  --target x86_64-unknown-linux-gnu -- --test-threads=1
-```
-
-A historical sanitizer result is not a result for a new patch. Record the
-actual toolchain, platform and command with new evidence.
-
-## Documentation maintenance
-
-Use [the documentation index](README.md) for canonical pages. Keep current
-instructions separate from dated checkpoints and immutable reports. Update
-links and relevant examples when behavior changes; check Markdown links with
-`node tools/docs/check.mjs`. Generated contracts and scaffold copies have
-separate generator checks and should not be manually rewritten.
+Before submitting, check generated outputs, relevant tests, formatting, and
+`git diff --check`. Preserve raw validation/benchmark evidence when documenting
+results. A source revision, platform matrix definition, and successful execution
+report are different pieces of evidence.

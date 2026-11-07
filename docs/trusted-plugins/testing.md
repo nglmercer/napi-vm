@@ -1,50 +1,72 @@
-# Verification
+# Test trusted plugins and interoperability
 
-Shared schema vectors live under fixtures/trusted-plugins/contracts. Node/Bun protocol tests and native protocol tests consume the same semantics. Unit and harness tests are distinct from process interoperability.
+Use three levels of verification: business logic, contract/lifecycle harness,
+and actual packaged child-process execution. Each proves a different boundary.
 
-`plugins:test:interop` requires Node, Bun and built Rust fixtures. It executes the same compiled TS artifact under all six host/runtime combinations and Rust native under Rust, and checks TS rejection of native launch. Missing required tools fail; they are not silently skipped.
+## Build the checkout fixtures
 
-After staging those fixtures, `npm run plugins:test:rust-interop` explicitly selects
-the otherwise ignored Rust integration test. It reads `fixtures.json` and supplies
-`NAPI_VM_GREETER_JS_MANIFEST`, `NAPI_VM_GREETER_RUST_MANIFEST`,
-`NAPI_VM_COUNTER_JS_MANIFEST`, and `NAPI_VM_COUNTER_RUST_MANIFEST` to
-`cargo test -p napi-vm-plugin-conformance --test interop -- --ignored`.
-The dedicated native CI runs both entrypoints. No compiled fixture means a failure.
-
-For the Node unit runner, set `NAPI_VM_BUN` to the installed Bun executable to
-include the Bun missing-dependency/no-install regression. Without that explicit
-path, this one optional cross-runtime unit case is reported skipped; the required
-interop matrix still fails if Bun is missing. `NAPI_VM_NODE` can select an explicit
-Node executable when running the same unit suite under Bun.
-
-## Independent consumer and package checks
-
-Run these permanent checks after `npm ci --ignore-scripts` and `npm run plugins:build`:
+Install Node.js 22+, Bun, Rust, and workspace dependencies, then run:
 
 ```sh
-npm run plugins:check-assets
-npm run plugins:test:packaged
-npm run plugins:test:consumers
-npm run plugins:test:rust-consumer
-npm run plugins:test:cargo-package
+npm run plugins:generate
+npm run plugins:build
 ```
 
-`plugins:check-assets` invokes the CLI asset synchronizer with `--check`; it detects drift in the Rust template's vendored source and bindings without rewriting files.
+JavaScript/TypeScript examples and SDK packages are emitted before tests load
+them. Rust fixtures build through Cargo. Generated outputs are committed, but
+generated JavaScript build products are not a substitute for building the
+current source.
 
-`plugins:test:packaged` verifies independently relocated plugin artifacts and rejects a modified entry before launch. Its structured outputs are written under `artifacts/trusted-plugins/`.
+## Run the full plugin gate
 
-`plugins:test:consumers` packs all five npm packages and installs their tarballs in an external application without workspace links. It generates bindings and performs strict TypeScript consumer checks, then exercises templates created by the packed CLI. Required public build dependencies must be installed or available through the configured npm registry/cache; this entire runner is not an offline-install guarantee.
+```sh
+npm run plugins:check
+```
 
-`plugins:test:rust-consumer` builds an external application against extracted protocol/SDK/host crate archives and relocated native fixtures. The consumer exercises callbacks, events, reload, snapshot and awaited shutdown with an empty runtime `PATH`, demonstrating that the native execution phase needs no Node, Bun or Cargo. Preparing and building this check still requires Node, Cargo and archive tooling. This runner also performs the same real Cargo archive verification as `plugins:test:cargo-package`, so CI does not repeat that packaging step separately.
+This checks generation/assets, builds both language stacks, typechecks/lints,
+runs Node/Bun/Rust suites, exercises interop, and verifies packaged consumers.
+Use the individual scripts to reproduce a failure:
 
-`plugins:test:cargo-package` creates and verifies real Cargo package archives for the three public crates. Because sibling packages are unpublished, verification uses registry patches pointing only to previously extracted sibling archives. It does not prove crates.io publication or registry resolution without those patches. The `napi-vm-plugin-conformance` crate has `publish = false`: it is repository test infrastructure, not a public consumer dependency.
+| Command | Boundary |
+| --- | --- |
+| `plugins:test:node`, `plugins:test:bun` | Protocol, SDK, host, generator, CLI, and example JS suites |
+| `plugins:test:rust` | Rust protocol/SDK/host/conformance and example crates |
+| `plugins:test:interop`, `plugins:test:rust-interop` | Real processes across supported host/plugin language combinations |
+| `plugins:test:packaged` | Relocation, integrity rejection, independent executable artifacts |
+| `plugins:test:consumers`, `plugins:test:rust-consumer` | External consumer paths |
+| `plugins:check-generated`, `plugins:check-assets` | Deterministic contracts, metadata, scaffold copies |
+| `plugins:test:cargo-package` | Rust package construction/consumer prerequisites |
 
-## CI execution scope
+Scripts set up their own fixtures where implemented. Inspect their prerequisites
+before running on a machine without Bun, Cargo, native compilers, or platform
+runtime dependencies. An explicitly skipped unavailable runtime is different
+from a passing test of that runtime.
 
-Native CI is configured for Linux x64, macOS arm64 and Windows x64, with smaller native runtime jobs for Linux arm64, Windows arm64 and macOS x64. Read the workflow for each job's selected checks; not every packaging check runs on every platform. These definitions are not evidence of successful remote execution. Current-source results must come from an actual local run or a verified CI run.
+## Test a plugin you authored
 
-Existing root VM tests, native bindings, browser/Wasm, LSP and capability-based host tests remain their own jobs. See [implementation boundaries](implementation-status.md) and [evidence provenance](evidence/README.md) for scope and historical observations. Benchmark data is descriptive, never a fabricated or hardcoded pass criterion.
+Run scaffold unit/harness tests, build the selected format, then run
+`napi-vm-plugin test DIRECTORY --artifact`. `plugin.test.json` supplies explicit
+scenarios and expected data. Native artifacts require `--host-executable`.
+When testing a distributed directory, include its scenario file explicitly;
+packaging does not include `plugin.test.json` automatically. Testing a built
+source project without a lock packages it temporarily before execution.
+Test cancellation, deadlines, invalid inputs/results, listener errors, bounded
+queues, missing services, reload/state incompatibility, crashes, and shutdown.
 
-The packed CLI development signal smoke runs on POSIX. On Windows, `child.kill('SIGINT')` terminates the process instead of injecting a console interrupt, so this signal path is explicitly reported as not tested. Windows host shutdown and artifact invocation gates still run.
+For state migration, compare the externally observed contract before and after
+replacement; do not claim migration works merely because a snapshot parses.
+For native dependencies, run on the target platform/ABI rather than inferring
+runtime support from cross-compilation alone.
 
-Before running root VM Node-API tests that build the isolated napi-rs fixture offline, populate its locked dependencies with `cargo fetch --locked --manifest-path tests/fixtures/node-api/napi-rs/Cargo.toml`, as the existing runtime matrix does.
+## Recorded evidence and measurements
+
+The [evidence index](evidence/README.md) links retained interoperability,
+package, compatibility, and benchmark captures. These records identify a past
+run; regenerate them when behavior or artifacts change. The workflow
+[trusted-plugins.yml](../../.github/workflows/trusted-plugins.yml) defines the
+current CI matrix.
+
+`npm run plugins:bench` and `npm run plugins:bench:rust` measure process-plugin
+paths. The [general performance guide](../performance.md) also links the
+isolated event-queue optimization. In-process harness delivery, TCP calls,
+startup, and native artifact throughput are separate units of work.

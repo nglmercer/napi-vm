@@ -1,47 +1,57 @@
-# Table generators
+# Regenerate language data tables
 
-Rust generators for the Unicode, CLDR and IANA tables committed under
-`crates/napi-vm-core`. They are not run by the normal build. Some download
-pinned upstream data; others require input files supplied locally. Review
-regenerated output and source hashes before updating the committed tables.
+These Rust tools maintain committed Unicode, CLDR, and IANA tables used by the
+core. Normal builds consume the committed data and do not run the generators.
+Some tools fetch pinned network inputs; others require files you provide.
 
-| Binary | Reads | Writes | Check after running |
-| --- | --- | --- | --- |
-| `tz-data` | IANA tzdata 2025b tarball (downloaded into a cache directory) | `builtins/intl/cldr/timezone-names.rs` | the generator's own primary-identifier self-check |
-| `number-data` | cldr-numbers-full, cldr-units-full and cldr-core 48.0.0 npm tarballs (renamed `numbers-48.tgz`, `units-48.tgz`, `core-48.tgz`) | `builtins/intl/cldr/number-pattern-*`, `LICENSE-CLDR.txt` | archive SHA-256 values in `number-pattern-sources.json` |
-| `emoji-tables` | `emoji-test.txt` (keeps entries up to Emoji 17.0) | `regex/emoji_tables.rs` | pinned entry counts per table |
-| `locale-data` | CLDR 48 release files over HTTPS | `builtins/intl/data.rs` | SHA-256 of every fetched file, listed in the output |
-| `rgi-check` | `emoji-test.txt`, `emoji-data.txt` (17.0), and the corpus `test/built-ins/RegExp/property-escapes/generated/strings` directory | nothing; exits nonzero on any mismatch | 0 mismatches on the pinned corpus |
+## Select a generator
 
-## Regenerating
+| Binary | Inputs | Output |
+| --- | --- | --- |
+| `tz-data` | Pinned IANA tzdata archive, cached after download | Primary timezone/link/name table |
+| `number-data` | CLDR 48.0.0 `numbers-48.tgz`, `units-48.tgz`, `core-48.tgz` | Compressed number/unit patterns, index, provenance, license |
+| `emoji-tables` | `emoji-test.txt`, keeping entries through Emoji 17.0 | Committed regex emoji tables |
+| `locale-data` | Pinned CLDR release files fetched over HTTPS | Locale/display data with source hashes |
+| `rgi-check` | Emoji test/data files and Test262 property-string lists | Validation only; no generated output |
+
+Consult each binary's source header for the exact pinned release and expected
+input names. Updating a data release requires reviewing code/tests and
+provenance together; do not substitute newer files under an old release label.
+
+## Build and invoke
+
+From the repository root:
 
 ```sh
-cargo build --release -p napi-vm-generators
-target/release/tz-data .napi-vm/tzdata crates/napi-vm-core/src/builtins/intl/cldr
-target/release/number-data <dir-with-npm-tarballs> crates/napi-vm-core/src/builtins/intl/cldr
-target/release/emoji-tables <emoji-test.txt> crates/napi-vm-core/src/regex/emoji_tables.rs
-target/release/locale-data crates/napi-vm-core/src/builtins/intl/data.rs
-target/release/rgi-check <emoji-test.txt> <emoji-data.txt> .napi-vm/test262/test/built-ins/RegExp/property-escapes/generated/strings
+cargo build --release --locked -p napi-vm-generators
 ```
 
-`emoji-tables` and `locale-data` run `rustfmt --edition 2024` on their output,
-because the committed files are rustfmt output. `number-data` compresses each
-locale record with zlib-rs at level 9 and `mtime` 0; the committed blob is
-byte-identical to that output.
+The invocation shapes are:
 
-## Interpreting the emoji check
+```text
+target/release/tz-data CACHE_DIR OUTPUT_DIR
+target/release/number-data ARCHIVE_DIR OUTPUT_DIR
+target/release/emoji-tables EMOJI_TEST_FILE OUTPUT_RS
+target/release/locale-data OUTPUT_RS
+target/release/rgi-check EMOJI_TEST_FILE EMOJI_DATA_FILE TEST262_STRINGS_DIR
+```
 
-`rgi-check` replaces the Python checker, whose set definitions were wrong: its
-`Basic_Emoji` omitted the skin-tone modifiers and the other text-default
-singles, and its `RGI_Emoji` left out the basic pairs. The Rust checker defines
-`Basic_Emoji` as the fully-qualified single code points plus every text-default
-Emoji (Emoji minus Emoji_Presentation minus Emoji_Component) followed by U+FE0F,
-and `RGI_Emoji` as the union of the RGI families and that basic set. The singles
-still come from `emoji-test.txt`, the same file the tables are built from, so
-the check compares the tables against test262 but does not independently verify
-the emoji-test singles.
+Core output owners are `builtins/intl/cldr/`, `builtins/intl/data.rs`, and
+`regex/emoji_tables.rs`. Generate into a reviewable location or preserve the
+prior bytes before replacing committed outputs. Keep the CLDR license and
+source manifests with the generated data.
 
-## Unit tests
+## Verify generated data
 
-`cargo test -p napi-vm-generators` covers the JSON string encoding, the tar
-reader, and gzip/SHA-256 helpers.
+Run `cargo test -p napi-vm-generators`, inspect source/archive hashes and table
+counts, then run the affected builtin/regex and Test262 checks. Emoji and locale
+tools format their Rust output. Number patterns use deterministic compression;
+changes in compressor/settings are part of the byte-level output provenance.
+
+`rgi-check` compares generated definitions with the selected corpus. Its singles
+derive from the same emoji input as generation, so it is not an independent
+verification of that input file. Separate data provenance from successful
+comparison against a consumer corpus.
+
+See [development](../../docs/development.md) and
+[conformance execution](../test262/README.md).

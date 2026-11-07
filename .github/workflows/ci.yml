@@ -62,6 +62,9 @@ jobs:
       - name: tsc --noEmit
         run: npm run lint:ts
 
+      - name: Check documentation links
+        run: npm run docs:check
+
   # ── Generated bindings ────────────────────────────────────────────────
   #
   # `index.js`, `index.mjs` and `index.d.ts` are build outputs that are also
@@ -145,6 +148,12 @@ jobs:
             echo "::error::Generated bindings are stale. Run 'npm run build:all' and commit the result."
             exit 1
           fi
+
+      - name: Build documentation plugin fixtures
+        run: npm run plugins:build:ts
+
+      - name: Run documentation examples
+        run: npm run docs:test:rust
 
   # ── Linux x86_64 ──────────────────────────────────────────────────────
   linux-x64:

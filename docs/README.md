@@ -1,55 +1,55 @@
 # Documentation
 
-Start with [getting started](getting-started.md) for a local build and working
-examples. Use [the API reference](api.md) for the Node boundary and
-[crate architecture](crate-architecture.md) for Rust ownership and features.
+Use these guides to build an integration, understand its boundaries, and verify
+it against the current implementation. Commands assume the repository root
+unless a guide states otherwise.
 
-## Current guides
+## Start running code
 
-| Topic | Guide |
+1. [Build and run your first program](getting-started.md).
+2. Choose [Node.js](api.md), [Rust](rust.md), or
+   [WebAssembly](../playground/README.md).
+3. Learn [module registration and loading](modules.md) and
+   [async execution and clocks](async.md).
+4. Select [runtime capabilities](runtime.md), or use the [CLI](cli.md).
+
+## Build an application
+
+| Task | Guide |
 | --- | --- |
-| Setup, callbacks, modules, async use | [Getting started](getting-started.md) |
-| `Vm`, `AsyncSession`, language service, sessions | [API](api.md) |
-| Contributor commands and source layout | [Development](development.md) |
-| Measured baseline and optimization workflow | [Performance](performance.md) |
-| Engine/runtime/binding boundaries and UTF-16 | [Crate architecture](crate-architecture.md) |
-| Resource limits and host privileges | [Safety](safety.md) |
-| Explicit runtime capabilities and permissions | [Optional runtime](optional-runtime.md) |
-| Clocks, event turns, async ownership | [Event loop](event-loop.md) |
-| CommonJS and native addon backends | [Native addons](native-addons.md) |
-| Sandboxed VM plugins | [Plugins](plugins.md) |
-| Independent trusted process SDKs | [Trusted plugins](trusted-plugins/README.md) |
-| LSP, Zed, playground and live metadata | [Editor integration](editor.md) |
-| Locator, transport and runtime messages | [Runtime protocol](runtime-protocol.md) |
-| Runtime ownership, caches and collection | [Runtime improvements](runtime-improvements.md) |
-| Implemented surfaces and boundaries | [Implementation map](roadmap.md) |
-| Test262 commands and corpus profiles | [Test262](../tools/test262/README.md) |
+| Set limits and decide what code to trust | [Safety](safety.md) |
+| Host guest plugins in VMs | [VM plugins](plugins.md) |
+| Author or host independent child-process plugins | [Trusted plugins](trusted-plugins/README.md) |
+| Load CommonJS and native addons | [Modules and native code](modules.md) |
+| Connect an editor to static and live metadata | [Editor integration](editor.md) |
+| Implement the editor metadata connection | [Runtime metadata protocol](runtime-protocol.md) |
 
-Package READMEs cover their own builds and consumers. Generated TypeScript
-signatures are in [index.d.ts](../index.d.ts); implementation and executable
-tests take precedence over prose when diagnosing drift.
+## Work on the project
 
-## Evidence and history
+| Task | Guide |
+| --- | --- |
+| Locate implementation owners and feature boundaries | [Architecture](architecture.md) |
+| Build, test, lint, and regenerate outputs | [Development](development.md) |
+| Interpret conformance and compatibility results | [Validation](validation.md) |
+| Measure throughput and compare engines | [Performance](performance.md) |
+| Generate Unicode, locale, and timezone tables | [Table generators](../tools/generators/README.md) |
+| Run isolated Test262 workers | [Test262 runner](../tools/test262/README.md) |
+| Maintain native build infrastructure | [Build tools](../tools/ci/README.md) |
 
-[The completed reviewed-profile Test262 report](../tools/test262/evidence/reviewed-5112-full-2026-11-06/README.md)
-records the selected full pass. [Test262 progress](test262-full-pass-progress.md)
-keeps the original-corpus results and measured experiments separate.
-[Historical Test262 campaigns](test262-history.md) explain older measurements.
+Package READMEs explain each independently consumed package. The
+[trusted-plugin contract guide](trusted-plugins/contracts.md) links generated
+wire references and their source definitions.
 
-Dated audits, implementation checkpoints, old plans, benchmark snapshots,
-and evidence directories are historical records. Their status notices link
-to current guides. Retain their original revision, platform, limitations,
-and measured results when citing them; an old successful run is not proof
-that a new binary or platform passed.
+## Documentation ownership
 
-Generated contracts, copied scaffolds, vendored documentation, and immutable
-validation reports are maintained by their owning generators or projects.
-Documentation cleanup does not rewrite those records.
+The current guides are written from public types, implementation, executable
+examples, and recorded results. Old work plans and implementation checkpoints
+have been removed; Git history retains them. Raw reports remain under
+`bench/baselines/`, `tools/test262/evidence/`, and `docs/implementation-evidence/`.
+They describe the recorded build, not an automatic claim about a later build.
 
-## Maintain these docs
-
-Update the owning guide with behavior changes and link it from this index.
-Keep API signatures in generated bindings, build commands in package scripts
-or workflows, and raw measurement data in the relevant evidence directory.
-Avoid copying long API or compatibility inventories into multiple guides.
-Run the documentation checker described in [development](development.md).
+When behavior changes, update its owning guide and runnable examples. Regenerate
+generated references from their source. Run `node tools/docs/check.mjs` and
+`node tools/docs/verify-examples.mjs` before submitting documentation changes.
+Use its `--rust` option for Rust blocks; [the tooling guide](../tools/docs/README.md)
+explains build prerequisites and the CI checks.

@@ -1,45 +1,64 @@
-# example.greeter 1.0.0
+# example.greeter
 
-Contract digest: `ca8aa1104513e5324f7aaaca699f3c4160f4b35ba934b4c1fc3d236aa77c9824`
+Generated contract reference. Regenerate this page with its TypeScript, Rust, and JSON artifacts; do not edit it by hand.
 
-Generated asynchronous, data-only interface. Exact version and digest matching is required.
+| Identity | Value |
+| --- | --- |
+| Interface version | `1.0.0` |
+| Contract digest | `ca8aa1104513e5324f7aaaca699f3c4160f4b35ba934b4c1fc3d236aa77c9824` |
+| Descriptor version | 1 |
+
+An asynchronous interface exchanging validated data-only messages.
+
+Host and plugin must agree on the exact interface version and digest. A package version or matching method name alone is insufficient.
 
 ## Methods
 
 ### `greet`
 
-`GreetInput → Promise<GreetOutput>`
+| Boundary | Type |
+| --- | --- |
+| Input | `GreetInput` |
+| Resolved output | `GreetOutput` |
 
+The JavaScript client returns a promise; the Rust client is asynchronous. Declared domain errors: `INVALID_NAME`.
 
-Declared domain errors: `INVALID_NAME`
+Idempotent metadata: `true`. Peers do not automatically retry calls.
 
-Idempotent metadata: true. Automatic retries are disabled.
-
-## Types
+## Data types
 
 ### `GreetInput`
 
-
-```ts
+```typescript
 type GreetInput = { "name": string };
 ```
 
 ### `GreetOutput`
 
-
-```ts
+```typescript
 type GreetOutput = { "message": string };
 ```
 
 ### `InvalidNameData`
 
-
-```ts
+```typescript
 type InvalidNameData = { "reason": string };
 ```
 
-## Errors and events
+## Domain errors
 
-- Domain error `INVALID_NAME`: `InvalidNameData`
+### `INVALID_NAME`
 
-Generated validators enforce schema constraints not expressible in static types. Optional fields preserve absence; null is accepted only where explicitly declared.
+A declared application error.
+
+Data type: `InvalidNameData`.
+
+## Events
+
+No events are declared.
+
+## Runtime validation
+
+Generated validators enforce schema bounds and wire encodings in addition to static types. Optional fields preserve absence; null is accepted only where declared. Wire data rejects cycles, functions, non-finite numbers, and unpaired Unicode surrogates.
+
+Use the generated client/registration helpers with the matching SDK. Cancellation and deadlines are cooperative and do not reverse completed application effects.

@@ -1,38 +1,54 @@
-# app.configuration 1.0.0
+# app.configuration
 
-Contract digest: `db06a9046edec0cff9afe336ca7bea7011133ac037f87dff207f652d2b47113f`
+Generated contract reference. Regenerate this page with its TypeScript, Rust, and JSON artifacts; do not edit it by hand.
 
-Generated asynchronous, data-only interface. Exact version and digest matching is required.
+| Identity | Value |
+| --- | --- |
+| Interface version | `1.0.0` |
+| Contract digest | `db06a9046edec0cff9afe336ca7bea7011133ac037f87dff207f652d2b47113f` |
+| Descriptor version | 1 |
+
+An asynchronous interface exchanging validated data-only messages.
+
+Host and plugin must agree on the exact interface version and digest. A package version or matching method name alone is insufficient.
 
 ## Methods
 
 ### `get`
 
-`GetInput → Promise<GetOutput>`
+| Boundary | Type |
+| --- | --- |
+| Input | `GetInput` |
+| Resolved output | `GetOutput` |
 
+The JavaScript client returns a promise; the Rust client is asynchronous. Declared domain errors: none.
 
-Declared domain errors: none
+Idempotent metadata: `false`. Peers do not automatically retry calls.
 
-Idempotent metadata: false. Automatic retries are disabled.
-
-## Types
+## Data types
 
 ### `GetInput`
 
-
-```ts
+```typescript
 type GetInput = { "key": string };
 ```
 
 ### `GetOutput`
 
-
-```ts
+```typescript
 type GetOutput = { "value": string };
 ```
 
-## Errors and events
+## Domain errors
 
-No domain errors or events declared.
+No domain errors are declared.
 
-Generated validators enforce schema constraints not expressible in static types. Optional fields preserve absence; null is accepted only where explicitly declared.
+## Events
+
+No events are declared.
+
+## Runtime validation
+
+Generated validators enforce schema bounds and wire encodings in addition to static types. Optional fields preserve absence; null is accepted only where declared. Wire data rejects cycles, functions, non-finite numbers, and unpaired Unicode surrogates.
+
+Use the generated client/registration helpers with the matching SDK. Cancellation and deadlines are cooperative and do not reverse completed application effects.

@@ -1,9 +1,37 @@
-# Trusted greeter
+# Your JavaScript process plugin
 
-This process has your account's OS privileges. The creator copies the five installed local SDK/tooling packages into `vendor/` and rewrites their dependencies to relative `file:` paths. No unpublished package is fetched. Install the published TypeScript/type dependencies explicitly with npm or Bun.
+This project implements a trusted greeter interface using JavaScript and
+checked-in contract metadata. It runs as a normal Node/Bun child process with
+the launching account's privileges.
 
-Bun-first: `bun install`, `bun run dev`, `bun run typecheck`, `bun test`, `bun run build`, `bun run test:artifact`.
+## Install and verify
 
-Node: `npm install`, `npm run typecheck`, `npm run build`, `npm run test:node`, `napi-vm-plugin test . --artifact --runtime node`.
+Run from this generated project:
 
-Production loading runs existing emitted JS. It never installs or builds. `napi-vm-plugin pack . --out ../greeter-package` creates a checksummed relocatable directory; dependency links stay inside the project and are materialized into the package. Loading never installs dependencies.
+```sh
+npm install
+npm run typecheck
+npm test
+npm run build
+npm run test:artifact
+```
+
+Keep business handlers in `src/plugin.js` and process setup in `src/main.js`.
+`src/generated/greeter.js` carries the matching contract; source definitions live
+under `contracts/`. Regenerate contract artifacts explicitly when changing the
+interface. JavaScript runtime validation remains required even with typechecking.
+
+`plugin.json` declares the built entry and runtimes. `plugin.build.json` controls
+compilation; `plugin.test.json` defines artifact scenarios. `npm run dev` selects
+an explicit build/watch/reload path.
+
+## Distribute
+
+```sh
+npx napi-vm-plugin pack . --out ../packaged-plugin
+npx napi-vm-plugin validate ../packaged-plugin
+```
+
+Package hashes identify bytes, not publisher trust. Test the relocated artifact
+and shut down host/plugin resources. See the
+[packaging guide](https://github.com/nglmercer/napi-vm/blob/main/docs/trusted-plugins/packaging.md).

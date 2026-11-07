@@ -1,104 +1,68 @@
 # napi-vm
 
-An embeddable JavaScript engine written in Rust, with Node.js bindings,
-WebAssembly support, an optional runtime, and editor tooling.
+Run JavaScript inside a Rust engine that you can embed in Node.js, Rust, or
+WebAssembly. The project provides its own parser, interpreter, bytecode engine,
+ECMAScript builtins, module system, and language service.
 
-The engine owns parsing, bytecode execution, ECMAScript builtins, modules,
-and guest values. Hosts explicitly provide filesystem, network, timers, and
-other capabilities. Native addons and trusted process plugins run with host
-privileges; see [safety](docs/safety.md) before choosing an integration.
+Choose which host functions and runtime capabilities guest code can use.
+Filesystem access, networking, timers, and native code are explicit integration
+choices. Read the [trust and resource model](docs/safety.md) before running
+untrusted programs.
 
-## Start with Node.js
+## Try it from a checkout
 
-<a id="quick-start"></a>
-
-From a checkout, install dependencies and build the local addon:
+You need Node.js 22+, npm, Rust, and a native compiler/linker. Run these commands
+at the repository root:
 
 ```sh
 npm ci --ignore-scripts
 npm run build
 ```
 
-```javascript
+```javascript verify
 const { Vm } = require('./index.js');
-
 const vm = new Vm();
-vm.run('let answer = 40 + 2;');
-console.log(vm.run('answer;')); // 42, returned as a string
-vm.dispose();
+try {
+  vm.setGlobal('price', 21);
+  const result = vm.run('price * 2');
+  console.log(result); // "42": run() returns formatted text.
+  require('node:assert/strict').equal(result, '42');
+} finally {
+  vm.dispose();
+}
 ```
 
-Node.js 22+ is required by the package. Building needs a Rust toolchain;
-CI pins its toolchain in [the workflow](.github/workflows/ci.yml). Bun runs
-the main JavaScript test suite, but is not required by Node consumers.
-Use [getting started](docs/getting-started.md) for host callbacks, modules,
-async execution, and browser setup.
+For structured results, define a guest function and use `callFunction`.
+For asynchronous host callbacks, use `AsyncSession` or `Vm.runAsync`.
+The [first-program guide](docs/getting-started.md) walks through both.
 
-## Choose an integration
+## Choose your entry point
 
-<a id="rust-embedding-and-commonjs"></a>
-<a id="experimental-rust-node-api-host"></a>
-
-| Need | Entry point |
+| What you want to build | Start here |
 | --- | --- |
-| Embed JavaScript in Node | `Vm`, `runCode`, or `AsyncSession`; [API](docs/api.md) |
-| Embed the engine in Rust | `napi-vm-core`; [crate architecture](docs/crate-architecture.md) |
-| Install runtime capabilities | `napi-vm-runtime`; [runtime guide](docs/optional-runtime.md) |
-| Load CommonJS or native addons | [Native addon guide](docs/native-addons.md) |
-| Run sandboxed guest plugins | [VM plugins](docs/plugins.md) |
-| Run trusted Node/Bun/native child plugins | [Trusted process plugins](docs/trusted-plugins/README.md) |
-| Integrate editors or live metadata | [Editor guide](docs/editor.md) |
-| Build the browser playground | [Playground](playground/README.md) |
+| A Node.js application embedding guest JavaScript | [Node API](docs/api.md) |
+| A Rust application embedding the engine | [Rust embedding](docs/rust.md) |
+| An application with timers, I/O, or package loading | [Optional runtime](docs/runtime.md) and [CLI](docs/cli.md) |
+| A browser integration | [WebAssembly and playground](playground/README.md) |
+| Plugins evaluated inside separate VMs | [VM plugins](docs/plugins.md) |
+| Trusted plugins running in Node, Bun, or native child processes | [Trusted process plugins](docs/trusted-plugins/README.md) |
+| Editor completion, hover, and diagnostics | [Editor integration](docs/editor.md) |
+| A contribution to the engine | [Architecture](docs/architecture.md) and [development](docs/development.md) |
 
-Guest strings retain UTF-16 code units, including lone surrogates. The
-Rust engine and optional runtime are separate crates; the `napi-vm` facade
-retains its default `napi` feature. See the architecture guide for feature
-selection and host string boundaries.
+## Understand the current evidence
 
-## Validation
+The retained `reviewed-5112` Test262 run passes **102,992 variants**, with zero
+skips or non-passing results. That profile applies one explicitly identified
+correction to the pinned upstream corpus. Results identify their engine binary
+and corpus; they do not establish complete Node.js or browser compatibility.
+See [validation and compatibility](docs/validation.md).
 
-<a id="status"></a>
+Benchmarks compare ten synchronous workloads with rquickjs 0.14.0 and retain
+separate startup, source-evaluation, and direct-call results. Several measured
+paths have been optimized; rquickjs remains faster across the retained warm-call
+workloads. See [performance and reproducibility](docs/performance.md).
 
-The selected, explicitly labelled **`reviewed-5112` Test262 corpus passes
-102,992/102,992 variants**, with zero skips or errors, at two workers and a
-ten-second deadline. It is the pinned upstream corpus plus the reviewed,
-unmerged correction from PR #5112. The original corpus remains available
-and contains contradictory assertions. [Report and audit](tools/test262/evidence/reviewed-5112-full-2026-11-06/README.md).
+## Find the rest
 
-```sh
-cargo build --release --locked --no-default-features --bin napi-vm-test262
-cargo build --release --locked -p napi-vm-test262-runner
-target/release/test262 fetch --profile reviewed-5112
-target/release/test262 run --profile reviewed-5112 --jobs 2 --timeout 10 \
-  --output reviewed-5112-full.json
-```
-
-[The Test262 guide](tools/test262/README.md) explains the original and
-reviewed profiles, isolated workers, comparisons, and archived reports.
-Conformance results apply to the recorded corpus and engine digest; they
-do not imply complete Node, browser, or native-addon compatibility.
-
-## Develop and measure
-
-```sh
-npm run test:rust
-npm test
-npm run lint
-```
-
-Read [development](docs/development.md) for prerequisites and targeted
-checks, and [performance](docs/performance.md) for reproducible baselines,
-coverage, and comparisons. Build artifacts before timing; keep correctness
-checks separate from performance measurements.
-
-## Documentation
-
-[Documentation index](docs/README.md) · [implementation map](docs/roadmap.md)
-
-<a id="disposing-a-vm"></a>
-
-Dispose async VMs and sessions in `finally`; see [API lifetime rules](docs/api.md#diagnostics-and-disposal).
-
-## License
-
-[MIT](LICENSE).
+[Documentation](docs/README.md) · [Examples](examples/) ·
+[Generated Node types](index.d.ts) · [MIT license](LICENSE)

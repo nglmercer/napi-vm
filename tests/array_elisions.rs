@@ -97,7 +97,7 @@ fn elisions_observe_inherited_elements_without_owning_them() {
 #[test]
 fn elided_destructuring_skips_iterator_values() {
     // Destructuring assignment intentionally declines to the shared AST
-    // evaluator (see docs/destructuring-assignment-checkpoint.md), so this
+    // evaluator (see docs/architecture.md), so this
     // case checks both execution paths agree without requiring bytecode.
     let source = "var a = 0; [, a] = [3, 4]; JSON.stringify([a]);";
     let prepared = Interpreter::compile(source).unwrap();

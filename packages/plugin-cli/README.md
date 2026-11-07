@@ -1,20 +1,53 @@
 # @napi-vm/plugin-cli
 
-Author, validate, build and package trusted process plugins.
+Create, generate, build, inspect, test, and package trusted process plugins.
+This CLI is a development tool; ordinary host loading never compiles or installs.
 
-Requires Node.js 22 or newer. Package version: `0.1.0`; wire protocol: `1.0`.
-
-Trusted process plugins execute with the launching user’s OS privileges. They are **not sandboxed**. The protocol token authenticates the session; it does not restrict filesystem, network or process access.
+## Create a project
 
 ```sh
-napi-vm-plugin create ./my-plugin --language ts
-cd my-plugin
-npm install
-npm run typecheck
-npm run build
-npm run test:artifact -- --runtime node
+napi-vm-plugin create my-plugin --language ts
 ```
 
-Scaffolds TS, JS and Rust templates with licensed local SDK assets. Use `napi-vm-plugin help` for validation, inspection, code generation, packaging and development commands. The CLI is authoring tooling: production Rust hosts loading packaged native executables do not require Node, Bun, npm or this package.
+Languages are `ts`, `js`, and `rust`. Install the created project's dependencies,
+then use its README for language-specific commands. The Rust scaffold includes
+licensed SDK/protocol source copies and builds independently with Cargo.
 
-See the [trusted plugin documentation](https://github.com/nglmercer/napi-vm/tree/main/docs/trusted-plugins) for contracts, lifecycle and platform limits. Licensed under MIT; see LICENSE.
+## Commands
+
+| Command | Purpose |
+| --- | --- |
+| `codegen FILE --out DIR [--check]` | Generate/verify contract adapters and references |
+| `inspect DIR` | Print manifest and contracts |
+| `validate DIR` | Validate manifest, artifacts, and any package lock |
+| `doctor DIR` | Diagnose tool/runtime availability |
+| `build DIR --format js\|executable` | Compile explicitly and update launch metadata |
+| `pack DIR --out NEW_DIR` | Package built files into a relocatable artifact and inventory |
+| `invoke DIR --interface ID --method NAME --input JSON` | Invoke through an actual host |
+| `test DIR --artifact` | Run declared artifact scenarios |
+| `dev DIR` | Build/watch with lifecycle-aware reload |
+
+Invocation/test/development can select `--runtime node|bun` and an application
+`--setup` module. Native executable plugins require `--host-executable` pointing
+to a Rust host. Full accepted arguments are printed by `napi-vm-plugin help`.
+Use shell quoting appropriate to your platform for JSON input.
+
+Results are JSON on stdout; diagnostics/compiler output go to stderr. Build
+requires the appropriate TypeScript/Cargo/Bun toolchain. Declaring an artifact
+profile does not prove it was built, distributed, or tested on another platform.
+
+## Maintain scaffold assets
+
+From the repository root:
+
+```sh
+node packages/plugin-cli/scripts/sync-assets.mjs
+npm run plugins:check-assets
+node --test packages/plugin-cli/test/*.test.mjs
+```
+
+Synchronization owns copied contracts, generated adapters, and Rust SDK sources.
+Change the original crate/generator before refreshing copies.
+
+[Authoring](https://github.com/nglmercer/napi-vm/blob/main/docs/trusted-plugins/authoring.md) ·
+[Packaging](https://github.com/nglmercer/napi-vm/blob/main/docs/trusted-plugins/packaging.md)

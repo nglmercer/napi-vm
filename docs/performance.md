@@ -1,106 +1,117 @@
-# Performance baseline and optimization workflow
+# Measure performance and reproduce comparisons
 
-Measure before changing a hot path. A useful result identifies the source,
-binary, workload, unit, machine, build flags and noise. Conformance counts
-and historical speed tables are separate evidence.
+Choose a boundary before choosing a benchmark. Parsing source, creating a VM,
+calling a retained function, copying a host value, polling a timer, and invoking
+a child process are different operations. Keep their results separate.
 
-The [repository performance review and rquickjs comparison](performance-review.md)
-records the cross-engine methodology, measured optimizations and verification.
+## Capture a broad baseline
 
-## Capture a baseline
-
-The finite baseline runner is currently implemented for Linux. It requires
-Python 3, Cargo, Node.js 22+, npm, the workspace dependencies, and the native
-build tools needed by this repository. It builds artifacts before measuring.
+The Linux baseline runner requires Python 3, Cargo, Node, npm, installed
+workspace dependencies, and the native build toolchain:
 
 ```sh
-npm ci --ignore-scripts
 python3 bench/performance.py run --output artifacts/performance/my-baseline
-```
-
-The output directory must be new. The runner records source and build-input
-fingerprints, Git revision and dirty state, toolchain versions, host details,
-settings, artifact digests, samples and summaries in `baseline.json`. Raw logs,
-Criterion samples and the explicitly loaded addon copy live beside it.
-A dirty run is labelled as such; its Git commit alone does not identify its inputs.
-
-The Node measurements load a copy of the newly built native library by its
-explicit path. This avoids accidentally timing an old platform `.node` file.
-Trusted-plugin measurements build and hash the emitted JavaScript, including
-any local source edits. Missing or invalid timing fields fail collection.
-The library uses the default NAPI feature set; Criterion additionally enables
-the core test hooks through its dev-dependency. The Rust scheduler example
-uses the runtime feature explicitly. Compare each backend with the same
-feature configuration rather than treating these artifacts as one build.
-
-## Coverage
-
-| Layer | Measured surface |
-| --- | --- |
-| Frontend | Lexer and parser on a generated larger source |
-| Fresh VM / AST | Arithmetic, recursion, arrays, strings, classes, closures and JSON |
-| Warm VM and bytecode | Reused class methods, asserted execution tiers, properties, calls and cycle collection |
-| Node binding | Fresh `runCode` calls through the selected addon |
-| Language service | Completion and update/diagnostics through the selected addon |
-| Scheduler | Rust turns and Node legacy/persistent async paths |
-| Trusted processes | Node plugin startup and request/response payload sizes |
-
-Fresh AST measurements include program declaration setup and collection after
-discarding the temporary interpreter. Scheduler VM cases explicitly install
-timer capabilities and assert callback counts. These corrected harnesses have
-different boundaries from older historical tables; establish a new baseline
-before making direct performance comparisons.
-
-This is representative coverage for choosing optimization targets, not timing
-of every code path. The baseline metadata lists omitted surfaces: WASM/Bun,
-filesystem/network runtime operations, native trusted-process payloads and LSP
-transport are not currently measured. The LSP executable is built and hashed
-but that fingerprint is not an LSP latency result. Add a correctness-checked
-workload before claiming a gain for an uncovered path.
-
-## Compare the same workload
-
-```sh
 python3 bench/performance.py compare \
   bench/baselines/2026-11-06/baseline.json \
   artifacts/performance/my-baseline/baseline.json
 ```
 
-Read metadata differences and added/removed workloads before interpreting
-ratios. A ratio below one means less time per recorded unit. Units are part
-of the contract: per-call latency, per-batch latency and medians of whole-run
-summaries must not be treated as interchangeable measurements.
+Use a new output directory. The runner builds before timing and explicitly
+loads the produced addon. Its report retains input hashes, Git state, features,
+toolchain/host settings, artifact digests, samples, medians, and median absolute
+deviation (MAD). The [baseline index](../bench/BASELINE.md) describes retained
+captures and which measurements predate the optimizations.
 
-The summaries report median, median absolute deviation (MAD), minimum,
-maximum and sample count. Criterion records here are per-iteration batch
-averages. Scheduler and trusted-process entries contain independent repeated
-whole-run summary medians. These are descriptive comparisons, not automatic
-statistical-significance claims.
+The baseline covers frontend/VM workloads, Node calls, language-service work,
+Rust/Node scheduling, and trusted-process calls. It does not time every builtin,
+WASM throughput, filesystem/network latency, native package, browser UI, or LSP
+transport. Add an appropriate workload before claiming a gain there.
 
-Use the same machine, toolchain, features and workload settings. Run on a quiet
-host without competing builds or benchmarks. CPU affinity and machine isolation
-are not enforced by the runner, so host load remains a limitation. Repeat and
-interleave promising before/after measurements; small differences within run
-noise are not a basis for a speed claim.
+## Compare with rquickjs
 
-## Retain evidence
+The [isolated comparison crate](../bench/rquickjs/README.md) pins rquickjs
+0.14.0 and a standalone lockfile. It compares bare `napi-vm-core` with rquickjs's
+default `std` build and full context. Build and retain an immutable executable:
 
-[The baseline index](../bench/BASELINE.md) points to the latest retained compact
-snapshot and older measurements. Keep raw results in the run directory;
-archive relevant samples and the compact report when accepting an optimization.
-The original historical tables remain in versioned history with their dates,
-source revisions and caveats.
+```sh
+python3 bench/rquickjs.py build --output artifacts/performance/engine-build
+python3 bench/rquickjs.py run --build artifacts/performance/engine-build \
+  --output artifacts/performance/engine-run.json --samples 15 --iterations 10
+python3 bench/rquickjs-compare.py engines artifacts/performance/engine-run.json
+```
 
-Record the affected layer, mechanism, correctness checks, repeated samples,
-and practical limitations with a performance change. Optimize a measured
-bottleneck rather than changing unrelated code. Revert experiments that slow
-the workload or add complexity without a demonstrated gain.
+Both sources and expected numeric outcomes are shared. Every timed batch checks
+its result, and samples alternate engine order. The ten workloads cover a
+trivial startup-dominated source, arithmetic, recursion, arrays, strings,
+closures, JSON, property reads/writes, and classes.
 
-## Correctness gates
+| Mode | Included in the timed boundary |
+| --- | --- |
+| `fresh_source` | Unique-comment source, VM/context construction and builtins, evaluation, destruction, napi-vm cycle collection |
+| `warm_source` | Source evaluation on reused VMs; napi-vm's public source caches remain active, while rquickjs reparses the invocation |
+| `warm_call` | Retained guest function invocation; napi-vm includes an empty job checkpoint |
 
-Engine changes need relevant Rust/Node/WASM regressions and an appropriate
-complete [Test262 gate](../tools/test262/README.md). Host/runtime changes need
-their own boundary tests. A local faster run does not replace these checks,
-and a Test262 pass does not prove that the Node binding or plugin transport
-became faster. See [development](development.md) and the
-[implementation map](roadmap.md) for ownership and targeted checks.
+Warm batches collect cycles outside the timer. Workloads are synchronous and
+enqueue no jobs. Both engines use sloppy scripts. Their default builtin sets
+differ: fresh napi-vm includes Intl and Temporal, so fresh results do not isolate
+parser or dispatch cost. Recorded outer tiers do not prove nested callees use
+the same tier.
+
+## Read the retained results
+
+The [before](../bench/baselines/performance-review-2026-11-06/rquickjs-before.json)
+and [after](../bench/baselines/performance-review-2026-11-06/rquickjs-after.json)
+reports each retain 60 engine/mode/workload rows. For warm calls, napi-vm's
+after/rquickjs time ratios include 2.02× for arithmetic, 4.35× for property
+reads, 9.01× for property updates, 24.86× for classes, and 29.88× for the array
+chain. A ratio above one means napi-vm took longer. rquickjs remains faster
+across the retained warm-call workloads; these are not whole-application scores.
+
+Accepted optimization evidence is retained separately:
+
+| Change and measured boundary | Repeated result | Evidence |
+| --- | --- | --- |
+| Borrow member keys and update existing own data properties without temporary descriptors | Fresh AST 3.09×, warm AST 5.20×, warm bytecode property calls 6.37× faster | [Criterion pairs](../bench/baselines/performance-review-2026-11-06/criterion-paired-summary.json), [engine pairs](../bench/baselines/performance-review-2026-11-06/rquickjs-interleaved.json) |
+| Copy only the visible 16-byte native typed-array subview | 8-MiB backing 111.6×; 32-MiB backing 1,635× faster; small-backing control unchanged | [Subview pairs](../bench/baselines/performance-review-2026-11-06/typed-array-paired-summary.json) |
+| Reuse the already located line start in LSP position conversion | 47.5–48.3% less conversion time | [LSP pairs](../bench/baselines/performance-review-2026-11-06/lsp-interleaved.json) |
+| Store enqueue byte counts in trusted SDK event queues | Eight subscribers/64-KiB payload: about 7.8× faster in-process harness delivery | [Queue samples](../bench/baselines/performance-review-2026-11-06/plugin-event-queue.json) |
+
+The property result combines two changes; it does not attribute percentages to
+key borrowing alone. The subview result excludes backing-buffer construction.
+The LSP result is isolated conversion, not request latency. The queue result
+excludes child-process startup and TCP transport. Queue mutation regressions
+also prove that listeners cannot corrupt dequeue byte accounting by changing a
+shared payload.
+
+## Reproduce a change safely
+
+Freeze the before build, make the change, and build into a second new directory.
+Alternate retained before/after executables on the same host, with the same
+workload, features, sources, dependency lockfile, flags, and sample settings.
+Use `bench/rquickjs-compare.py changes BEFORE.json AFTER.json` to validate and
+compare the reports. Targeted tools are `bench/lsp-positions.py`,
+`bench/performance/typed-array.cjs`, and
+`tools/plugins/benchmark-event-queue.mjs`; inspect their arguments and retain the
+source snapshots/build records they require.
+
+The validator rejects missing rows, inconsistent statistics, and changed timed
+harness inputs. Older before-build reports lack separate dependency/config
+fingerprints: matching lockfile hashes identify dependencies, while configuration
+identity remains explicitly unverified. Preserve these provenance warnings.
+
+## Limits and next candidates
+
+Measurements came from an AMD BC-250 desktop without CPU isolation. Samples are
+batch averages; medians/MAD and repeated ratios are descriptive, not formal
+significance tests. Do not claim small changes inside the noise as gains.
+
+Profile before changing the remaining candidates: per-fetch client/runtime
+creation, metadata-triggered document reparsing, Map/Set conversion identity,
+temporary descriptors for missing named properties, lexer literal allocations,
+and shape-transition retention under unique-key churn. Each needs a workload
+and lifecycle/correctness checks for its own boundary.
+
+Run relevant Rust/Node/WASM tests and the appropriate complete Test262 gate for
+engine changes. The [validation record](../bench/baselines/performance-review-2026-11-06/validation.json)
+and [follow-up audit](../bench/baselines/performance-review-2026-11-06/followup-audit.json)
+link retained correctness evidence and source-equivalence checks.

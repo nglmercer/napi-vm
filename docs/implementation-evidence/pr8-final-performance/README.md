@@ -1,7 +1,18 @@
-# Final-source performance samples
+# Retained lifecycle/runtime measurements
 
-All 21 baseline/modified pairs from the complete uncontended-by-compilation trial are included. `measurement-context.json` identifies the measured code/source tree, baseline, binary hashes, identical instrumentation and machine versions. A later documentation-only commit does not change these binaries.
+The JSONL files in this directory contain historical baseline/modified samples
+for public async calls, call instrumentation, and timer queues. The paired run
+configuration is in [measurement-context.json](measurement-context.json), the
+analysis in [comparison-summary.json](comparison-summary.json), and associated
+gates in [required-gates.json](required-gates.json).
 
-`comparison-summary.json` records every public, timer and Rust call-metrics row, with paired median ratios and bootstrap 95% intervals. `required-gates.json` selects the six required public gates and 21 timer cases. `process-monitor.jsonl` retains concurrent desktop activity; no compiler or Miri overlapped this accepted trial.
+The capture identifies its baseline/modified revisions and binaries,
+instrumentation hashes, platform/toolchains, and 21 alternating process pairs.
+Read each workload's timing/allocation unit and comparison method before using
+its ratio. An instrumented call boundary is different from whole-application
+throughput or a core-engine comparison.
 
-Earlier complete failed trials and interruption/build-invalidated trials remain archived outside this final-only evidence directory. No individual samples were omitted from this accepted 21-pair run. Remote platform checks remain blocked and the PR remains draft.
+These original records are preserved. Use the
+[current performance guide](../../performance.md) and
+[baseline index](../../../bench/BASELINE.md) for new measurements and the later
+rquickjs/optimization captures.
