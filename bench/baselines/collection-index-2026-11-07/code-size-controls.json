@@ -1,0 +1,875 @@
+{
+  "schema": 1,
+  "binaries": {
+    "before": {
+      "path": "artifacts/performance/collection-index-before-build-2/comparison",
+      "sha256": "eaa8e9c3714122d1a2b7e2e553905c7c035177a709c5303a1d053de8bc48b256"
+    },
+    "after": {
+      "path": "artifacts/performance/collection-index-final-build-2/comparison",
+      "sha256": "f39c696afeb76d3b8b062fd78b8714f49fda0b5ef9f5707cfa3e36ed0b127d0a"
+    }
+  },
+  "symbols": [
+    {
+      "symbol": "<core::cell::once::OnceCell<alloc::rc::Rc<napi_vm_core::value::ObjectCell>>>::try_init::<<core::cell::once::OnceCell<alloc::rc::Rc<napi_vm_core::value::ObjectCell>>>::get_or_init<<napi_vm_core::value::DateData>::properties::{closure#0}>::{closure#0}, !>",
+      "before": [
+        {
+          "address": "0000000000f46f50",
+          "bytes": 547
+        }
+      ],
+      "after": [
+        {
+          "address": "0000000000f47390",
+          "bytes": 547
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "core::ptr::drop_glue::<core::cell::RefCell<core::option::Option<alloc::rc::Rc<napi_vm_core::value::ObjectCell>>>>",
+      "before": [
+        {
+          "address": "0000000000f66b30",
+          "bytes": 25
+        },
+        {
+          "address": "0000000001363d60",
+          "bytes": 25
+        }
+      ],
+      "after": [
+        {
+          "address": "0000000000f66f70",
+          "bytes": 25
+        },
+        {
+          "address": "0000000001365770",
+          "bytes": 25
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "core::ptr::drop_glue::<core::cell::RefCell<napi_vm_core::value::ObjectMeta>>",
+      "before": [
+        {
+          "address": "0000000000f67060",
+          "bytes": 9
+        },
+        {
+          "address": "0000000001364200",
+          "bytes": 2073
+        }
+      ],
+      "after": [
+        {
+          "address": "0000000000f674a0",
+          "bytes": 9
+        },
+        {
+          "address": "0000000001365c10",
+          "bytes": 2073
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "core::ptr::drop_glue::<core::result::Result<&alloc::rc::Rc<napi_vm_core::value::ObjectCell>, (&alloc::rc::Rc<napi_vm_core::value::ObjectCell>, alloc::rc::Rc<napi_vm_core::value::ObjectCell>)>>",
+      "before": [
+        {
+          "address": "0000000000f68a10",
+          "bytes": 26
+        }
+      ],
+      "after": [
+        {
+          "address": "0000000000f68ed0",
+          "bytes": 26
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "core::ptr::drop_glue::<alloc::rc::Rc<napi_vm_core::value::ObjectCell>>",
+      "before": [
+        {
+          "address": "0000000000f68b30",
+          "bytes": 15
+        },
+        {
+          "address": "0000000001365eb0",
+          "bytes": 15
+        }
+      ],
+      "after": [
+        {
+          "address": "0000000000f68ff0",
+          "bytes": 15
+        },
+        {
+          "address": "00000000013678c0",
+          "bytes": 15
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "core::ptr::drop_glue::<alloc::vec::Vec<alloc::rc::Rc<napi_vm_core::value::ObjectCell>>>",
+      "before": [
+        {
+          "address": "0000000000f6a250",
+          "bytes": 223
+        }
+      ],
+      "after": [
+        {
+          "address": "0000000000f6a7c0",
+          "bytes": 223
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "core::ptr::drop_glue::<core::cell::once::OnceCell<alloc::rc::Rc<napi_vm_core::value::ObjectCell>>>",
+      "before": [
+        {
+          "address": "0000000000f70280",
+          "bytes": 20
+        },
+        {
+          "address": "00000000013683d0",
+          "bytes": 20
+        }
+      ],
+      "after": [
+        {
+          "address": "0000000000f70860",
+          "bytes": 20
+        },
+        {
+          "address": "0000000001369de0",
+          "bytes": 20
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "core::ptr::drop_glue::<napi_vm_core::value::ObjectCell>",
+      "before": [
+        {
+          "address": "0000000000f799b0",
+          "bytes": 528
+        }
+      ],
+      "after": [
+        {
+          "address": "0000000000f79f90",
+          "bytes": 528
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "core::ptr::drop_glue::<napi_vm_core::value::ObjectMeta>",
+      "before": [
+        {
+          "address": "0000000000f79bc0",
+          "bytes": 2459
+        }
+      ],
+      "after": [
+        {
+          "address": "0000000000f7a1a0",
+          "bytes": 2459
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<alloc::vec::Vec<alloc::rc::Weak<napi_vm_core::value::ObjectCell>>>::retain::<napi_vm_core::heap::sweep_vec<napi_vm_core::value::ObjectCell, napi_vm_core::heap::collect::{closure#3}::{closure#0}>::{closure#0}>::{closure#0}",
+      "before": [
+        {
+          "address": "0000000000fc7d50",
+          "bytes": 324
+        }
+      ],
+      "after": [
+        {
+          "address": "0000000000fc8330",
+          "bytes": 324
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::interpreter::Interpreter>::member_closure_env",
+      "before": [
+        {
+          "address": "0000000001015320",
+          "bytes": 383
+        }
+      ],
+      "after": [
+        {
+          "address": "0000000001015900",
+          "bytes": 383
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::interpreter::Interpreter>::member",
+      "before": [
+        {
+          "address": "00000000010487a0",
+          "bytes": 263
+        }
+      ],
+      "after": [
+        {
+          "address": "0000000001048d80",
+          "bytes": 263
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::parser::Parser>::member_property_name",
+      "before": [
+        {
+          "address": "00000000010579e0",
+          "bytes": 326
+        }
+      ],
+      "after": [
+        {
+          "address": "0000000001057fc0",
+          "bytes": 326
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectMeta>::set_symbol_key",
+      "before": [
+        {
+          "address": "000000000108d650",
+          "bytes": 404
+        }
+      ],
+      "after": [
+        {
+          "address": "000000000108e130",
+          "bytes": 404
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectMeta>::is_explicit_data",
+      "before": [
+        {
+          "address": "000000000108d7f0",
+          "bytes": 290
+        }
+      ],
+      "after": [
+        {
+          "address": "000000000108e2d0",
+          "bytes": 290
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectMeta>::may_have_accessor",
+      "before": [
+        {
+          "address": "000000000108d920",
+          "bytes": 682
+        }
+      ],
+      "after": [
+        {
+          "address": "000000000108e400",
+          "bytes": 682
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectMeta>::set_explicit_data",
+      "before": [
+        {
+          "address": "000000000108dbd0",
+          "bytes": 206
+        }
+      ],
+      "after": [
+        {
+          "address": "000000000108e6b0",
+          "bytes": 206
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectMeta>::set_empty_accessor",
+      "before": [
+        {
+          "address": "000000000108dca0",
+          "bytes": 474
+        }
+      ],
+      "after": [
+        {
+          "address": "000000000108e780",
+          "bytes": 474
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectMeta>::has_accessor_marker",
+      "before": [
+        {
+          "address": "000000000108de80",
+          "bytes": 778
+        }
+      ],
+      "after": [
+        {
+          "address": "000000000108e960",
+          "bytes": 778
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectMeta>::explicit_accessor_kind",
+      "before": [
+        {
+          "address": "000000000108e190",
+          "bytes": 319
+        }
+      ],
+      "after": [
+        {
+          "address": "000000000108ec70",
+          "bytes": 319
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectMeta>::set_explicit_accessor_kind",
+      "before": [
+        {
+          "address": "000000000108e2d0",
+          "bytes": 925
+        }
+      ],
+      "after": [
+        {
+          "address": "000000000108edb0",
+          "bytes": 925
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectMeta>::forget",
+      "before": [
+        {
+          "address": "000000000108e670",
+          "bytes": 663
+        }
+      ],
+      "after": [
+        {
+          "address": "000000000108f150",
+          "bytes": 663
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectMeta>::attrs_of",
+      "before": [
+        {
+          "address": "000000000108e910",
+          "bytes": 138
+        }
+      ],
+      "after": [
+        {
+          "address": "000000000108f3f0",
+          "bytes": 138
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectMeta>::set_attrs",
+      "before": [
+        {
+          "address": "000000000108e9a0",
+          "bytes": 400
+        }
+      ],
+      "after": [
+        {
+          "address": "000000000108f480",
+          "bytes": 400
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<alloc::raw_vec::RawVec<alloc::rc::Rc<napi_vm_core::value::ObjectCell>>>::grow_one",
+      "before": [
+        {
+          "address": "00000000010c8280",
+          "bytes": 100
+        }
+      ],
+      "after": [
+        {
+          "address": "00000000010c9070",
+          "bytes": 100
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<alloc::raw_vec::RawVec<alloc::rc::Weak<napi_vm_core::value::ObjectCell>>>::grow_one",
+      "before": [
+        {
+          "address": "00000000010c8280",
+          "bytes": 100
+        }
+      ],
+      "after": [
+        {
+          "address": "00000000010c9070",
+          "bytes": 100
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectCell>::borrow_mut",
+      "before": [
+        {
+          "address": "00000000010c8fa0",
+          "bytes": 400
+        }
+      ],
+      "after": [
+        {
+          "address": "00000000010c9d90",
+          "bytes": 400
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectCell>::clear_edges",
+      "before": [
+        {
+          "address": "00000000010c9130",
+          "bytes": 1749
+        }
+      ],
+      "after": [
+        {
+          "address": "00000000010c9f20",
+          "bytes": 1749
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectCell>::note_mutated",
+      "before": [
+        {
+          "address": "00000000010c9810",
+          "bytes": 470
+        }
+      ],
+      "after": [
+        {
+          "address": "00000000010ca600",
+          "bytes": 470
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectCell>::slot_verified",
+      "before": [
+        {
+          "address": "00000000010c99f0",
+          "bytes": 306
+        }
+      ],
+      "after": [
+        {
+          "address": "00000000010ca7e0",
+          "bytes": 306
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectCell>::note_key_added",
+      "before": [
+        {
+          "address": "00000000010c9b30",
+          "bytes": 2159
+        }
+      ],
+      "after": [
+        {
+          "address": "00000000010ca920",
+          "bytes": 2159
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectCell>::trace_children",
+      "before": [
+        {
+          "address": "00000000010ca3a0",
+          "bytes": 4315
+        }
+      ],
+      "after": [
+        {
+          "address": "00000000010cb190",
+          "bytes": 4315
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectCell>::set_slot_verified",
+      "before": [
+        {
+          "address": "00000000010cb480",
+          "bytes": 533
+        }
+      ],
+      "after": [
+        {
+          "address": "00000000010cc270",
+          "bytes": 533
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectCell>::new_exotic_properties",
+      "before": [
+        {
+          "address": "00000000010cb6a0",
+          "bytes": 702
+        }
+      ],
+      "after": [
+        {
+          "address": "00000000010cc490",
+          "bytes": 702
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectCell>::new_with_default_proto",
+      "before": [
+        {
+          "address": "00000000010cb960",
+          "bytes": 756
+        }
+      ],
+      "after": [
+        {
+          "address": "00000000010cc750",
+          "bytes": 756
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectCell>::new",
+      "before": [
+        {
+          "address": "00000000010cbc60",
+          "bytes": 759
+        }
+      ],
+      "after": [
+        {
+          "address": "00000000010cca50",
+          "bytes": 759
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectCell>::shape_id",
+      "before": [
+        {
+          "address": "00000000010cbf60",
+          "bytes": 85
+        }
+      ],
+      "after": [
+        {
+          "address": "00000000010ccd50",
+          "bytes": 85
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectCell>::own_index",
+      "before": [
+        {
+          "address": "00000000010cbfc0",
+          "bytes": 5182
+        }
+      ],
+      "after": [
+        {
+          "address": "00000000010ccdb0",
+          "bytes": 5182
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectCell>::own_value",
+      "before": [
+        {
+          "address": "00000000010cd400",
+          "bytes": 77
+        }
+      ],
+      "after": [
+        {
+          "address": "00000000010ce1f0",
+          "bytes": 77
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<napi_vm_core::value::ObjectCell>::set_proto",
+      "before": [
+        {
+          "address": "00000000010cd450",
+          "bytes": 169
+        }
+      ],
+      "after": [
+        {
+          "address": "00000000010ce240",
+          "bytes": 169
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<alloc::rc::Rc<napi_vm_core::value::ObjectCell>>::drop_slow",
+      "before": [
+        {
+          "address": "00000000010e5940",
+          "bytes": 84
+        }
+      ],
+      "after": [
+        {
+          "address": "00000000010e6730",
+          "bytes": 84
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<core::cell::once::OnceCell<alloc::rc::Rc<napi_vm_core::value::ObjectCell>> as core::fmt::Debug>::fmt",
+      "before": [
+        {
+          "address": "00000000013250f0",
+          "bytes": 1600
+        },
+        {
+          "address": "000000000137bee0",
+          "bytes": 1600
+        }
+      ],
+      "after": [
+        {
+          "address": "0000000001326b00",
+          "bytes": 1600
+        },
+        {
+          "address": "000000000137d8f0",
+          "bytes": 1600
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<&alloc::rc::Rc<napi_vm_core::value::ObjectCell> as core::fmt::Debug>::fmt",
+      "before": [
+        {
+          "address": "000000000132ccc0",
+          "bytes": 542
+        },
+        {
+          "address": "0000000001380e70",
+          "bytes": 542
+        }
+      ],
+      "after": [
+        {
+          "address": "000000000132e6d0",
+          "bytes": 542
+        },
+        {
+          "address": "0000000001382880",
+          "bytes": 542
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<alloc::rc::Rc<napi_vm_core::value::ObjectCell> as core::fmt::Debug>::fmt",
+      "before": [
+        {
+          "address": "0000000001346770",
+          "bytes": 539
+        },
+        {
+          "address": "0000000001392470",
+          "bytes": 539
+        }
+      ],
+      "after": [
+        {
+          "address": "0000000001348180",
+          "bytes": 539
+        },
+        {
+          "address": "0000000001393e80",
+          "bytes": 539
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<core::cell::RefCell<core::option::Option<alloc::rc::Rc<napi_vm_core::value::ObjectCell>>> as core::fmt::Debug>::fmt",
+      "before": [
+        {
+          "address": "000000000135d440",
+          "bytes": 293
+        },
+        {
+          "address": "000000000139b950",
+          "bytes": 293
+        }
+      ],
+      "after": [
+        {
+          "address": "000000000135ee50",
+          "bytes": 293
+        },
+        {
+          "address": "000000000139d360",
+          "bytes": 293
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<core::cell::RefCell<napi_vm_core::value::ObjectMeta> as core::fmt::Debug>::fmt",
+      "before": [
+        {
+          "address": "000000000135e020",
+          "bytes": 293
+        },
+        {
+          "address": "000000000139c530",
+          "bytes": 293
+        }
+      ],
+      "after": [
+        {
+          "address": "000000000135fa30",
+          "bytes": 293
+        },
+        {
+          "address": "000000000139df40",
+          "bytes": 293
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<core::cell::Ref<core::option::Option<alloc::rc::Rc<napi_vm_core::value::ObjectCell>>> as core::fmt::Debug>::fmt",
+      "before": [
+        {
+          "address": "000000000135ef40",
+          "bytes": 341
+        },
+        {
+          "address": "000000000139ccf0",
+          "bytes": 341
+        }
+      ],
+      "after": [
+        {
+          "address": "0000000001360950",
+          "bytes": 341
+        },
+        {
+          "address": "000000000139e700",
+          "bytes": 341
+        }
+      ],
+      "same_sizes": true
+    },
+    {
+      "symbol": "<core::cell::Ref<napi_vm_core::value::ObjectMeta> as core::fmt::Debug>::fmt",
+      "before": [
+        {
+          "address": "00000000013608d0",
+          "bytes": 9
+        },
+        {
+          "address": "000000000139e680",
+          "bytes": 9
+        }
+      ],
+      "after": [
+        {
+          "address": "00000000013622e0",
+          "bytes": 9
+        },
+        {
+          "address": "00000000013a0090",
+          "bytes": 9
+        }
+      ],
+      "same_sizes": true
+    }
+  ],
+  "limits": [
+    "Equal symbol sizes do not establish equal instructions, cache placement, cycles or latency.",
+    "Map/index changes shift text addresses even when unrelated function sizes stay equal."
+  ]
+}

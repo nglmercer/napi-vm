@@ -1,0 +1,462 @@
+{
+  "descriptor": {
+    "allocations/file_loader/load_64k": [
+      0.9545454545454546,
+      0.9545454545454546
+    ],
+    "allocations/file_loader/resolve": [
+      1.0,
+      1.0
+    ],
+    "allocations/npm_loader/cjs_resolve_read_64k": [
+      0.9578947368421052,
+      0.9578947368421052
+    ],
+    "allocations/npm_loader/resolve_4m": [
+      0.9634146341463414,
+      0.9634146341463414
+    ],
+    "allocations/oxc/typescript_1000_sourcemap": [
+      1.0,
+      1.0
+    ],
+    "allocations/oxc/typescript_100_sourcemap": [
+      1.0,
+      1.0
+    ],
+    "allocations/permissions/denied_read": [
+      1.0,
+      1.0
+    ],
+    "allocations/permissions/mkdir_existing_nested": [
+      1.0,
+      1.0
+    ],
+    "allocations/permissions/read_bytes_4k": [
+      0.9166666666666666,
+      0.9166666666666666
+    ],
+    "allocations/permissions/read_bytes_4m": [
+      0.9545454545454546,
+      0.9545454545454546
+    ],
+    "allocations/permissions/read_bytes_64k": [
+      0.9375,
+      0.9375
+    ],
+    "allocations/permissions/read_bytes_empty": [
+      0.6666666666666666,
+      0.6666666666666666
+    ],
+    "allocations/permissions/read_bytes_nested_4k": [
+      0.8823529411764706,
+      0.8823529411764706
+    ],
+    "allocations/permissions/read_text_64k": [
+      0.9375,
+      0.9375
+    ],
+    "allocations/permissions/write_bytes_4k": [
+      0.6666666666666666,
+      0.6666666666666666
+    ],
+    "allocations/rust_std/mkdir_existing_nested": [
+      null,
+      null
+    ],
+    "allocations/rust_std/read_bytes_4k": [
+      1.0,
+      1.0
+    ],
+    "allocations/rust_std/read_bytes_4m": [
+      1.0,
+      1.0
+    ],
+    "allocations/rust_std/read_bytes_64k": [
+      1.0,
+      1.0
+    ],
+    "allocations/rust_std/read_bytes_empty": [
+      null,
+      null
+    ],
+    "allocations/rust_std/read_bytes_nested_4k": [
+      1.0,
+      1.0
+    ],
+    "allocations/rust_std/read_text_64k": [
+      1.0,
+      1.0
+    ],
+    "allocations/rust_std/write_bytes_4k": [
+      null,
+      null
+    ],
+    "latency/file_loader/load_64k": [
+      0.6481813343363237,
+      0.9401204123492356
+    ],
+    "latency/file_loader/resolve": [
+      0.7167449139280125,
+      0.9697004344843357
+    ],
+    "latency/node_cjs/cjs_resolve_read_64k": [
+      0.5696185446524492,
+      0.916227212569192
+    ],
+    "latency/node_file/load_64k": [
+      0.5638028015030777,
+      0.9422553360390881
+    ],
+    "latency/node_file/resolve": [
+      0.8144909758633327,
+      1.017190308873999
+    ],
+    "latency/node_fs/mkdir_existing_nested": [
+      0.738561443011728,
+      0.9782220664149368
+    ],
+    "latency/node_fs/read_bytes_4k": [
+      0.7180698833161638,
+      0.98234197870527
+    ],
+    "latency/node_fs/read_bytes_4m": [
+      1.1935200390379763,
+      1.0490540851596888
+    ],
+    "latency/node_fs/read_bytes_64k": [
+      0.7871832532861617,
+      1.0543281801732343
+    ],
+    "latency/node_fs/read_bytes_empty": [
+      0.6813943757346553,
+      0.8177683700312142
+    ],
+    "latency/node_fs/read_bytes_nested_4k": [
+      0.923801478228363,
+      0.9842415424718987
+    ],
+    "latency/node_fs/read_text_64k": [
+      0.6166518349561816,
+      0.8308536657543537
+    ],
+    "latency/node_fs/write_bytes_4k": [
+      0.6049333318431258,
+      0.7696652499958144
+    ],
+    "latency/npm_loader/cjs_resolve_read_64k": [
+      0.6789855963819308,
+      0.8983099960707579
+    ],
+    "latency/npm_loader/resolve_4m": [
+      0.7594606465996802,
+      0.823626472774954
+    ],
+    "latency/oxc/typescript_1000_sourcemap": [
+      0.6389548326443999,
+      0.8683266091246928
+    ],
+    "latency/oxc/typescript_100_sourcemap": [
+      0.671604902014664,
+      0.9486674027509142
+    ],
+    "latency/permissions/denied_read": [
+      0.7180798878766643,
+      1.0809290698885532
+    ],
+    "latency/permissions/mkdir_existing_nested": [
+      0.7383056708569941,
+      0.93561491466647
+    ],
+    "latency/permissions/read_bytes_4k": [
+      0.714594405186007,
+      0.9083080417565998
+    ],
+    "latency/permissions/read_bytes_4m": [
+      0.7393695746171649,
+      0.8446638082179625
+    ],
+    "latency/permissions/read_bytes_64k": [
+      0.6406468728904724,
+      0.9178022481373262
+    ],
+    "latency/permissions/read_bytes_empty": [
+      0.6516604730726127,
+      0.8481427344836044
+    ],
+    "latency/permissions/read_bytes_nested_4k": [
+      0.781330236091748,
+      0.9411141912988427
+    ],
+    "latency/permissions/read_text_64k": [
+      0.6602274555923168,
+      0.9483900767857428
+    ],
+    "latency/permissions/write_bytes_4k": [
+      0.8416790152522343,
+      0.9733537558363137
+    ],
+    "latency/rust_std/mkdir_existing_nested": [
+      0.7373140669333751,
+      1.0027205517278903
+    ],
+    "latency/rust_std/read_bytes_4k": [
+      0.7453551328045289,
+      1.0080801659528908
+    ],
+    "latency/rust_std/read_bytes_4m": [
+      0.7429471805706814,
+      0.8098196341303223
+    ],
+    "latency/rust_std/read_bytes_64k": [
+      0.6820472520786858,
+      0.9571772850283088
+    ],
+    "latency/rust_std/read_bytes_empty": [
+      0.8072570131563229,
+      1.0030393364007517
+    ],
+    "latency/rust_std/read_bytes_nested_4k": [
+      0.8019043528064147,
+      1.0023500341727565
+    ],
+    "latency/rust_std/read_text_64k": [
+      0.6743124701456338,
+      0.9551994319236324
+    ],
+    "latency/rust_std/write_bytes_4k": [
+      0.621892703337907,
+      0.7236256911219
+    ]
+  },
+  "final": {
+    "allocations/file_loader/load_64k": [
+      0.4090909090909091,
+      0.4090909090909091
+    ],
+    "allocations/file_loader/resolve": [
+      1.0,
+      1.0
+    ],
+    "allocations/npm_loader/cjs_resolve_read_64k": [
+      0.6736842105263158,
+      0.6736842105263158
+    ],
+    "allocations/npm_loader/resolve_4m": [
+      0.7073170731707317,
+      0.7073170731707317
+    ],
+    "allocations/oxc/typescript_1000_sourcemap": [
+      1.0,
+      1.0
+    ],
+    "allocations/oxc/typescript_100_sourcemap": [
+      1.0,
+      1.0
+    ],
+    "allocations/permissions/denied_read": [
+      1.0,
+      1.0
+    ],
+    "allocations/permissions/mkdir_existing_nested": [
+      1.0,
+      1.0
+    ],
+    "allocations/permissions/read_bytes_4k": [
+      0.25,
+      0.25
+    ],
+    "allocations/permissions/read_bytes_4m": [
+      0.13636363636363635,
+      0.13636363636363635
+    ],
+    "allocations/permissions/read_bytes_64k": [
+      0.1875,
+      0.1875
+    ],
+    "allocations/permissions/read_bytes_empty": [
+      0.6666666666666666,
+      0.6666666666666666
+    ],
+    "allocations/permissions/read_bytes_nested_4k": [
+      0.4117647058823529,
+      0.4117647058823529
+    ],
+    "allocations/permissions/read_text_64k": [
+      0.1875,
+      0.1875
+    ],
+    "allocations/permissions/write_bytes_4k": [
+      0.6666666666666666,
+      0.6666666666666666
+    ],
+    "allocations/rust_std/mkdir_existing_nested": [
+      null,
+      null
+    ],
+    "allocations/rust_std/read_bytes_4k": [
+      1.0,
+      1.0
+    ],
+    "allocations/rust_std/read_bytes_4m": [
+      1.0,
+      1.0
+    ],
+    "allocations/rust_std/read_bytes_64k": [
+      1.0,
+      1.0
+    ],
+    "allocations/rust_std/read_bytes_empty": [
+      null,
+      null
+    ],
+    "allocations/rust_std/read_bytes_nested_4k": [
+      1.0,
+      1.0
+    ],
+    "allocations/rust_std/read_text_64k": [
+      1.0,
+      1.0
+    ],
+    "allocations/rust_std/write_bytes_4k": [
+      null,
+      null
+    ],
+    "latency/file_loader/load_64k": [
+      0.4919198596549293,
+      0.7598847805363841
+    ],
+    "latency/file_loader/resolve": [
+      0.827162547528517,
+      0.9896712046549181
+    ],
+    "latency/node_cjs/cjs_resolve_read_64k": [
+      0.8190847624061187,
+      1.1762612309582243
+    ],
+    "latency/node_file/load_64k": [
+      0.7596958939116909,
+      1.1911313740222333
+    ],
+    "latency/node_file/resolve": [
+      0.7312824576547,
+      1.0526171794846741
+    ],
+    "latency/node_fs/mkdir_existing_nested": [
+      0.79978873893707,
+      0.9996982828824932
+    ],
+    "latency/node_fs/read_bytes_4k": [
+      0.9329705572550167,
+      1.0201508129972408
+    ],
+    "latency/node_fs/read_bytes_4m": [
+      1.0097356767747219,
+      0.6603001081072645
+    ],
+    "latency/node_fs/read_bytes_64k": [
+      0.8422670465005351,
+      1.0644025741148584
+    ],
+    "latency/node_fs/read_bytes_empty": [
+      0.882564697483491,
+      0.8852356336575331
+    ],
+    "latency/node_fs/read_bytes_nested_4k": [
+      0.77162733141948,
+      1.0312814238527084
+    ],
+    "latency/node_fs/read_text_64k": [
+      0.7297004018840079,
+      0.9419597421469663
+    ],
+    "latency/node_fs/write_bytes_4k": [
+      0.6523935432904261,
+      0.8099833037497769
+    ],
+    "latency/npm_loader/cjs_resolve_read_64k": [
+      0.5844848551112706,
+      0.7739615474022234
+    ],
+    "latency/npm_loader/resolve_4m": [
+      0.49866450822605946,
+      0.684197060376268
+    ],
+    "latency/oxc/typescript_1000_sourcemap": [
+      0.7056083588745861,
+      0.9875650955887714
+    ],
+    "latency/oxc/typescript_100_sourcemap": [
+      0.7332707060727945,
+      0.953206449862391
+    ],
+    "latency/permissions/denied_read": [
+      0.7287328970850685,
+      1.0103915188411883
+    ],
+    "latency/permissions/mkdir_existing_nested": [
+      0.7920791206355443,
+      0.963003473280117
+    ],
+    "latency/permissions/read_bytes_4k": [
+      0.43486884125365577,
+      0.5423255943200923
+    ],
+    "latency/permissions/read_bytes_4m": [
+      0.5004815508083091,
+      0.721188425506446
+    ],
+    "latency/permissions/read_bytes_64k": [
+      0.4239459286256899,
+      0.5853960499849857
+    ],
+    "latency/permissions/read_bytes_empty": [
+      0.7103405103396587,
+      0.8906362416381347
+    ],
+    "latency/permissions/read_bytes_nested_4k": [
+      0.6306742296874754,
+      0.8150231008966976
+    ],
+    "latency/permissions/read_text_64k": [
+      0.42854607657523,
+      0.5843137614991795
+    ],
+    "latency/permissions/write_bytes_4k": [
+      0.8624168839972971,
+      1.0087806827803565
+    ],
+    "latency/rust_std/mkdir_existing_nested": [
+      0.8435344754063873,
+      1.0033885669750262
+    ],
+    "latency/rust_std/read_bytes_4k": [
+      0.8322082046433931,
+      1.0595463400285272
+    ],
+    "latency/rust_std/read_bytes_4m": [
+      0.5122441716849605,
+      0.7041545025494976
+    ],
+    "latency/rust_std/read_bytes_64k": [
+      0.7257915700369744,
+      0.9674618053310924
+    ],
+    "latency/rust_std/read_bytes_empty": [
+      0.842979673236879,
+      1.0238486789070107
+    ],
+    "latency/rust_std/read_bytes_nested_4k": [
+      0.8029136123225388,
+      0.8696284350918007
+    ],
+    "latency/rust_std/read_text_64k": [
+      0.7050274799826063,
+      1.0407416855955611
+    ],
+    "latency/rust_std/write_bytes_4k": [
+      0.6031231933104898,
+      0.7897479474933456
+    ]
+  }
+}

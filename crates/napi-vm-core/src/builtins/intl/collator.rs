@@ -256,10 +256,15 @@ fn compare(i: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, 
     ))
 }
 fn get_compare(i: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    slot(&this)?;
-    let cell = this.property_cell().unwrap();
-    if let Some(bound) = &cell.meta.borrow().intl_bound_compare {
-        return Ok((**bound).clone());
+    let cell = this.property_cell().ok_or_else(error)?;
+    {
+        let meta = cell.meta.borrow();
+        if meta.intl_collator.is_none() {
+            return Err(error());
+        }
+        if let Some(bound) = &meta.intl_bound_compare {
+            return Ok((**bound).clone());
+        }
     }
     let fp = i
         .persistent_global

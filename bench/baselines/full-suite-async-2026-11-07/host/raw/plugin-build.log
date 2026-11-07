@@ -1,0 +1,2 @@
+npm notice run napi-vm@0.1.5 plugins:build:ts
+npm notice run node tools/plugins/build.mjs

@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "results": [
+    {
+      "name": "get_64k",
+      "before_ns": 427259.3333333333,
+      "after_ns": 427259.3333333333,
+      "speedup": 1.0
+    },
+    {
+      "name": "get_empty",
+      "before_ns": 169725.0,
+      "after_ns": 169725.0,
+      "speedup": 1.0
+    },
+    {
+      "name": "post_4m",
+      "before_ns": 4849384.666666667,
+      "after_ns": 4849384.666666667,
+      "speedup": 1.0
+    },
+    {
+      "name": "post_4m_redirect_3",
+      "before_ns": 19934930.333333332,
+      "after_ns": 19934930.333333332,
+      "speedup": 1.0
+    }
+  ],
+  "changed_build_inputs": [],
+  "warning": "Descriptive ratios only; inspect raw samples/MAD and repeat interleaved measurements."
+}

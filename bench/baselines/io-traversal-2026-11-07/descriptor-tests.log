@@ -1,0 +1,11 @@
+   Compiling napi-vm-runtime v0.1.5 (/home/meme/Documentos/Default Project/node-vm/crates/napi-vm-runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.19s
+     Running tests/permission_traversal.rs (target/debug/deps/permission_traversal-7905387ef7811b46)
+
+running 3 tests
+test symlinks_aliases_and_special_files_remain_denied ... ok
+test most_specific_grant_stays_anchored_after_directory_replacement ... ok
+test descriptor_traversal_reads_writes_and_reuses_grants_after_errors ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

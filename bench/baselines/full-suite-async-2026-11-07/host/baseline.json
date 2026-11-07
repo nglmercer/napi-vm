@@ -1,0 +1,2066 @@
+{
+  "schema": 1,
+  "metadata": {
+    "utc": "2026-11-07T11:55:35.242825+00:00",
+    "git_head": "15f5b9de55b1820aa64cddc410334aab8e5e5c47",
+    "git_status_porcelain_start": "M Cargo.lock\n M bench/BASELINE.md\n M bench/performance.py\n M bench/rquickjs.py\n M bench/rquickjs/README.md\n M bench/rquickjs/src/main.rs\n M benches/vm.rs\n M crates/napi-vm-core/src/bigint.rs\n M crates/napi-vm-core/src/builtins/array.rs\n M crates/napi-vm-core/src/builtins/collections.rs\n M crates/napi-vm-core/src/builtins/mod.rs\n M crates/napi-vm-core/src/builtins/promise.rs\n M crates/napi-vm-core/src/interpreter/promise.rs\n M crates/napi-vm-core/src/lang/service.rs\n M crates/napi-vm-core/src/shape.rs\n M crates/napi-vm-core/src/value.rs\n M crates/napi-vm-core/tests/private_elements.rs\n M crates/napi-vm-core/tests/realm_semantics.rs\n M crates/napi-vm-runtime/Cargo.toml\n M crates/napi-vm-runtime/src/runtime/network.rs\n M crates/napi-vm-runtime/tests/runtime_web.rs\n M docs/performance.md\n M package.json\n M src/bindings/marshal.rs\n M src/wasm.rs\n M tests/promise_semantics.rs\n M tests/wasm/browser-build.test.mjs\n?? bench/async_jobs.py\n?? bench/baselines/array-results-2026-11-07/after-tests.log\n?? bench/baselines/array-results-2026-11-07/array-changes-1.json\n?? bench/baselines/array-results-2026-11-07/array-changes-2.json\n?? bench/baselines/array-results-2026-11-07/array-full-after.json\n?? bench/baselines/array-results-2026-11-07/array-full-before.json\n?? bench/baselines/array-results-2026-11-07/array-full-changes.json\n?? bench/baselines/array-results-2026-11-07/array-paired-0-before.json\n?? bench/baselines/array-results-2026-11-07/array-paired-1-after.json\n?? bench/baselines/array-results-2026-11-07/array-paired-2-after.json\n?? bench/baselines/array-results-2026-11-07/array-paired-3-before.json\n?? bench/baselines/array-results-2026-11-07/before-tests.log\n?? bench/baselines/array-results-2026-11-07/test262-compare.log\n?? bench/baselines/array-results-2026-11-07/test262-comparison.json\n?? bench/baselines/array-results-2026-11-07/test262-full.log\n?? bench/baselines/array-results-2026-11-07/test262-report.json.gz\n?? bench/baselines/array-results-2026-11-07/test262-summary.json\n?? bench/baselines/array-results-2026-11-07/validation-build.json\n?? bench/baselines/array-results-2026-11-07/validation-status.json\n?? bench/baselines/async-jobs-2026-11-07/baseline.json\n?? bench/baselines/async-jobs-2026-11-07/before-2.json\n?? bench/baselines/async-jobs-2026-11-07/before-build.json\n?? bench/baselines/async-jobs-2026-11-07/before-build.log\n?? bench/baselines/async-jobs-2026-11-07/before-workloads.json\n?? bench/baselines/async-jobs-2026-11-07/candidate-1.json\n?? bench/baselines/async-jobs-2026-11-07/candidate-2.json\n?? bench/baselines/async-jobs-2026-11-07/candidate-build.json\n?? bench/baselines/async-jobs-2026-11-07/candidate-build.log\n?? bench/baselines/async-jobs-2026-11-07/candidate-workloads.json\n?? bench/baselines/async-jobs-2026-11-07/clippy.log\n?? bench/baselines/async-jobs-2026-11-07/core-tests.log\n?? bench/baselines/async-jobs-2026-11-07/pair-1.log\n?? bench/baselines/async-jobs-2026-11-07/pair-2.log\n?? bench/baselines/async-jobs-2026-11-07/runtime-tests.log\n?? bench/baselines/async-jobs-2026-11-07/sources/before/crates/napi-vm-core/src/builtins/promise.rs\n?? bench/baselines/async-jobs-2026-11-07/sources/before/crates/napi-vm-core/src/interpreter/promise.rs\n?? bench/baselines/async-jobs-2026-11-07/sources/bench/async_jobs.py\n?? bench/baselines/async-jobs-2026-11-07/sources/bench/performance/promise-memory.cjs\n?? bench/baselines/async-jobs-2026-11-07/sources/bench/rquickjs/src/bin/async_jobs.rs\n?? bench/baselines/async-jobs-2026-11-07/sources/bench/suite.py\n?? bench/baselines/async-jobs-2026-11-07/sources/bench/tests/test_async_jobs.py\n?? bench/baselines/async-jobs-2026-11-07/sources/bench/tests/test_suite.py\n?? bench/baselines/async-jobs-2026-11-07/sources/candidate/crates/napi-vm-core/src/builtins/promise.rs\n?? bench/baselines/async-jobs-2026-11-07/sources/candidate/crates/napi-vm-core/src/interpreter/promise.rs\n?? bench/baselines/async-jobs-2026-11-07/sources/tests/promise_semantics.rs\n?? bench/baselines/async-jobs-2026-11-07/validation.json\n?? bench/baselines/async-jobs-2026-11-07/validator-tests.log\n?? bench/baselines/async-jobs-2026-11-07/worker-build.json\n?? bench/baselines/async-jobs-2026-11-07/worker-build.log\n?? bench/baselines/collection-index-2026-11-07/after-1.json\n?? bench/baselines/collection-index-2026-11-07/after-2.json\n?? bench/baselines/collection-index-2026-11-07/after-3.json\n?? bench/baselines/collection-index-2026-11-07/before-1.json\n?? bench/baselines/collection-index-2026-11-07/before-2.json\n?? bench/baselines/collection-index-2026-11-07/before-3.json\n?? bench/baselines/collection-index-2026-11-07/benchmark-tests-final.log\n?? bench/baselines/collection-index-2026-11-07/benchmark-tests.log\n?? bench/baselines/collection-index-2026-11-07/clippy.log\n?? bench/baselines/collection-index-2026-11-07/code-size-controls.json\n?? bench/baselines/collection-index-2026-11-07/comparison-1.json\n?? bench/baselines/collection-index-2026-11-07/comparison-2.json\n?? bench/baselines/collection-index-2026-11-07/comparison-3.json\n?? bench/baselines/collection-index-2026-11-07/core-tests.log\n?? bench/baselines/collection-index-2026-11-07/docs-check-final.log\n?? bench/baselines/collection-index-2026-11-07/docs-check.log\n?? bench/baselines/collection-index-2026-11-07/index-tests.log\n?? bench/baselines/collection-index-2026-11-07/node-tests.log\n?? bench/baselines/collection-index-2026-11-07/owner-memory-after.json\n?? bench/baselines/collection-index-2026-11-07/owner-memory-before.json\n?? bench/baselines/collection-index-2026-11-07/owner-memory-comparison.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/array_index_updates-after-1.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/array_index_updates-after-2.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/array_index_updates-before-1.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/array_index_updates-before-2.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/class_methods-after-1.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/class_methods-after-2.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/class_methods-before-1.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/class_methods-before-2.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/controls.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/property_reads-after-1.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/property_reads-after-2.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/property_reads-before-1.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/property_reads-before-2.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/run.log\n?? bench/baselines/collection-index-2026-11-07/reference-checks.json\n?? bench/baselines/collection-index-2026-11-07/rquickjs-hash-audit.json\n?? bench/baselines/collection-index-2026-11-07/source-checks.json\n?? bench/baselines/collection-index-2026-11-07/test262-comparison.json\n?? bench/baselines/collection-index-2026-11-07/test262-comparison.log\n?? bench/baselines/collection-index-2026-11-07/test262-report.json.gz\n?? bench/baselines/collection-index-2026-11-07/test262-summary.json\n?? bench/baselines/collection-index-2026-11-07/test262.log\n?? bench/baselines/collection-index-2026-11-07/timing-after-build.json\n?? bench/baselines/collection-index-2026-11-07/timing-before-build.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/array_index_updates-after-1.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/array_index_updates-after-2.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/array_index_updates-before-1.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/array_index_updates-before-2.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/class_methods-after-1.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/class_methods-after-2.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/class_methods-before-1.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/class_methods-before-2.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/property_reads-after-1.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/property_reads-after-2.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/property_reads-before-1.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/property_reads-before-2.json\n?? bench/baselines/collection-index-2026-11-07/validation.json\n?? bench/baselines/collection-index-2026-11-07/wasm-build.json\n?? bench/baselines/collection-index-2026-11-07/wasm-build.log\n?? bench/baselines/collection-index-2026-11-07/wasm-package-negative-check.json\n?? bench/baselines/collection-index-2026-11-07/wasm-tests.log\n?? bench/baselines/collection-index-2026-11-07/worker-build.json\n?? bench/baselines/collections-2026-11-07/after-1.json\n?? bench/baselines/collections-2026-11-07/after-2.json\n?? bench/baselines/collections-2026-11-07/after-3.json\n?? bench/baselines/collections-2026-11-07/before-1.json\n?? bench/baselines/collections-2026-11-07/before-2.json\n?? bench/baselines/collections-2026-11-07/before-3.json\n?? bench/baselines/collections-2026-11-07/benchmark-tests-expanded.log\n?? bench/baselines/collections-2026-11-07/benchmark-tests.log\n?? bench/baselines/collections-2026-11-07/build.log\n?? bench/baselines/collections-2026-11-07/clippy.log\n?? bench/baselines/collections-2026-11-07/comparison-1.json\n?? bench/baselines/collections-2026-11-07/comparison-2.json\n?? bench/baselines/collections-2026-11-07/comparison-3.json\n?? bench/baselines/collections-2026-11-07/guest-engine-audit.json\n?? bench/baselines/collections-2026-11-07/identity-tests.log\n?? bench/baselines/collections-2026-11-07/node-tests.log\n?? bench/baselines/collections-2026-11-07/validation.json\n?? bench/baselines/full-suite-2026-11-07/engine-build.log\n?? bench/baselines/full-suite-2026-11-07/engine-ratios.log\n?? bench/baselines/full-suite-2026-11-07/engines.json\n?? bench/baselines/full-suite-2026-11-07/engines.log\n?? bench/baselines/full-suite-2026-11-07/host.log\n?? bench/baselines/full-suite-2026-11-07/host/baseline.json\n?? bench/baselines/full-suite-2026-11-07/http-build.log\n?? bench/baselines/full-suite-2026-11-07/http-validate.log\n?? bench/baselines/full-suite-2026-11-07/http.json\n?? bench/baselines/full-suite-2026-11-07/http.log\n?? bench/baselines/full-suite-2026-11-07/memory-validate.log\n?? bench/baselines/full-suite-2026-11-07/memory.json\n?? bench/baselines/full-suite-2026-11-07/memory.log\n?? bench/baselines/full-suite-2026-11-07/suite.json\n?? bench/baselines/full-suite-2026-11-07/validator-tests.log\n?? bench/baselines/full-suite-expanded-2026-11-07/engine-build.log\n?? bench/baselines/full-suite-expanded-2026-11-07/engine-build/build.json\n?? bench/baselines/full-suite-expanded-2026-11-07/engine-ratios.log\n?? bench/baselines/full-suite-expanded-2026-11-07/engines.json\n?? bench/baselines/full-suite-expanded-2026-11-07/engines.log\n?? bench/baselines/full-suite-expanded-2026-11-07/host.log\n?? bench/baselines/full-suite-expanded-2026-11-07/host/baseline.json\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/cargo-bench-build.log\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/cargo-build.log\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/collections.json\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/criterion.log\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/node.json\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/plugin-build.log\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/public-api.json\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/scheduler-build.log\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/scheduler-node-legacy-0.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/scheduler-node-legacy-1.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/scheduler-node-legacy-2.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/scheduler-node-persistent-0.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/scheduler-node-persistent-1.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/scheduler-node-persistent-2.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/scheduler-rust-0.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/scheduler-rust-1.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/scheduler-rust-2.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/trusted-node-0.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/trusted-node-1.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/trusted-node-2.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/http-build.log\n?? bench/baselines/full-suite-expanded-2026-11-07/http-build/build.json\n?? bench/baselines/full-suite-expanded-2026-11-07/http-validate.log\n?? bench/baselines/full-suite-expanded-2026-11-07/http.json\n?? bench/baselines/full-suite-expanded-2026-11-07/http.log\n?? bench/baselines/full-suite-expanded-2026-11-07/memory-validate.log\n?? bench/baselines/full-suite-expanded-2026-11-07/memory.json\n?? bench/baselines/full-suite-expanded-2026-11-07/memory.log\n?? bench/baselines/full-suite-expanded-2026-11-07/suite.json\n?? bench/baselines/full-suite-expanded-2026-11-07/validator-tests.log\n?? bench/baselines/full-suite-indexed-2026-11-07/engine-build.log\n?? bench/baselines/full-suite-indexed-2026-11-07/engine-build/build.json\n?? bench/baselines/full-suite-indexed-2026-11-07/engine-ratios.log\n?? bench/baselines/full-suite-indexed-2026-11-07/engines.json\n?? bench/baselines/full-suite-indexed-2026-11-07/engines.log\n?? bench/baselines/full-suite-indexed-2026-11-07/host.log\n?? bench/baselines/full-suite-indexed-2026-11-07/host/baseline.json\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/cargo-bench-build.log\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/cargo-build.log\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/collections.json\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/criterion.log\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/node.json\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/owner-memory.json\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/plugin-build.log\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/public-api.json\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/scheduler-build.log\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/scheduler-node-legacy-0.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/scheduler-node-legacy-1.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/scheduler-node-legacy-2.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/scheduler-node-persistent-0.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/scheduler-node-persistent-1.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/scheduler-node-persistent-2.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/scheduler-rust-0.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/scheduler-rust-1.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/scheduler-rust-2.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/trusted-node-0.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/trusted-node-1.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/trusted-node-2.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/http-build.log\n?? bench/baselines/full-suite-indexed-2026-11-07/http-build/build.json\n?? bench/baselines/full-suite-indexed-2026-11-07/http-validate.log\n?? bench/baselines/full-suite-indexed-2026-11-07/http.json\n?? bench/baselines/full-suite-indexed-2026-11-07/http.log\n?? bench/baselines/full-suite-indexed-2026-11-07/memory-validate.log\n?? bench/baselines/full-suite-indexed-2026-11-07/memory.json\n?? bench/baselines/full-suite-indexed-2026-11-07/memory.log\n?? bench/baselines/full-suite-indexed-2026-11-07/suite.json\n?? bench/baselines/full-suite-indexed-2026-11-07/validator-tests.log\n?? bench/baselines/full-suite-platforms-2026-11-07/engine-build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/engine-build/build.json\n?? bench/baselines/full-suite-platforms-2026-11-07/engine-build/build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/engine-build/workloads.json\n?? bench/baselines/full-suite-platforms-2026-11-07/engine-ratios.log\n?? bench/baselines/full-suite-platforms-2026-11-07/engines.json\n?? bench/baselines/full-suite-platforms-2026-11-07/engines.log\n?? bench/baselines/full-suite-platforms-2026-11-07/host.log\n?? bench/baselines/full-suite-platforms-2026-11-07/host/baseline.json\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/cargo-bench-build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/cargo-build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/collections.json\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/criterion.log\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/node.json\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/owner-memory.json\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/plugin-build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/public-api.json\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/scheduler-build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/scheduler-node-legacy-0.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/scheduler-node-legacy-1.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/scheduler-node-legacy-2.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/scheduler-node-persistent-0.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/scheduler-node-persistent-1.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/scheduler-node-persistent-2.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/scheduler-rust-0.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/scheduler-rust-1.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/scheduler-rust-2.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/trusted-node-0.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/trusted-node-1.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/trusted-node-2.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/http-build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/http-build/build.json\n?? bench/baselines/full-suite-platforms-2026-11-07/http-build/build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/http-validate.log\n?? bench/baselines/full-suite-platforms-2026-11-07/http.json\n?? bench/baselines/full-suite-platforms-2026-11-07/http.log\n?? bench/baselines/full-suite-platforms-2026-11-07/memory-validate.log\n?? bench/baselines/full-suite-platforms-2026-11-07/memory.json\n?? bench/baselines/full-suite-platforms-2026-11-07/memory.log\n?? bench/baselines/full-suite-platforms-2026-11-07/platform-build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/platform-build/build.json\n?? bench/baselines/full-suite-platforms-2026-11-07/platform-build/native-build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/platform-build/wasm-build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/platform-build/workloads.json\n?? bench/baselines/full-suite-platforms-2026-11-07/platform-ratios.json\n?? bench/baselines/full-suite-platforms-2026-11-07/platform-validate.log\n?? bench/baselines/full-suite-platforms-2026-11-07/platforms.json\n?? bench/baselines/full-suite-platforms-2026-11-07/platforms.log\n?? bench/baselines/full-suite-platforms-2026-11-07/suite.json\n?? bench/baselines/full-suite-platforms-2026-11-07/validation.json\n?? bench/baselines/http-2026-11-07/http-clippy.log\n?? bench/baselines/http-2026-11-07/http-final-changes-1.json\n?? bench/baselines/http-2026-11-07/http-final-changes-2.json\n?? bench/baselines/http-2026-11-07/http-final-changes-3.json\n?? bench/baselines/http-2026-11-07/http-final-changes-4.json\n?? bench/baselines/http-2026-11-07/http-final-paired-0-before.json\n?? bench/baselines/http-2026-11-07/http-final-paired-1-after.json\n?? bench/baselines/http-2026-11-07/http-final-paired-2-after.json\n?? bench/baselines/http-2026-11-07/http-final-paired-3-before.json\n?? bench/baselines/http-2026-11-07/http-final-paired-4-after.json\n?? bench/baselines/http-2026-11-07/http-final-paired-5-before.json\n?? bench/baselines/http-2026-11-07/http-final-paired-6-before.json\n?? bench/baselines/http-2026-11-07/http-final-paired-7-after.json\n?? bench/baselines/http-2026-11-07/http-tests-expanded.log\n?? bench/baselines/http-2026-11-07/validation.json\n?? bench/baselines/memory-2026-11-07/baseline.json\n?? bench/baselines/memory-2026-11-07/clippy.log\n?? bench/baselines/memory-2026-11-07/hwm-diagnostics.json\n?? bench/baselines/memory-2026-11-07/stress.json\n?? bench/baselines/memory-2026-11-07/timing-smoke-ratios.json\n?? bench/baselines/memory-2026-11-07/timing-smoke.json\n?? bench/baselines/memory-2026-11-07/validation.json\n?? bench/baselines/memory-2026-11-07/validator-tests.log\n?? bench/baselines/operations-2026-11-07/engine-ratios.json\n?? bench/baselines/operations-2026-11-07/language-tests.log\n?? bench/baselines/operations-2026-11-07/metadata-paired-0-before.log\n?? bench/baselines/operations-2026-11-07/metadata-paired-1-after.log\n?? bench/baselines/operations-2026-11-07/metadata-paired-2-after.log\n?? bench/baselines/operations-2026-11-07/metadata-paired-3-before.log\n?? bench/baselines/operations-2026-11-07/metadata-paired.json\n?? bench/baselines/operations-2026-11-07/metadata-provenance.json\n?? bench/baselines/operations-2026-11-07/rquickjs-expanded-smoke.json\n?? bench/baselines/platforms-2026-11-07/after-1-ratios.json\n?? bench/baselines/platforms-2026-11-07/after-1.json\n?? bench/baselines/platforms-2026-11-07/after-1.log\n?? bench/baselines/platforms-2026-11-07/after-2-ratios.json\n?? bench/baselines/platforms-2026-11-07/after-2.json\n?? bench/baselines/platforms-2026-11-07/after-2.log\n?? bench/baselines/platforms-2026-11-07/after-native-build.log\n?? bench/baselines/platforms-2026-11-07/after-wasm-build.log\n?? bench/baselines/platforms-2026-11-07/before-1-ratios.json\n?? bench/baselines/platforms-2026-11-07/before-1.json\n?? bench/baselines/platforms-2026-11-07/before-1.log\n?? bench/baselines/platforms-2026-11-07/before-2-ratios.json\n?? bench/baselines/platforms-2026-11-07/before-2.json\n?? bench/baselines/platforms-2026-11-07/before-2.log\n?? bench/baselines/platforms-2026-11-07/build-after.json\n?? bench/baselines/platforms-2026-11-07/build-before.json\n?? bench/baselines/platforms-2026-11-07/final-tests.log\n?? bench/baselines/platforms-2026-11-07/host-observation.json\n?? bench/baselines/platforms-2026-11-07/import-counts-after.json\n?? bench/baselines/platforms-2026-11-07/import-counts-before.json\n?? bench/baselines/platforms-2026-11-07/npm-pack-after.json\n?? bench/baselines/platforms-2026-11-07/npm-pack-before.json\n?? bench/baselines/platforms-2026-11-07/package-tests.log\n?? bench/baselines/platforms-2026-11-07/packed-wasm-tests.log\n?? bench/baselines/platforms-2026-11-07/pair-1.json\n?? bench/baselines/platforms-2026-11-07/pair-2.json\n?? bench/baselines/platforms-2026-11-07/playground-build.log\n?? bench/baselines/platforms-2026-11-07/sources/bench/performance/platforms.cjs\n?? bench/baselines/platforms-2026-11-07/sources/bench/performance/wasm-imports.mjs\n?? bench/baselines/platforms-2026-11-07/sources/bench/platform_ratios.py\n?? bench/baselines/platforms-2026-11-07/sources/bench/platforms.py\n?? bench/baselines/platforms-2026-11-07/sources/bench/rquickjs.py\n?? bench/baselines/platforms-2026-11-07/sources/bench/rquickjs/src/main.rs\n?? bench/baselines/platforms-2026-11-07/sources/bench/suite.py\n?? bench/baselines/platforms-2026-11-07/sources/tests/node/wasm-package.test.js\n?? bench/baselines/platforms-2026-11-07/sources/tests/wasm/browser-build.test.mjs\n?? bench/baselines/platforms-2026-11-07/sources/tools/ci/wasm-package.mjs\n?? bench/baselines/platforms-2026-11-07/validation.json\n?? bench/baselines/platforms-2026-11-07/vite-build.log\n?? bench/baselines/platforms-2026-11-07/wasm-after.rs\n?? bench/baselines/platforms-2026-11-07/wasm-before.rs\n?? bench/baselines/platforms-2026-11-07/wasm-clippy-final.log\n?? bench/baselines/shape-cache-2026-11-07/benchmark-validator-tests.log\n?? bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-compare.log\n?? bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-comparison.json\n?? bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-full.log\n?? bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-report.json.gz\n?? bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-summary.json\n?? bench/baselines/shape-cache-2026-11-07/clippy.log\n?? bench/baselines/shape-cache-2026-11-07/core-tests.log\n?? bench/baselines/shape-cache-2026-11-07/layouts/build.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-0-before.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-1-bounded.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-2-header.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-3-bounded.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-4-header.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-5-before.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-6-header.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-7-before.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-8-bounded.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-0-before-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-0-before-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-1-id-first-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-1-id-first-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-2-hot-index-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-2-hot-index-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-3-hot-index-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-3-hot-index-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-4-id-first-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-4-id-first-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-5-before-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-5-before-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-summary.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/node-tests.log\n?? bench/baselines/shape-cache-2026-11-07/layouts/selected-memory-comparison.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/selected-memory-stress.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/selection.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-hot-header-clippy.log\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-hot-header-core-tests.log\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-id-after.asm\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-id-before.asm\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-id-header.asm\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-id-hot-index.asm\n?? bench/baselines/shape-cache-2026-11-07/layouts/suite-validator-tests.log\n?? bench/baselines/shape-cache-2026-11-07/memory-baseline-after.json\n?? bench/baselines/shape-cache-2026-11-07/memory-baseline-comparison.json\n?? bench/baselines/shape-cache-2026-11-07/memory-stress-after.json\n?? bench/baselines/shape-cache-2026-11-07/memory-stress-comparison.json\n?? bench/baselines/shape-cache-2026-11-07/node-default-tests.log\n?? bench/baselines/shape-cache-2026-11-07/node-runtime-tests.log\n?? bench/baselines/shape-cache-2026-11-07/selected-hot-header-build.json\n?? bench/baselines/shape-cache-2026-11-07/selected-hot-header-source-checks.json\n?? bench/baselines/shape-cache-2026-11-07/selected-hot-header-test262-comparison.json\n?? bench/baselines/shape-cache-2026-11-07/selected-hot-header-test262-comparison.log\n?? bench/baselines/shape-cache-2026-11-07/selected-hot-header-test262-report.json.gz\n?? bench/baselines/shape-cache-2026-11-07/selected-hot-header-test262-summary.json\n?? bench/baselines/shape-cache-2026-11-07/selected-hot-header-test262.log\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-0-before.json\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-1-after.json\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-2-after.json\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-3-before.json\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-changes-1.json\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-changes-2.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-0-before.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-1-after.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-2-after.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-3-before.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-changes-1.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-changes-2.json\n?? bench/baselines/shape-cache-2026-11-07/validation-build.json\n?? bench/baselines/shape-cache-2026-11-07/validation.json\n?? bench/collection_memory.py\n?? bench/collection_report.py\n?? bench/http.py\n?? bench/latency_controls.py\n?? bench/memory_report.py\n?? bench/performance/collection-memory.cjs\n?? bench/performance/collections.cjs\n?? bench/performance/platforms.cjs\n?? bench/performance/promise-memory.cjs\n?? bench/performance/public-api.cjs\n?? bench/performance/wasm-imports.mjs\n?? bench/platform_ratios.py\n?? bench/platforms.py\n?? bench/public_api_report.py\n?? bench/rquickjs/src/bin/async_jobs.rs\n?? bench/rquickjs/src/bin/memory.rs\n?? bench/suite.py\n?? bench/tests/test_async_jobs.py\n?? bench/tests/test_collection_memory.py\n?? bench/tests/test_collection_report.py\n?? bench/tests/test_http.py\n?? bench/tests/test_memory_report.py\n?? bench/tests/test_platforms.py\n?? bench/tests/test_public_api_report.py\n?? bench/tests/test_suite.py\n?? crates/napi-vm-runtime/examples/http_bench.rs\n?? crates/napi-vm-runtime/examples/http_bench/native.rs\n?? tests/array_result_fast_path.rs\n?? tests/collection_index.rs\n?? tests/node/collection-identity.test.js\n?? tests/node/shape-cache.test.js\n?? tests/node/wasm-package.test.js\n?? tools/ci/wasm-package.mjs",
+    "git_status_porcelain_end": "M Cargo.lock\n M bench/BASELINE.md\n M bench/performance.py\n M bench/rquickjs.py\n M bench/rquickjs/README.md\n M bench/rquickjs/src/main.rs\n M benches/vm.rs\n M crates/napi-vm-core/src/bigint.rs\n M crates/napi-vm-core/src/builtins/array.rs\n M crates/napi-vm-core/src/builtins/collections.rs\n M crates/napi-vm-core/src/builtins/mod.rs\n M crates/napi-vm-core/src/builtins/promise.rs\n M crates/napi-vm-core/src/interpreter/promise.rs\n M crates/napi-vm-core/src/lang/service.rs\n M crates/napi-vm-core/src/shape.rs\n M crates/napi-vm-core/src/value.rs\n M crates/napi-vm-core/tests/private_elements.rs\n M crates/napi-vm-core/tests/realm_semantics.rs\n M crates/napi-vm-runtime/Cargo.toml\n M crates/napi-vm-runtime/src/runtime/network.rs\n M crates/napi-vm-runtime/tests/runtime_web.rs\n M docs/performance.md\n M package.json\n M src/bindings/marshal.rs\n M src/wasm.rs\n M tests/promise_semantics.rs\n M tests/wasm/browser-build.test.mjs\n?? bench/async_jobs.py\n?? bench/baselines/array-results-2026-11-07/after-tests.log\n?? bench/baselines/array-results-2026-11-07/array-changes-1.json\n?? bench/baselines/array-results-2026-11-07/array-changes-2.json\n?? bench/baselines/array-results-2026-11-07/array-full-after.json\n?? bench/baselines/array-results-2026-11-07/array-full-before.json\n?? bench/baselines/array-results-2026-11-07/array-full-changes.json\n?? bench/baselines/array-results-2026-11-07/array-paired-0-before.json\n?? bench/baselines/array-results-2026-11-07/array-paired-1-after.json\n?? bench/baselines/array-results-2026-11-07/array-paired-2-after.json\n?? bench/baselines/array-results-2026-11-07/array-paired-3-before.json\n?? bench/baselines/array-results-2026-11-07/before-tests.log\n?? bench/baselines/array-results-2026-11-07/test262-compare.log\n?? bench/baselines/array-results-2026-11-07/test262-comparison.json\n?? bench/baselines/array-results-2026-11-07/test262-full.log\n?? bench/baselines/array-results-2026-11-07/test262-report.json.gz\n?? bench/baselines/array-results-2026-11-07/test262-summary.json\n?? bench/baselines/array-results-2026-11-07/validation-build.json\n?? bench/baselines/array-results-2026-11-07/validation-status.json\n?? bench/baselines/async-jobs-2026-11-07/baseline.json\n?? bench/baselines/async-jobs-2026-11-07/before-2.json\n?? bench/baselines/async-jobs-2026-11-07/before-build.json\n?? bench/baselines/async-jobs-2026-11-07/before-build.log\n?? bench/baselines/async-jobs-2026-11-07/before-workloads.json\n?? bench/baselines/async-jobs-2026-11-07/candidate-1.json\n?? bench/baselines/async-jobs-2026-11-07/candidate-2.json\n?? bench/baselines/async-jobs-2026-11-07/candidate-build.json\n?? bench/baselines/async-jobs-2026-11-07/candidate-build.log\n?? bench/baselines/async-jobs-2026-11-07/candidate-workloads.json\n?? bench/baselines/async-jobs-2026-11-07/clippy.log\n?? bench/baselines/async-jobs-2026-11-07/core-tests.log\n?? bench/baselines/async-jobs-2026-11-07/pair-1.log\n?? bench/baselines/async-jobs-2026-11-07/pair-2.log\n?? bench/baselines/async-jobs-2026-11-07/runtime-tests.log\n?? bench/baselines/async-jobs-2026-11-07/sources/before/crates/napi-vm-core/src/builtins/promise.rs\n?? bench/baselines/async-jobs-2026-11-07/sources/before/crates/napi-vm-core/src/interpreter/promise.rs\n?? bench/baselines/async-jobs-2026-11-07/sources/bench/async_jobs.py\n?? bench/baselines/async-jobs-2026-11-07/sources/bench/performance/promise-memory.cjs\n?? bench/baselines/async-jobs-2026-11-07/sources/bench/rquickjs/src/bin/async_jobs.rs\n?? bench/baselines/async-jobs-2026-11-07/sources/bench/suite.py\n?? bench/baselines/async-jobs-2026-11-07/sources/bench/tests/test_async_jobs.py\n?? bench/baselines/async-jobs-2026-11-07/sources/bench/tests/test_suite.py\n?? bench/baselines/async-jobs-2026-11-07/sources/candidate/crates/napi-vm-core/src/builtins/promise.rs\n?? bench/baselines/async-jobs-2026-11-07/sources/candidate/crates/napi-vm-core/src/interpreter/promise.rs\n?? bench/baselines/async-jobs-2026-11-07/sources/tests/promise_semantics.rs\n?? bench/baselines/async-jobs-2026-11-07/validation.json\n?? bench/baselines/async-jobs-2026-11-07/validator-tests.log\n?? bench/baselines/async-jobs-2026-11-07/worker-build.json\n?? bench/baselines/async-jobs-2026-11-07/worker-build.log\n?? bench/baselines/collection-index-2026-11-07/after-1.json\n?? bench/baselines/collection-index-2026-11-07/after-2.json\n?? bench/baselines/collection-index-2026-11-07/after-3.json\n?? bench/baselines/collection-index-2026-11-07/before-1.json\n?? bench/baselines/collection-index-2026-11-07/before-2.json\n?? bench/baselines/collection-index-2026-11-07/before-3.json\n?? bench/baselines/collection-index-2026-11-07/benchmark-tests-final.log\n?? bench/baselines/collection-index-2026-11-07/benchmark-tests.log\n?? bench/baselines/collection-index-2026-11-07/clippy.log\n?? bench/baselines/collection-index-2026-11-07/code-size-controls.json\n?? bench/baselines/collection-index-2026-11-07/comparison-1.json\n?? bench/baselines/collection-index-2026-11-07/comparison-2.json\n?? bench/baselines/collection-index-2026-11-07/comparison-3.json\n?? bench/baselines/collection-index-2026-11-07/core-tests.log\n?? bench/baselines/collection-index-2026-11-07/docs-check-final.log\n?? bench/baselines/collection-index-2026-11-07/docs-check.log\n?? bench/baselines/collection-index-2026-11-07/index-tests.log\n?? bench/baselines/collection-index-2026-11-07/node-tests.log\n?? bench/baselines/collection-index-2026-11-07/owner-memory-after.json\n?? bench/baselines/collection-index-2026-11-07/owner-memory-before.json\n?? bench/baselines/collection-index-2026-11-07/owner-memory-comparison.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/array_index_updates-after-1.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/array_index_updates-after-2.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/array_index_updates-before-1.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/array_index_updates-before-2.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/class_methods-after-1.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/class_methods-after-2.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/class_methods-before-1.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/class_methods-before-2.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/controls.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/property_reads-after-1.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/property_reads-after-2.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/property_reads-before-1.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/property_reads-before-2.json\n?? bench/baselines/collection-index-2026-11-07/pinned-controls/run.log\n?? bench/baselines/collection-index-2026-11-07/reference-checks.json\n?? bench/baselines/collection-index-2026-11-07/rquickjs-hash-audit.json\n?? bench/baselines/collection-index-2026-11-07/source-checks.json\n?? bench/baselines/collection-index-2026-11-07/test262-comparison.json\n?? bench/baselines/collection-index-2026-11-07/test262-comparison.log\n?? bench/baselines/collection-index-2026-11-07/test262-report.json.gz\n?? bench/baselines/collection-index-2026-11-07/test262-summary.json\n?? bench/baselines/collection-index-2026-11-07/test262.log\n?? bench/baselines/collection-index-2026-11-07/timing-after-build.json\n?? bench/baselines/collection-index-2026-11-07/timing-before-build.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/array_index_updates-after-1.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/array_index_updates-after-2.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/array_index_updates-before-1.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/array_index_updates-before-2.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/class_methods-after-1.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/class_methods-after-2.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/class_methods-before-1.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/class_methods-before-2.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/property_reads-after-1.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/property_reads-after-2.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/property_reads-before-1.json\n?? bench/baselines/collection-index-2026-11-07/unpinned-controls/property_reads-before-2.json\n?? bench/baselines/collection-index-2026-11-07/validation.json\n?? bench/baselines/collection-index-2026-11-07/wasm-build.json\n?? bench/baselines/collection-index-2026-11-07/wasm-build.log\n?? bench/baselines/collection-index-2026-11-07/wasm-package-negative-check.json\n?? bench/baselines/collection-index-2026-11-07/wasm-tests.log\n?? bench/baselines/collection-index-2026-11-07/worker-build.json\n?? bench/baselines/collections-2026-11-07/after-1.json\n?? bench/baselines/collections-2026-11-07/after-2.json\n?? bench/baselines/collections-2026-11-07/after-3.json\n?? bench/baselines/collections-2026-11-07/before-1.json\n?? bench/baselines/collections-2026-11-07/before-2.json\n?? bench/baselines/collections-2026-11-07/before-3.json\n?? bench/baselines/collections-2026-11-07/benchmark-tests-expanded.log\n?? bench/baselines/collections-2026-11-07/benchmark-tests.log\n?? bench/baselines/collections-2026-11-07/build.log\n?? bench/baselines/collections-2026-11-07/clippy.log\n?? bench/baselines/collections-2026-11-07/comparison-1.json\n?? bench/baselines/collections-2026-11-07/comparison-2.json\n?? bench/baselines/collections-2026-11-07/comparison-3.json\n?? bench/baselines/collections-2026-11-07/guest-engine-audit.json\n?? bench/baselines/collections-2026-11-07/identity-tests.log\n?? bench/baselines/collections-2026-11-07/node-tests.log\n?? bench/baselines/collections-2026-11-07/validation.json\n?? bench/baselines/full-suite-2026-11-07/engine-build.log\n?? bench/baselines/full-suite-2026-11-07/engine-ratios.log\n?? bench/baselines/full-suite-2026-11-07/engines.json\n?? bench/baselines/full-suite-2026-11-07/engines.log\n?? bench/baselines/full-suite-2026-11-07/host.log\n?? bench/baselines/full-suite-2026-11-07/host/baseline.json\n?? bench/baselines/full-suite-2026-11-07/http-build.log\n?? bench/baselines/full-suite-2026-11-07/http-validate.log\n?? bench/baselines/full-suite-2026-11-07/http.json\n?? bench/baselines/full-suite-2026-11-07/http.log\n?? bench/baselines/full-suite-2026-11-07/memory-validate.log\n?? bench/baselines/full-suite-2026-11-07/memory.json\n?? bench/baselines/full-suite-2026-11-07/memory.log\n?? bench/baselines/full-suite-2026-11-07/suite.json\n?? bench/baselines/full-suite-2026-11-07/validator-tests.log\n?? bench/baselines/full-suite-expanded-2026-11-07/engine-build.log\n?? bench/baselines/full-suite-expanded-2026-11-07/engine-build/build.json\n?? bench/baselines/full-suite-expanded-2026-11-07/engine-ratios.log\n?? bench/baselines/full-suite-expanded-2026-11-07/engines.json\n?? bench/baselines/full-suite-expanded-2026-11-07/engines.log\n?? bench/baselines/full-suite-expanded-2026-11-07/host.log\n?? bench/baselines/full-suite-expanded-2026-11-07/host/baseline.json\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/cargo-bench-build.log\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/cargo-build.log\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/collections.json\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/criterion.log\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/node.json\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/plugin-build.log\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/public-api.json\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/scheduler-build.log\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/scheduler-node-legacy-0.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/scheduler-node-legacy-1.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/scheduler-node-legacy-2.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/scheduler-node-persistent-0.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/scheduler-node-persistent-1.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/scheduler-node-persistent-2.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/scheduler-rust-0.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/scheduler-rust-1.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/scheduler-rust-2.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/trusted-node-0.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/trusted-node-1.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/host/raw/trusted-node-2.jsonl\n?? bench/baselines/full-suite-expanded-2026-11-07/http-build.log\n?? bench/baselines/full-suite-expanded-2026-11-07/http-build/build.json\n?? bench/baselines/full-suite-expanded-2026-11-07/http-validate.log\n?? bench/baselines/full-suite-expanded-2026-11-07/http.json\n?? bench/baselines/full-suite-expanded-2026-11-07/http.log\n?? bench/baselines/full-suite-expanded-2026-11-07/memory-validate.log\n?? bench/baselines/full-suite-expanded-2026-11-07/memory.json\n?? bench/baselines/full-suite-expanded-2026-11-07/memory.log\n?? bench/baselines/full-suite-expanded-2026-11-07/suite.json\n?? bench/baselines/full-suite-expanded-2026-11-07/validator-tests.log\n?? bench/baselines/full-suite-indexed-2026-11-07/engine-build.log\n?? bench/baselines/full-suite-indexed-2026-11-07/engine-build/build.json\n?? bench/baselines/full-suite-indexed-2026-11-07/engine-ratios.log\n?? bench/baselines/full-suite-indexed-2026-11-07/engines.json\n?? bench/baselines/full-suite-indexed-2026-11-07/engines.log\n?? bench/baselines/full-suite-indexed-2026-11-07/host.log\n?? bench/baselines/full-suite-indexed-2026-11-07/host/baseline.json\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/cargo-bench-build.log\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/cargo-build.log\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/collections.json\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/criterion.log\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/node.json\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/owner-memory.json\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/plugin-build.log\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/public-api.json\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/scheduler-build.log\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/scheduler-node-legacy-0.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/scheduler-node-legacy-1.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/scheduler-node-legacy-2.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/scheduler-node-persistent-0.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/scheduler-node-persistent-1.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/scheduler-node-persistent-2.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/scheduler-rust-0.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/scheduler-rust-1.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/scheduler-rust-2.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/trusted-node-0.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/trusted-node-1.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/host/raw/trusted-node-2.jsonl\n?? bench/baselines/full-suite-indexed-2026-11-07/http-build.log\n?? bench/baselines/full-suite-indexed-2026-11-07/http-build/build.json\n?? bench/baselines/full-suite-indexed-2026-11-07/http-validate.log\n?? bench/baselines/full-suite-indexed-2026-11-07/http.json\n?? bench/baselines/full-suite-indexed-2026-11-07/http.log\n?? bench/baselines/full-suite-indexed-2026-11-07/memory-validate.log\n?? bench/baselines/full-suite-indexed-2026-11-07/memory.json\n?? bench/baselines/full-suite-indexed-2026-11-07/memory.log\n?? bench/baselines/full-suite-indexed-2026-11-07/suite.json\n?? bench/baselines/full-suite-indexed-2026-11-07/validator-tests.log\n?? bench/baselines/full-suite-platforms-2026-11-07/engine-build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/engine-build/build.json\n?? bench/baselines/full-suite-platforms-2026-11-07/engine-build/build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/engine-build/workloads.json\n?? bench/baselines/full-suite-platforms-2026-11-07/engine-ratios.log\n?? bench/baselines/full-suite-platforms-2026-11-07/engines.json\n?? bench/baselines/full-suite-platforms-2026-11-07/engines.log\n?? bench/baselines/full-suite-platforms-2026-11-07/host.log\n?? bench/baselines/full-suite-platforms-2026-11-07/host/baseline.json\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/cargo-bench-build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/cargo-build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/collections.json\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/criterion.log\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/node.json\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/owner-memory.json\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/plugin-build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/public-api.json\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/scheduler-build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/scheduler-node-legacy-0.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/scheduler-node-legacy-1.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/scheduler-node-legacy-2.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/scheduler-node-persistent-0.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/scheduler-node-persistent-1.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/scheduler-node-persistent-2.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/scheduler-rust-0.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/scheduler-rust-1.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/scheduler-rust-2.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/trusted-node-0.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/trusted-node-1.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/host/raw/trusted-node-2.jsonl\n?? bench/baselines/full-suite-platforms-2026-11-07/http-build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/http-build/build.json\n?? bench/baselines/full-suite-platforms-2026-11-07/http-build/build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/http-validate.log\n?? bench/baselines/full-suite-platforms-2026-11-07/http.json\n?? bench/baselines/full-suite-platforms-2026-11-07/http.log\n?? bench/baselines/full-suite-platforms-2026-11-07/memory-validate.log\n?? bench/baselines/full-suite-platforms-2026-11-07/memory.json\n?? bench/baselines/full-suite-platforms-2026-11-07/memory.log\n?? bench/baselines/full-suite-platforms-2026-11-07/platform-build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/platform-build/build.json\n?? bench/baselines/full-suite-platforms-2026-11-07/platform-build/native-build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/platform-build/wasm-build.log\n?? bench/baselines/full-suite-platforms-2026-11-07/platform-build/workloads.json\n?? bench/baselines/full-suite-platforms-2026-11-07/platform-ratios.json\n?? bench/baselines/full-suite-platforms-2026-11-07/platform-validate.log\n?? bench/baselines/full-suite-platforms-2026-11-07/platforms.json\n?? bench/baselines/full-suite-platforms-2026-11-07/platforms.log\n?? bench/baselines/full-suite-platforms-2026-11-07/suite.json\n?? bench/baselines/full-suite-platforms-2026-11-07/validation.json\n?? bench/baselines/http-2026-11-07/http-clippy.log\n?? bench/baselines/http-2026-11-07/http-final-changes-1.json\n?? bench/baselines/http-2026-11-07/http-final-changes-2.json\n?? bench/baselines/http-2026-11-07/http-final-changes-3.json\n?? bench/baselines/http-2026-11-07/http-final-changes-4.json\n?? bench/baselines/http-2026-11-07/http-final-paired-0-before.json\n?? bench/baselines/http-2026-11-07/http-final-paired-1-after.json\n?? bench/baselines/http-2026-11-07/http-final-paired-2-after.json\n?? bench/baselines/http-2026-11-07/http-final-paired-3-before.json\n?? bench/baselines/http-2026-11-07/http-final-paired-4-after.json\n?? bench/baselines/http-2026-11-07/http-final-paired-5-before.json\n?? bench/baselines/http-2026-11-07/http-final-paired-6-before.json\n?? bench/baselines/http-2026-11-07/http-final-paired-7-after.json\n?? bench/baselines/http-2026-11-07/http-tests-expanded.log\n?? bench/baselines/http-2026-11-07/validation.json\n?? bench/baselines/memory-2026-11-07/baseline.json\n?? bench/baselines/memory-2026-11-07/clippy.log\n?? bench/baselines/memory-2026-11-07/hwm-diagnostics.json\n?? bench/baselines/memory-2026-11-07/stress.json\n?? bench/baselines/memory-2026-11-07/timing-smoke-ratios.json\n?? bench/baselines/memory-2026-11-07/timing-smoke.json\n?? bench/baselines/memory-2026-11-07/validation.json\n?? bench/baselines/memory-2026-11-07/validator-tests.log\n?? bench/baselines/operations-2026-11-07/engine-ratios.json\n?? bench/baselines/operations-2026-11-07/language-tests.log\n?? bench/baselines/operations-2026-11-07/metadata-paired-0-before.log\n?? bench/baselines/operations-2026-11-07/metadata-paired-1-after.log\n?? bench/baselines/operations-2026-11-07/metadata-paired-2-after.log\n?? bench/baselines/operations-2026-11-07/metadata-paired-3-before.log\n?? bench/baselines/operations-2026-11-07/metadata-paired.json\n?? bench/baselines/operations-2026-11-07/metadata-provenance.json\n?? bench/baselines/operations-2026-11-07/rquickjs-expanded-smoke.json\n?? bench/baselines/platforms-2026-11-07/after-1-ratios.json\n?? bench/baselines/platforms-2026-11-07/after-1.json\n?? bench/baselines/platforms-2026-11-07/after-1.log\n?? bench/baselines/platforms-2026-11-07/after-2-ratios.json\n?? bench/baselines/platforms-2026-11-07/after-2.json\n?? bench/baselines/platforms-2026-11-07/after-2.log\n?? bench/baselines/platforms-2026-11-07/after-native-build.log\n?? bench/baselines/platforms-2026-11-07/after-wasm-build.log\n?? bench/baselines/platforms-2026-11-07/before-1-ratios.json\n?? bench/baselines/platforms-2026-11-07/before-1.json\n?? bench/baselines/platforms-2026-11-07/before-1.log\n?? bench/baselines/platforms-2026-11-07/before-2-ratios.json\n?? bench/baselines/platforms-2026-11-07/before-2.json\n?? bench/baselines/platforms-2026-11-07/before-2.log\n?? bench/baselines/platforms-2026-11-07/build-after.json\n?? bench/baselines/platforms-2026-11-07/build-before.json\n?? bench/baselines/platforms-2026-11-07/final-tests.log\n?? bench/baselines/platforms-2026-11-07/host-observation.json\n?? bench/baselines/platforms-2026-11-07/import-counts-after.json\n?? bench/baselines/platforms-2026-11-07/import-counts-before.json\n?? bench/baselines/platforms-2026-11-07/npm-pack-after.json\n?? bench/baselines/platforms-2026-11-07/npm-pack-before.json\n?? bench/baselines/platforms-2026-11-07/package-tests.log\n?? bench/baselines/platforms-2026-11-07/packed-wasm-tests.log\n?? bench/baselines/platforms-2026-11-07/pair-1.json\n?? bench/baselines/platforms-2026-11-07/pair-2.json\n?? bench/baselines/platforms-2026-11-07/playground-build.log\n?? bench/baselines/platforms-2026-11-07/sources/bench/performance/platforms.cjs\n?? bench/baselines/platforms-2026-11-07/sources/bench/performance/wasm-imports.mjs\n?? bench/baselines/platforms-2026-11-07/sources/bench/platform_ratios.py\n?? bench/baselines/platforms-2026-11-07/sources/bench/platforms.py\n?? bench/baselines/platforms-2026-11-07/sources/bench/rquickjs.py\n?? bench/baselines/platforms-2026-11-07/sources/bench/rquickjs/src/main.rs\n?? bench/baselines/platforms-2026-11-07/sources/bench/suite.py\n?? bench/baselines/platforms-2026-11-07/sources/tests/node/wasm-package.test.js\n?? bench/baselines/platforms-2026-11-07/sources/tests/wasm/browser-build.test.mjs\n?? bench/baselines/platforms-2026-11-07/sources/tools/ci/wasm-package.mjs\n?? bench/baselines/platforms-2026-11-07/validation.json\n?? bench/baselines/platforms-2026-11-07/vite-build.log\n?? bench/baselines/platforms-2026-11-07/wasm-after.rs\n?? bench/baselines/platforms-2026-11-07/wasm-before.rs\n?? bench/baselines/platforms-2026-11-07/wasm-clippy-final.log\n?? bench/baselines/shape-cache-2026-11-07/benchmark-validator-tests.log\n?? bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-compare.log\n?? bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-comparison.json\n?? bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-full.log\n?? bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-report.json.gz\n?? bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-summary.json\n?? bench/baselines/shape-cache-2026-11-07/clippy.log\n?? bench/baselines/shape-cache-2026-11-07/core-tests.log\n?? bench/baselines/shape-cache-2026-11-07/layouts/build.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-0-before.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-1-bounded.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-2-header.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-3-bounded.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-4-header.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-5-before.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-6-header.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-7-before.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-8-bounded.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-0-before-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-0-before-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-1-id-first-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-1-id-first-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-2-hot-index-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-2-hot-index-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-3-hot-index-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-3-hot-index-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-4-id-first-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-4-id-first-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-5-before-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-5-before-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-summary.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/node-tests.log\n?? bench/baselines/shape-cache-2026-11-07/layouts/selected-memory-comparison.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/selected-memory-stress.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/selection.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-hot-header-clippy.log\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-hot-header-core-tests.log\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-id-after.asm\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-id-before.asm\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-id-header.asm\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-id-hot-index.asm\n?? bench/baselines/shape-cache-2026-11-07/layouts/suite-validator-tests.log\n?? bench/baselines/shape-cache-2026-11-07/memory-baseline-after.json\n?? bench/baselines/shape-cache-2026-11-07/memory-baseline-comparison.json\n?? bench/baselines/shape-cache-2026-11-07/memory-stress-after.json\n?? bench/baselines/shape-cache-2026-11-07/memory-stress-comparison.json\n?? bench/baselines/shape-cache-2026-11-07/node-default-tests.log\n?? bench/baselines/shape-cache-2026-11-07/node-runtime-tests.log\n?? bench/baselines/shape-cache-2026-11-07/selected-hot-header-build.json\n?? bench/baselines/shape-cache-2026-11-07/selected-hot-header-source-checks.json\n?? bench/baselines/shape-cache-2026-11-07/selected-hot-header-test262-comparison.json\n?? bench/baselines/shape-cache-2026-11-07/selected-hot-header-test262-comparison.log\n?? bench/baselines/shape-cache-2026-11-07/selected-hot-header-test262-report.json.gz\n?? bench/baselines/shape-cache-2026-11-07/selected-hot-header-test262-summary.json\n?? bench/baselines/shape-cache-2026-11-07/selected-hot-header-test262.log\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-0-before.json\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-1-after.json\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-2-after.json\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-3-before.json\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-changes-1.json\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-changes-2.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-0-before.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-1-after.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-2-after.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-3-before.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-changes-1.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-changes-2.json\n?? bench/baselines/shape-cache-2026-11-07/validation-build.json\n?? bench/baselines/shape-cache-2026-11-07/validation.json\n?? bench/collection_memory.py\n?? bench/collection_report.py\n?? bench/http.py\n?? bench/latency_controls.py\n?? bench/memory_report.py\n?? bench/performance/collection-memory.cjs\n?? bench/performance/collections.cjs\n?? bench/performance/platforms.cjs\n?? bench/performance/promise-memory.cjs\n?? bench/performance/public-api.cjs\n?? bench/performance/wasm-imports.mjs\n?? bench/platform_ratios.py\n?? bench/platforms.py\n?? bench/public_api_report.py\n?? bench/rquickjs/src/bin/async_jobs.rs\n?? bench/rquickjs/src/bin/memory.rs\n?? bench/suite.py\n?? bench/tests/test_async_jobs.py\n?? bench/tests/test_collection_memory.py\n?? bench/tests/test_collection_report.py\n?? bench/tests/test_http.py\n?? bench/tests/test_memory_report.py\n?? bench/tests/test_platforms.py\n?? bench/tests/test_public_api_report.py\n?? bench/tests/test_suite.py\n?? crates/napi-vm-runtime/examples/http_bench.rs\n?? crates/napi-vm-runtime/examples/http_bench/native.rs\n?? tests/array_result_fast_path.rs\n?? tests/collection_index.rs\n?? tests/node/collection-identity.test.js\n?? tests/node/shape-cache.test.js\n?? tests/node/wasm-package.test.js\n?? tools/ci/wasm-package.mjs",
+    "source_sha256_start": "de8ffa7f0ea519a537e5889075a13cf6dc01112d81ff81d6b943d3d21a5ba447",
+    "source_sha256_end": "de8ffa7f0ea519a537e5889075a13cf6dc01112d81ff81d6b943d3d21a5ba447",
+    "build_inputs_sha256_start": "6cf63bfc92c48cbb4cd1e6a3f025f00d9d70e69c5c9ef21aec0519d3c374fff6",
+    "build_inputs_sha256_end": "6cf63bfc92c48cbb4cd1e6a3f025f00d9d70e69c5c9ef21aec0519d3c374fff6",
+    "platform": "Linux-7.3.0-4-cachyos-x86_64-with-glibc2.44",
+    "machine": "x86_64",
+    "cpu": "AMD BC-250",
+    "cpu_count": 12,
+    "load_average_at_end": [
+      4.68017578125,
+      4.4443359375,
+      3.54931640625
+    ],
+    "build_environment": {},
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)\nbinary: rustc\ncommit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4\ncommit-date: 2026-09-28\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.0\nLLVM version: 23.1.1",
+    "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+    "node": "v26.13.0",
+    "features": {
+      "library": "default (napi)",
+      "criterion": "default (napi), plus core test-hooks dev feature",
+      "scheduler_rust": "default plus runtime",
+      "trusted_process": "emitted TypeScript on Node"
+    },
+    "profile": "release / Cargo bench profile",
+    "criterion": {
+      "samples": 10,
+      "warmup_seconds": 0.2,
+      "measurement_seconds": 0.5
+    },
+    "backend_artifacts": {
+      "criterion_sha256": "4443148fafb82a0266e5f38dd0d27dd413a84947f29ff35d2ddc77270a845a37",
+      "trusted_emitted_js_sha256": "0cbefdb6dad884bd961dfad56ffa43fb30a61383cd02e1c668376b333853cfd4",
+      "addon_path": "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-async-suite/host/raw/napi-vm.node",
+      "addon_sha256": "34280f5088cd808e0260b6ef2db80f95a6f75dcef048582d7882ddb5479b9139",
+      "built_library_sha256_at_build": "34280f5088cd808e0260b6ef2db80f95a6f75dcef048582d7882ddb5479b9139",
+      "scheduler_sha256": "e04213f446a2df5f3320736a47f6374688b03ffa58d31ac8c5851f95cb32537c",
+      "lsp_sha256": "5640e6d2154a16bfc6d6fc9ee17e8cba2de65dc8dd48f84930bd0eafb15b88cf"
+    },
+    "limitations": [
+      "Finite representative workloads, not full code coverage.",
+      "No CPU affinity or isolation; compare on the same quiet machine.",
+      "Criterion samples are per-iteration batch averages. Scheduler and trusted samples are independent whole-run summary medians, not per-call samples.",
+      "Trusted process measurement uses the current emitted TypeScript sources, including any dirty edits.",
+      "LanguageService cases use the NAPI binding; LSP transport is built and fingerprinted but not measured.",
+      "No filesystem/network runtime, wasm, Bun, or native trusted-process workload measured."
+    ]
+  },
+  "results": [
+    {
+      "name": "node_binding/arithmetic",
+      "unit": "ns/call",
+      "samples": [
+        8341263,
+        8369208,
+        7843901,
+        7753752,
+        8113103,
+        8646771,
+        7887825,
+        7726575,
+        7849917,
+        8509538,
+        8073769,
+        7952405,
+        7794673,
+        8330322,
+        8556718,
+        7895918,
+        7723447,
+        8361168,
+        8560767,
+        7830870
+      ],
+      "backend": "runCode: fresh VM with warmed source-template cache via explicitly loaded NAPI addon",
+      "summary": {
+        "median": 8013087.0,
+        "mad": 272923.5,
+        "min": 7723447,
+        "max": 8646771,
+        "count": 20
+      }
+    },
+    {
+      "name": "node_binding/fibonacci",
+      "unit": "ns/call",
+      "samples": [
+        3323899,
+        3703639,
+        3190390,
+        3124885,
+        3130217,
+        3183508,
+        3132793,
+        3127534,
+        3129946,
+        3160302,
+        3743101,
+        3441390,
+        3384512,
+        3174500,
+        3146818,
+        3160553,
+        3164660,
+        3183216,
+        3162436,
+        3195768
+      ],
+      "backend": "runCode: fresh VM with warmed source-template cache via explicitly loaded NAPI addon",
+      "summary": {
+        "median": 3169580.0,
+        "mad": 31487.5,
+        "min": 3124885,
+        "max": 3743101,
+        "count": 20
+      }
+    },
+    {
+      "name": "node_binding/array",
+      "unit": "ns/call",
+      "samples": [
+        10283423,
+        10539729,
+        10662003,
+        10301057,
+        10397924,
+        10830500,
+        10275097,
+        10463683,
+        10672510,
+        10376573,
+        10250805,
+        10983836,
+        11064245,
+        10774144,
+        10742463,
+        10981870,
+        10757059,
+        10421732,
+        10764874,
+        10328257
+      ],
+      "backend": "runCode: fresh VM with warmed source-template cache via explicitly loaded NAPI addon",
+      "summary": {
+        "median": 10600866.0,
+        "mad": 213617.5,
+        "min": 10250805,
+        "max": 11064245,
+        "count": 20
+      }
+    },
+    {
+      "name": "node_binding/json",
+      "unit": "ns/call",
+      "samples": [
+        9107002,
+        8718866,
+        8572917,
+        8507350,
+        8921760,
+        8474332,
+        8460432,
+        8465536,
+        8972176,
+        8511623,
+        8440138,
+        8431933,
+        8959953,
+        8473230,
+        8615147,
+        8485599,
+        9023023,
+        8505582,
+        8410753,
+        8456850
+      ],
+      "backend": "runCode: fresh VM with warmed source-template cache via explicitly loaded NAPI addon",
+      "summary": {
+        "median": 8506466.0,
+        "mad": 66389.5,
+        "min": 8410753,
+        "max": 9107002,
+        "count": 20
+      }
+    },
+    {
+      "name": "language_service/completion",
+      "unit": "ns/call",
+      "samples": [
+        528809,
+        532296,
+        530692,
+        541767,
+        579164,
+        547536,
+        540024,
+        572103,
+        535922,
+        548106,
+        523421,
+        534399,
+        536626,
+        532945,
+        532597,
+        523858,
+        529593,
+        524890,
+        523522,
+        520764
+      ],
+      "backend": "NAPI LanguageService; cached document completion",
+      "summary": {
+        "median": 532771.0,
+        "mad": 7567.0,
+        "min": 520764,
+        "max": 579164,
+        "count": 20
+      }
+    },
+    {
+      "name": "language_service/diagnostics_update",
+      "unit": "ns/call",
+      "samples": [
+        10201,
+        9939,
+        9278,
+        14015,
+        14608,
+        9547,
+        8887,
+        9134,
+        8786,
+        8714,
+        8907,
+        8834,
+        11442,
+        9288,
+        8807,
+        13714,
+        9619,
+        8766,
+        8834,
+        9348
+      ],
+      "backend": "NAPI LanguageService; update plus diagnostics",
+      "summary": {
+        "median": 9283.0,
+        "mad": 462.5,
+        "min": 8714,
+        "max": 14608,
+        "count": 20
+      }
+    },
+    {
+      "name": "node/collections/map_1_references",
+      "unit": "ns/call",
+      "source": "var collection=new Map();for(var i=0;i<256;i++)collection.set(i,i);var output=[];for(var i=0;i<1;i++)output.push(collection);function get(){return output;}",
+      "expectedEntries": 256,
+      "references": 1,
+      "sharedIdentityPreserved": true,
+      "samples": [
+        68407.6,
+        421872.2,
+        67382.3,
+        63442.1,
+        66703.3,
+        62022.2,
+        100743.4,
+        65977.9,
+        57832.5,
+        59314.6,
+        56998.4,
+        55451.1,
+        74870.4,
+        57977.1,
+        55551.1
+      ],
+      "summary": {
+        "median": 63442.1,
+        "mad": 5465.0,
+        "min": 55451.1,
+        "max": 421872.2,
+        "count": 15
+      },
+      "backend": "NAPI retained call and outbound collection conversion"
+    },
+    {
+      "name": "node/collections/map_64_references",
+      "unit": "ns/call",
+      "source": "var collection=new Map();for(var i=0;i<256;i++)collection.set(i,i);var output=[];for(var i=0;i<64;i++)output.push(collection);function get(){return output;}",
+      "expectedEntries": 256,
+      "references": 64,
+      "sharedIdentityPreserved": true,
+      "samples": [
+        69730.2,
+        73570.8,
+        66720.9,
+        68600.1,
+        66322.4,
+        68732.4,
+        65658.3,
+        65568.2,
+        66886.9,
+        65052.2,
+        68210.6,
+        67834.5,
+        71186.9,
+        69569.3,
+        66299.8
+      ],
+      "summary": {
+        "median": 67834.5,
+        "mad": 1534.699999999997,
+        "min": 65052.2,
+        "max": 73570.8,
+        "count": 15
+      },
+      "backend": "NAPI retained call and outbound collection conversion"
+    },
+    {
+      "name": "node/collections/set_1_references",
+      "unit": "ns/call",
+      "source": "var collection=new Set();for(var i=0;i<256;i++)collection.add(i);var output=[];for(var i=0;i<1;i++)output.push(collection);function get(){return output;}",
+      "expectedEntries": 256,
+      "references": 1,
+      "sharedIdentityPreserved": true,
+      "samples": [
+        53730.8,
+        52217.5,
+        53194.9,
+        51917.4,
+        66444.1,
+        52929.6,
+        51166.1,
+        52856.4,
+        51390.2,
+        52936.5,
+        52791.9,
+        52916.6,
+        68190.4,
+        59778.1,
+        53207.4
+      ],
+      "summary": {
+        "median": 52929.6,
+        "mad": 712.0999999999985,
+        "min": 51166.1,
+        "max": 68190.4,
+        "count": 15
+      },
+      "backend": "NAPI retained call and outbound collection conversion"
+    },
+    {
+      "name": "node/collections/set_64_references",
+      "unit": "ns/call",
+      "source": "var collection=new Set();for(var i=0;i<256;i++)collection.add(i);var output=[];for(var i=0;i<64;i++)output.push(collection);function get(){return output;}",
+      "expectedEntries": 256,
+      "references": 64,
+      "sharedIdentityPreserved": true,
+      "samples": [
+        64519.2,
+        63536.9,
+        64514.6,
+        75899.4,
+        63635.6,
+        63498.1,
+        62885.5,
+        63328.5,
+        64080.8,
+        63422.1,
+        62924,
+        64122.9,
+        76509,
+        63787.1,
+        62416.7
+      ],
+      "summary": {
+        "median": 63635.6,
+        "mad": 487.3000000000029,
+        "min": 62416.7,
+        "max": 76509,
+        "count": 15
+      },
+      "backend": "NAPI retained call and outbound collection conversion"
+    },
+    {
+      "name": "node_api/construct_dispose",
+      "unit": "ns/call",
+      "backend": "NAPI Vm construction and explicit disposal, including builtin setup/cleanup",
+      "samples": [
+        3373439.2,
+        3357108.6,
+        3346980.8,
+        3335189.9,
+        3357970.4,
+        3386366.6,
+        3347030.4,
+        3356478.1,
+        3341375.5,
+        3374897.7,
+        3458808.3,
+        3355160.6,
+        3698805.7,
+        3699556.3,
+        3427736
+      ],
+      "summary": {
+        "median": 3357970.4,
+        "mad": 16594.899999999907,
+        "min": 3335189.9,
+        "max": 3699556.3,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/run_cached_source",
+      "unit": "ns/call",
+      "backend": "NAPI persistent run with warmed identical source and scalar string result",
+      "samples": [
+        3435.9,
+        2295.1,
+        2254.1,
+        2267,
+        2264.5,
+        2862.8,
+        2306.1,
+        2336.5,
+        2300.1,
+        2315.8,
+        3377.9,
+        2281,
+        2515.2,
+        4417.2,
+        2270.5
+      ],
+      "summary": {
+        "median": 2306.1,
+        "mad": 39.09999999999991,
+        "min": 2254.1,
+        "max": 4417.2,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/get_global_scalar",
+      "unit": "ns/call",
+      "backend": "NAPI getGlobal with existing scalar and string result",
+      "samples": [
+        1650.8,
+        1175.8,
+        1172.4,
+        1182.1,
+        1169.1,
+        1348,
+        1167.1,
+        1353.8,
+        1166.2,
+        1215.8,
+        1231.8,
+        1176.2,
+        1754.4,
+        1261.2,
+        1175
+      ],
+      "summary": {
+        "median": 1182.1,
+        "mad": 15.899999999999864,
+        "min": 1166.2,
+        "max": 1754.4,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/has_global",
+      "unit": "ns/call",
+      "backend": "NAPI hasGlobal existing name",
+      "samples": [
+        1223.3,
+        1017.2,
+        1016.4,
+        1005.9,
+        1005.7,
+        1004.5,
+        1007,
+        1261.3,
+        1025.5,
+        1076.3,
+        1011.1,
+        1014.7,
+        1013.2,
+        1035.8,
+        1013
+      ],
+      "summary": {
+        "median": 1014.7,
+        "mad": 8.800000000000068,
+        "min": 1004.5,
+        "max": 1261.3,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/set_global_scalar",
+      "unit": "ns/call",
+      "backend": "NAPI setGlobal existing scalar; verification read excluded",
+      "samples": [
+        9081.5,
+        9238,
+        9980.4,
+        10367.6,
+        10365,
+        9992.7,
+        11656.4,
+        9758.6,
+        10429.5,
+        9920.1,
+        9722.9,
+        9862.3,
+        10714.5,
+        10289.3,
+        10039.6
+      ],
+      "summary": {
+        "median": 9992.7,
+        "mad": 296.59999999999854,
+        "min": 9081.5,
+        "max": 11656.4,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/remove_global",
+      "unit": "ns/call",
+      "backend": "NAPI removeGlobal existing scalar; reseeding excluded",
+      "samples": [
+        3317.5,
+        3049.7,
+        2892.6,
+        2840.1,
+        2907.1,
+        2910.7,
+        2870.9,
+        3124.7,
+        2937.8,
+        2962.9,
+        2927.2,
+        2944.3,
+        3126,
+        3067.4,
+        2874.6
+      ],
+      "summary": {
+        "median": 2937.8,
+        "mad": 63.20000000000027,
+        "min": 2840.1,
+        "max": 3317.5,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/call_no_arguments",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call, no arguments, scalar outbound result",
+      "samples": [
+        2437.3,
+        2502.9,
+        2273.2,
+        2161,
+        2255.1,
+        2328.6,
+        2077.2,
+        2340,
+        2789.3,
+        2031.8,
+        2014,
+        1997.5,
+        2000.5,
+        1999.3,
+        3051.6
+      ],
+      "summary": {
+        "median": 2255.1,
+        "mad": 223.29999999999995,
+        "min": 1997.5,
+        "max": 3051.6,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/call_eight_numbers",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call, eight scalar incoming arguments, scalar result",
+      "samples": [
+        3609.7,
+        3315.5,
+        3296,
+        3305.4,
+        3274.1,
+        3319.3,
+        3258.1,
+        3521.6,
+        3265.1,
+        3302.7,
+        3262.7,
+        3260.2,
+        3311.7,
+        3264.4,
+        3510.7
+      ],
+      "summary": {
+        "median": 3302.7,
+        "mad": 37.59999999999991,
+        "min": 3258.1,
+        "max": 3609.7,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/call_plain_control",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call with scalar guest addition",
+      "samples": [
+        2483.3,
+        2140.2,
+        2734.7,
+        2101,
+        2112.3,
+        2088,
+        2107.6,
+        2147.7,
+        2886.2,
+        2087.3,
+        2104.5,
+        2093.9,
+        403509.6,
+        2166.8,
+        2086.7
+      ],
+      "summary": {
+        "median": 2112.3,
+        "mad": 25.600000000000364,
+        "min": 2086.7,
+        "max": 403509.6,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/call_host_callback",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call, synchronous Node callback and scalar result",
+      "samples": [
+        3937.9,
+        2807.9,
+        2784.3,
+        2782.8,
+        2782.9,
+        2800.8,
+        2795,
+        3040.5,
+        2790.9,
+        2817.2,
+        2786.3,
+        3058,
+        2787.4,
+        2797.1,
+        2778.7
+      ],
+      "summary": {
+        "median": 2795,
+        "mad": 12.099999999999909,
+        "min": 2778.7,
+        "max": 3937.9,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/replace_host_function",
+      "unit": "ns/call",
+      "backend": "NAPI exposeFunction replacement including callback registration/revocation; invocation check excluded",
+      "samples": [
+        15300.3,
+        12999,
+        13067.9,
+        12861.1,
+        12798.5,
+        13700.5,
+        12426.2,
+        12945.7,
+        12425.7,
+        13107.2,
+        13514.9,
+        12741.2,
+        12505.4,
+        12891,
+        13136.9
+      ],
+      "summary": {
+        "median": 12945.7,
+        "mad": 191.1999999999989,
+        "min": 12425.7,
+        "max": 15300.3,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/set_object_1",
+      "unit": "ns/call",
+      "backend": "NAPI setGlobal plain incoming object with 1 numeric own properties; guest sum check excluded",
+      "samples": [
+        15472.8,
+        15051.3,
+        20912.4,
+        15678.6,
+        14664.6,
+        14158.5,
+        15450.3,
+        28033.5,
+        13323.4,
+        15777.3,
+        13043.5,
+        13183.4,
+        11956.2,
+        12001.1,
+        12407.8
+      ],
+      "summary": {
+        "median": 14664.6,
+        "mad": 1341.2000000000007,
+        "min": 11956.2,
+        "max": 28033.5,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/return_object_1",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call and outgoing plain object with 1 numeric own properties",
+      "samples": [
+        4256.9,
+        3385.1,
+        3454.5,
+        4418.9,
+        3575,
+        3366.3,
+        3243,
+        3398.7,
+        3183,
+        3185.8,
+        3417.9,
+        3187.8,
+        3416.8,
+        3164,
+        3301.1
+      ],
+      "summary": {
+        "median": 3385.1,
+        "mad": 142.0999999999999,
+        "min": 3164,
+        "max": 4418.9,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/set_object_128",
+      "unit": "ns/call",
+      "backend": "NAPI setGlobal plain incoming object with 128 numeric own properties; guest sum check excluded",
+      "samples": [
+        89743.4,
+        87308.6,
+        84516.6,
+        85567.3,
+        82558.5,
+        152641.3,
+        78634,
+        80025.8,
+        82411.8,
+        78794.7,
+        79960.9,
+        81231.3,
+        77520.4,
+        79412.9,
+        80182
+      ],
+      "summary": {
+        "median": 81231.3,
+        "mad": 2436.600000000006,
+        "min": 77520.4,
+        "max": 152641.3,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/return_object_128",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call and outgoing plain object with 128 numeric own properties",
+      "samples": [
+        62877,
+        76037,
+        54580.3,
+        53802.2,
+        53752.3,
+        53462.7,
+        52317.3,
+        51896.2,
+        60250.6,
+        51668.6,
+        52121.7,
+        52456.6,
+        60821.4,
+        52330.3,
+        52437.4
+      ],
+      "summary": {
+        "median": 53462.7,
+        "mad": 1145.3999999999942,
+        "min": 51668.6,
+        "max": 76037,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/set_bytes_1024",
+      "unit": "ns/call",
+      "backend": "NAPI setGlobal full Uint8Array copy of 1024 bytes; guest endpoint check excluded",
+      "samples": [
+        11481.3,
+        10476.6,
+        10877.5,
+        10002.5,
+        9965.4,
+        9895.8,
+        9579,
+        9162.5,
+        9050.6,
+        8961.5,
+        9121.7,
+        8978.1,
+        10317.5,
+        9166.2,
+        9192.9
+      ],
+      "summary": {
+        "median": 9579,
+        "mad": 457.2999999999993,
+        "min": 8961.5,
+        "max": 11481.3,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/return_bytes_1024",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call and outgoing Uint8Array copy of 1024 bytes",
+      "samples": [
+        3764.3,
+        3427.2,
+        3383.7,
+        3382.8,
+        3402,
+        3372,
+        5116.5,
+        3515.8,
+        4212.5,
+        3463.5,
+        3419.9,
+        3428.6,
+        4209.7,
+        3338.6,
+        3353.6
+      ],
+      "summary": {
+        "median": 3427.2,
+        "mad": 55.19999999999982,
+        "min": 3338.6,
+        "max": 5116.5,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/set_bytes_65536",
+      "unit": "ns/call",
+      "backend": "NAPI setGlobal full Uint8Array copy of 65536 bytes; guest endpoint check excluded",
+      "samples": [
+        11164.3,
+        10959.1,
+        11086.7,
+        11114.4,
+        10831.2,
+        11027.4,
+        11030.1,
+        10878.7,
+        10859.5,
+        11319.8,
+        10861.4,
+        11036.1,
+        10879.3,
+        11359.3,
+        11079.1
+      ],
+      "summary": {
+        "median": 11030.1,
+        "mad": 134.1999999999989,
+        "min": 10831.2,
+        "max": 11359.3,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/return_bytes_65536",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call and outgoing Uint8Array copy of 65536 bytes",
+      "samples": [
+        24516.4,
+        27554.3,
+        38519.4,
+        35365.3,
+        37366.4,
+        64565.3,
+        34495,
+        34693.1,
+        36020,
+        33757.7,
+        34296.5,
+        36277,
+        34352.1,
+        35123,
+        36710.6
+      ],
+      "summary": {
+        "median": 35123,
+        "mad": 1154,
+        "min": 24516.4,
+        "max": 64565.3,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/validate_module",
+      "unit": "ns/call",
+      "backend": "NAPI validateModule valid small source; see implementation for parser/cache policy",
+      "samples": [
+        6679.6,
+        5345.2,
+        5254.3,
+        5285.3,
+        5660.7,
+        5966.7,
+        5302.1,
+        5247.5,
+        5239.5,
+        5230.1,
+        5268.5,
+        5277.2,
+        5254.2,
+        5276.7,
+        5249.3
+      ],
+      "summary": {
+        "median": 5276.7,
+        "mad": 27.399999999999636,
+        "min": 5230.1,
+        "max": 6679.6,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/define_module",
+      "unit": "ns/call",
+      "backend": "NAPI deferred module source registration/replacement; import evaluation excluded",
+      "samples": [
+        1784.4,
+        1060.9,
+        1050.7,
+        1055,
+        1057.7,
+        1056.7,
+        1049.8,
+        1050.9,
+        1050,
+        1108.1,
+        1059,
+        1055.1,
+        1061.4,
+        1056.3,
+        1199.6
+      ],
+      "summary": {
+        "median": 1056.7,
+        "mad": 4.7000000000000455,
+        "min": 1049.8,
+        "max": 1784.4,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/register_module",
+      "unit": "ns/call",
+      "backend": "NAPI eager module replacement, warmed identical source, export transaction and execution",
+      "samples": [
+        7656.2,
+        7210.9,
+        7240.4,
+        7482.8,
+        7809.1,
+        7462.9,
+        7240.8,
+        8391.5,
+        7136.3,
+        8315.4,
+        7087.7,
+        7072.4,
+        7166.2,
+        7119.4,
+        7124.2
+      ],
+      "summary": {
+        "median": 7240.4,
+        "mad": 152.69999999999982,
+        "min": 7072.4,
+        "max": 8391.5,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/has_module",
+      "unit": "ns/call",
+      "backend": "NAPI hasModule existing deferred module",
+      "samples": [
+        1129.2,
+        856.4,
+        852.6,
+        853.2,
+        850.1,
+        851.4,
+        850.9,
+        849.2,
+        851.3,
+        848.6,
+        852.6,
+        849.8,
+        851.8,
+        850.3,
+        847.8
+      ],
+      "summary": {
+        "median": 851.3,
+        "mad": 1.3000000000000682,
+        "min": 847.8,
+        "max": 1129.2,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/remove_module",
+      "unit": "ns/call",
+      "backend": "NAPI removeModule deferred source; reseeding excluded",
+      "samples": [
+        1339.4,
+        1214.3,
+        1211.8,
+        1209.6,
+        1207.3,
+        1211.8,
+        1208.9,
+        1209,
+        1204.3,
+        1228.7,
+        1209.6,
+        1211.7,
+        1209.5,
+        1206.8,
+        1202.2
+      ],
+      "summary": {
+        "median": 1209.6,
+        "mad": 2.2000000000000455,
+        "min": 1202.2,
+        "max": 1339.4,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/list_modules",
+      "unit": "ns/call",
+      "backend": "NAPI listModules existing small registry and outbound string array",
+      "samples": [
+        1532,
+        1280.9,
+        1279,
+        1277.8,
+        1280,
+        1279.4,
+        1278.1,
+        1274.7,
+        1278.5,
+        1276.7,
+        1276.8,
+        1278.3,
+        1276,
+        1280.4,
+        1278.5
+      ],
+      "summary": {
+        "median": 1278.5,
+        "mad": 1.5,
+        "min": 1274.7,
+        "max": 1532,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/collect_cycles_idle",
+      "unit": "ns/call",
+      "backend": "NAPI explicit cycle collection on retained owner without deliberately created garbage",
+      "samples": [
+        541091.6,
+        501033.2,
+        502411.2,
+        501142.1,
+        502452.7,
+        498823.9,
+        546950.7,
+        502797.5,
+        499742.5,
+        502340.3,
+        501084.5,
+        500363,
+        499398.2,
+        617983.7,
+        506167.1
+      ],
+      "summary": {
+        "median": 502340.3,
+        "mad": 1977.2999999999884,
+        "min": 498823.9,
+        "max": 617983.7,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_owner_memory/map_small/last_collected_rss",
+      "unit": "bytes",
+      "samples": [
+        78225408,
+        78274560,
+        78659584
+      ],
+      "backend": "Node process RSS after three collection-replacement rounds and explicit native GC; separate owner/process per sample",
+      "summary": {
+        "median": 78274560,
+        "mad": 49152,
+        "min": 78225408,
+        "max": 78659584,
+        "count": 3
+      }
+    },
+    {
+      "name": "node_owner_memory/map_large/last_collected_rss",
+      "unit": "bytes",
+      "samples": [
+        91889664,
+        92037120,
+        92213248
+      ],
+      "backend": "Node process RSS after three collection-replacement rounds and explicit native GC; separate owner/process per sample",
+      "summary": {
+        "median": 92037120,
+        "mad": 147456,
+        "min": 91889664,
+        "max": 92213248,
+        "count": 3
+      }
+    },
+    {
+      "name": "node_owner_memory/set_small/last_collected_rss",
+      "unit": "bytes",
+      "samples": [
+        78802944,
+        78438400,
+        78774272
+      ],
+      "backend": "Node process RSS after three collection-replacement rounds and explicit native GC; separate owner/process per sample",
+      "summary": {
+        "median": 78774272,
+        "mad": 28672,
+        "min": 78438400,
+        "max": 78802944,
+        "count": 3
+      }
+    },
+    {
+      "name": "node_owner_memory/set_large/last_collected_rss",
+      "unit": "bytes",
+      "samples": [
+        92651520,
+        92643328,
+        92475392
+      ],
+      "backend": "Node process RSS after three collection-replacement rounds and explicit native GC; separate owner/process per sample",
+      "summary": {
+        "median": 92643328,
+        "mad": 8192,
+        "min": 92475392,
+        "max": 92651520,
+        "count": 3
+      }
+    },
+    {
+      "name": "criterion/frontend/lex_big_source",
+      "unit": "ns/iteration",
+      "samples": [
+        4876950.5,
+        4883118.5,
+        4886001.833333333,
+        4878431.625,
+        4865123.8,
+        4843042.083333333,
+        4842508.571428572,
+        4855051.1875,
+        4835593.222222222,
+        4832016.15
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 4860087.49375,
+        "mad": 17961.526785714086,
+        "min": 4832016.15,
+        "max": 4886001.833333333,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/frontend/parse_big_source",
+      "unit": "ns/iteration",
+      "samples": [
+        10598101.0,
+        10627104.5,
+        10737233.0,
+        10402525.5,
+        10542555.4,
+        10631003.666666666,
+        10587168.857142856,
+        10571737.25,
+        10481489.555555556,
+        10525873.4
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 10579453.05357143,
+        "mad": 49601.02976190392,
+        "min": 10402525.5,
+        "max": 10737233.0,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/language_metadata/1_documents_changed",
+      "unit": "ns/iteration",
+      "samples": [
+        133838.33823529413,
+        133542.1838235294,
+        133215.95098039217,
+        133232.6911764706,
+        133374.82352941178,
+        133474.13725490196,
+        133456.96218487396,
+        134245.5955882353,
+        133470.00326797387,
+        133392.79852941175
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 133463.4827264239,
+        "mad": 83.68014705881069,
+        "min": 133215.95098039217,
+        "max": 134245.5955882353,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/language_metadata/1_documents_unchanged",
+      "unit": "ns/iteration",
+      "samples": [
+        230.49887960888165,
+        231.52374465267874,
+        231.72239763699326,
+        230.3723581686698,
+        234.51023630067223,
+        231.75217712365043,
+        230.50805372057155,
+        231.84592712365043,
+        233.38998098730224,
+        249.06747046241597
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 231.73728738032185,
+        "mad": 1.2338207155952432,
+        "min": 230.3723581686698,
+        "max": 249.06747046241597,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/language_metadata/20_documents_changed",
+      "unit": "ns/iteration",
+      "samples": [
+        2200738.4,
+        2252213.0,
+        2235417.8666666667,
+        2237851.0,
+        2248957.08,
+        2237362.433333333,
+        2241387.057142857,
+        2245911.5,
+        2354822.466666667,
+        2359800.16
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 2243649.2785714287,
+        "mad": 7259.128571428824,
+        "min": 2200738.4,
+        "max": 2359800.16,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/language_metadata/20_documents_unchanged",
+      "unit": "ns/iteration",
+      "samples": [
+        231.36900735013606,
+        231.73776037030444,
+        231.7823105029799,
+        231.42415244538265,
+        231.6052188509372,
+        233.32892070839372,
+        229.9296268979374,
+        229.51220465932502,
+        229.55500168140367,
+        230.33264833795366
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 231.39657989775935,
+        "mad": 0.7248310825131199,
+        "min": 229.51220465932502,
+        "max": 233.32892070839372,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/plugin_call/direct_call_json",
+      "unit": "ns/iteration",
+      "samples": [
+        125366.2923076923,
+        153974.6846153846,
+        144818.5794871795,
+        142801.61538461538,
+        145324.22153846154,
+        130953.21025641025,
+        133158.29230769232,
+        138302.09807692308,
+        133421.252991453,
+        132270.2969230769
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 135861.67553418805,
+        "mad": 5924.202564102561,
+        "min": 125366.2923076923,
+        "max": 153974.6846153846,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/plugin_call/legacy_wrapper_eval",
+      "unit": "ns/iteration",
+      "samples": [
+        2072081.0,
+        2077527.5,
+        2059223.1333333333,
+        2130919.8,
+        2055305.92,
+        2065696.1333333333,
+        2069232.7142857143,
+        2089703.8,
+        2037949.4888888889,
+        2066950.08
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 2068091.3971428573,
+        "mad": 9152.183333333349,
+        "min": 2037949.4888888889,
+        "max": 2130919.8,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/run/arithmetic_loop",
+      "unit": "ns/iteration",
+      "samples": [
+        8800097.0,
+        8691175.5,
+        8623131.833333334,
+        8592448.125,
+        8661203.8,
+        8683119.166666666,
+        8657549.214285715,
+        8686762.5625,
+        8794210.444444444,
+        8664625.9
+      ],
+      "backend": "AST fresh",
+      "summary": {
+        "median": 8673872.533333333,
+        "mad": 16813.142857142724,
+        "min": 8592448.125,
+        "max": 8800097.0,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/run/array_chain",
+      "unit": "ns/iteration",
+      "samples": [
+        10944177.0,
+        10636294.0,
+        10798527.666666666,
+        10759547.0,
+        10748429.4,
+        10614758.833333334,
+        10598416.285714285,
+        10541419.375,
+        10546213.555555556,
+        10621230.8
+      ],
+      "backend": "AST fresh",
+      "summary": {
+        "median": 10628762.4,
+        "mad": 84945.93472222239,
+        "min": 10541419.375,
+        "max": 10944177.0,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/run/closures",
+      "unit": "ns/iteration",
+      "samples": [
+        12216641.0,
+        11918460.5,
+        11849061.666666666,
+        12815540.0,
+        12257343.0,
+        12191791.666666666,
+        12013736.285714285,
+        12171437.75,
+        12105483.333333334,
+        12033977.6
+      ],
+      "backend": "AST fresh",
+      "summary": {
+        "median": 12138460.541666668,
+        "mad": 111682.70000000019,
+        "min": 11849061.666666666,
+        "max": 12815540.0,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/run/json_roundtrip",
+      "unit": "ns/iteration",
+      "samples": [
+        9122926.5,
+        9136934.0,
+        8952682.666666666,
+        9079828.5,
+        9354813.4,
+        9174128.083333334,
+        9462605.07142857,
+        9071722.375,
+        9044264.555555556,
+        8981754.95
+      ],
+      "backend": "AST fresh",
+      "summary": {
+        "median": 9101377.5,
+        "mad": 64931.76388888899,
+        "min": 8952682.666666666,
+        "max": 9462605.07142857,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/run/property_updates",
+      "unit": "ns/iteration",
+      "samples": [
+        8515048.0,
+        8389867.5,
+        8558746.833333334,
+        8453338.375,
+        8478789.1,
+        8481302.166666666,
+        8643567.214285715,
+        8398607.875,
+        8431931.666666666,
+        8427579.7
+      ],
+      "backend": "AST fresh",
+      "summary": {
+        "median": 8466063.7375,
+        "mad": 43734.15000000037,
+        "min": 8389867.5,
+        "max": 8643567.214285715,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/run/recursion_fib",
+      "unit": "ns/iteration",
+      "samples": [
+        3724253.0,
+        3774770.5,
+        3769374.5555555555,
+        3762927.75,
+        3755401.1333333333,
+        3753551.6666666665,
+        3747344.4285714286,
+        3769187.5416666665,
+        3780994.2592592593,
+        3951575.2
+      ],
+      "backend": "AST fresh",
+      "summary": {
+        "median": 3766057.645833333,
+        "mad": 11581.245833333116,
+        "min": 3724253.0,
+        "max": 3951575.2,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/run/string_ops",
+      "unit": "ns/iteration",
+      "samples": [
+        10077546.0,
+        10022158.5,
+        9983724.333333334,
+        10102432.75,
+        10061255.6,
+        10088613.166666666,
+        10253946.857142856,
+        10299171.25,
+        10104275.444444444,
+        10311091.7
+      ],
+      "backend": "AST fresh",
+      "summary": {
+        "median": 10095522.958333332,
+        "mad": 53815.90833333228,
+        "min": 9983724.333333334,
+        "max": 10311091.7,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/tiers/call_tiny_hot",
+      "unit": "ns/iteration",
+      "samples": [
+        1386287.0,
+        1407185.2857142857,
+        1387284.6666666667,
+        1375267.0,
+        1379320.142857143,
+        1382533.7857142857,
+        1443590.8979591837,
+        1392679.4107142857,
+        1437766.7142857143,
+        1388930.2142857143
+      ],
+      "backend": "bytecode asserted",
+      "summary": {
+        "median": 1388107.4404761905,
+        "mad": 7180.476190476213,
+        "min": 1375267.0,
+        "max": 1443590.8979591837,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/tiers/gc_collect",
+      "unit": "ns/iteration",
+      "samples": [
+        3610305.3333333335,
+        3445445.0,
+        3522635.111111111,
+        3528167.5,
+        3507287.8,
+        3933663.0555555555,
+        3439975.0,
+        3417178.2916666665,
+        3418514.5555555555,
+        3451648.0
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 3479467.9,
+        "mad": 45933.4055555556,
+        "min": 3417178.2916666665,
+        "max": 3933663.0555555555,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/tiers/prop_mega_hot",
+      "unit": "ns/iteration",
+      "samples": [
+        1651503.0,
+        1646404.5,
+        1646341.2222222222,
+        1644906.8333333333,
+        1649668.7666666666,
+        1654286.9444444445,
+        1656127.5714285714,
+        1652157.9166666667,
+        1660575.7407407407,
+        1657765.0
+      ],
+      "backend": "bytecode asserted",
+      "summary": {
+        "median": 1651830.4583333335,
+        "mad": 4861.535714285681,
+        "min": 1644906.8333333333,
+        "max": 1660575.7407407407,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/tiers/prop_mono_hot",
+      "unit": "ns/iteration",
+      "samples": [
+        515554.44444444444,
+        529618.9722222222,
+        535170.5,
+        525826.875,
+        519645.76666666666,
+        523090.712962963,
+        518857.6904761905,
+        519326.31944444444,
+        520641.64814814815,
+        517874.25
+      ],
+      "backend": "bytecode asserted",
+      "summary": {
+        "median": 520143.7074074074,
+        "mad": 2608.231481481489,
+        "min": 515554.44444444444,
+        "max": 535170.5,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/tiers/shape_churn",
+      "unit": "ns/iteration",
+      "samples": [
+        1379283.0,
+        1392910.9285714286,
+        1383751.761904762,
+        1374943.142857143,
+        1377179.2,
+        1383515.0476190476,
+        1382595.530612245,
+        1395500.7857142857,
+        1395406.6825396826,
+        1384811.9571428571
+      ],
+      "backend": "bytecode asserted",
+      "summary": {
+        "median": 1383633.4047619049,
+        "mad": 5402.304761904874,
+        "min": 1374943.142857143,
+        "max": 1395500.7857142857,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/warm/class_methods_reused_vm",
+      "unit": "ns/iteration",
+      "samples": [
+        11316338.0,
+        11172782.5,
+        11321564.0,
+        11324722.5,
+        11336611.6,
+        11431970.666666666,
+        11677896.714285715,
+        11397643.875,
+        11181911.333333334,
+        11226905.3
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 11323143.25,
+        "mad": 85369.28749999963,
+        "min": 11172782.5,
+        "max": 11677896.714285715,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/warm/property_updates_ast",
+      "unit": "ns/iteration",
+      "samples": [
+        4383798.333333333,
+        4424428.833333333,
+        4347036.0,
+        4365468.083333333,
+        4354255.8,
+        4362558.666666667,
+        4369186.380952381,
+        4368837.625,
+        4382642.259259259,
+        4357839.933333334
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 4367152.854166666,
+        "mad": 11104.987499999348,
+        "min": 4347036.0,
+        "max": 4424428.833333333,
+        "count": 10
+      }
+    },
+    {
+      "name": "scheduler-rust/timers/100",
+      "unit": "ns/batch",
+      "samples": [
+        18736.0,
+        19385.0,
+        18785.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 18785.0,
+        "mad": 49.0,
+        "min": 18736.0,
+        "max": 19385.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/cancel/100",
+      "unit": "ns/batch",
+      "samples": [
+        15507.0,
+        16180.0,
+        15530.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 15530.0,
+        "mad": 23.0,
+        "min": 15507.0,
+        "max": 16180.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/timers/1000",
+      "unit": "ns/batch",
+      "samples": [
+        361030.0,
+        359040.0,
+        355785.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 359040.0,
+        "mad": 1990.0,
+        "min": 355785.0,
+        "max": 361030.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/cancel/1000",
+      "unit": "ns/batch",
+      "samples": [
+        355526.0,
+        356136.0,
+        358802.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 356136.0,
+        "mad": 610.0,
+        "min": 355526.0,
+        "max": 358802.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/timers/10000",
+      "unit": "ns/batch",
+      "samples": [
+        4772835.0,
+        4723823.0,
+        4805814.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 4772835.0,
+        "mad": 32979.0,
+        "min": 4723823.0,
+        "max": 4805814.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/cancel/10000",
+      "unit": "ns/batch",
+      "samples": [
+        4657154.0,
+        4623492.0,
+        4830388.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 4657154.0,
+        "mad": 33662.0,
+        "min": 4623492.0,
+        "max": 4830388.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/vm/timers",
+      "unit": "ns/batch",
+      "samples": [
+        5924402.0,
+        6053416.0,
+        5849804.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 5924402.0,
+        "mad": 74598.0,
+        "min": 5849804.0,
+        "max": 6053416.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/vm/cancel",
+      "unit": "ns/batch",
+      "samples": [
+        4932414.0,
+        4881317.0,
+        4868694.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 4881317.0,
+        "mad": 12623.0,
+        "min": 4868694.0,
+        "max": 4932414.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/vm/promises",
+      "unit": "ns/batch",
+      "samples": [
+        27222718.0,
+        27165559.0,
+        27926695.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 27222718.0,
+        "mad": 57159.0,
+        "min": 27165559.0,
+        "max": 27926695.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/vm/mixed",
+      "unit": "ns/batch",
+      "samples": [
+        9898390.0,
+        10218918.0,
+        9748516.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 9898390.0,
+        "mad": 149874.0,
+        "min": 9748516.0,
+        "max": 10218918.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-node-legacy/trivial-async",
+      "unit": "ns/call",
+      "samples": [
+        10097.000000001799,
+        17583.999999999378,
+        13034.999999995023
+      ],
+      "backend": "scheduler-node-legacy; individual samples are per-run p50",
+      "summary": {
+        "median": 13034.999999995023,
+        "mad": 2937.9999999932243,
+        "min": 10097.000000001799,
+        "max": 17583.999999999378,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-node-legacy/awaited-host-async",
+      "unit": "ns/call",
+      "samples": [
+        28379.999999970096,
+        24718.000000007123,
+        27733.99999995263
+      ],
+      "backend": "scheduler-node-legacy; individual samples are per-run p50",
+      "summary": {
+        "median": 27733.99999995263,
+        "mad": 646.0000000174659,
+        "min": 24718.000000007123,
+        "max": 28379.999999970096,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-node-persistent/trivial-async",
+      "unit": "ns/call",
+      "samples": [
+        10720.99999999665,
+        11036.999999994634,
+        10648.999999993692
+      ],
+      "backend": "scheduler-node-persistent; individual samples are per-run p50",
+      "summary": {
+        "median": 10720.99999999665,
+        "mad": 72.00000000295768,
+        "min": 10648.999999993692,
+        "max": 11036.999999994634,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-node-persistent/awaited-host-async",
+      "unit": "ns/call",
+      "samples": [
+        25749.000000018896,
+        26897.00000001949,
+        23784.999999975298
+      ],
+      "backend": "scheduler-node-persistent; individual samples are per-run p50",
+      "summary": {
+        "median": 25749.000000018896,
+        "mad": 1148.000000000593,
+        "min": 23784.999999975298,
+        "max": 26897.00000001949,
+        "count": 3
+      }
+    },
+    {
+      "name": "trusted-node/payload_64_p50",
+      "unit": "ns",
+      "samples": [
+        344045.0000000226,
+        302726.99999997596,
+        473430.00000000757
+      ],
+      "backend": "trusted-node; individual samples are per-run p50",
+      "summary": {
+        "median": 344045.0000000226,
+        "mad": 41318.000000046624,
+        "min": 302726.99999997596,
+        "max": 473430.00000000757,
+        "count": 3
+      }
+    },
+    {
+      "name": "trusted-node/payload_4096_p50",
+      "unit": "ns",
+      "samples": [
+        804317.999999995,
+        696152.9999999811,
+        1219075.0000000037
+      ],
+      "backend": "trusted-node; individual samples are per-run p50",
+      "summary": {
+        "median": 804317.999999995,
+        "mad": 108165.00000001385,
+        "min": 696152.9999999811,
+        "max": 1219075.0000000037,
+        "count": 3
+      }
+    },
+    {
+      "name": "trusted-node/payload_262144_p50",
+      "unit": "ns",
+      "samples": [
+        7960270.000000037,
+        8424064.999999985,
+        8346709.999999973
+      ],
+      "backend": "trusted-node; individual samples are per-run p50",
+      "summary": {
+        "median": 8346709.999999973,
+        "mad": 77355.0000000121,
+        "min": 7960270.000000037,
+        "max": 8424064.999999985,
+        "count": 3
+      }
+    },
+    {
+      "name": "trusted-node/payload_1048576_p50",
+      "unit": "ns",
+      "samples": [
+        27292320.00000002,
+        30075152.000000004,
+        28089902.999999937
+      ],
+      "backend": "trusted-node; individual samples are per-run p50",
+      "summary": {
+        "median": 28089902.999999937,
+        "mad": 797582.999999918,
+        "min": 27292320.00000002,
+        "max": 30075152.000000004,
+        "count": 3
+      }
+    },
+    {
+      "name": "trusted-node/startup",
+      "unit": "ns",
+      "samples": [
+        120208649.0,
+        115146710.00000001,
+        140977052.0
+      ],
+      "backend": "trusted-node; individual samples are per-run p50",
+      "summary": {
+        "median": 120208649.0,
+        "mad": 5061938.999999985,
+        "min": 115146710.00000001,
+        "max": 140977052.0,
+        "count": 3
+      }
+    }
+  ]
+}

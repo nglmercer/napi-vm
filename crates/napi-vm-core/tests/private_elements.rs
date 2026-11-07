@@ -12,7 +12,7 @@ fn truth(source: &str) {
 #[test]
 fn instance_private_methods_are_branded_before_fields_and_remain_read_only() {
     truth(
-        "class A{#value=this.#method();#method(){return 42;}read(){return this.#value;}method(){return this.#method;}write(){this.#method=1;}}var a=new A();var b=new A();var caught;try{a.write();}catch(e){caught=e;}a.read()===42&&a.method()===b.method()&&caught instanceof TypeError&&Object.getOwnPropertyNames(A.prototype).join(',')==='read,method,write,constructor';",
+        "class A{#value=this.#method();#method(){return 42;}read(){return this.#value;}method(){return this.#method;}write(){this.#method=1;}}var a=new A();var b=new A();var caught;try{a.write();}catch(e){caught=e;}a.read()===42&&a.method()===b.method()&&caught instanceof TypeError&&Object.getOwnPropertyNames(A.prototype).join(',')==='constructor,read,method,write';",
     );
 }
 

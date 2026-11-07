@@ -36,6 +36,23 @@ use crate::value::{MAX_ARRAY_LEN, MAX_OBJECT_PROPS, MAX_STRING_LEN, Value, limit
 /// error instead of overflowing the stack in the recursive walkers below.
 const MAX_MARSHAL_DEPTH: usize = 512;
 
+// One boundary crossing builds a plain record with own data properties.
+// In particular, an empty logs array is fresh for every result.
+#[wasm_bindgen(inline_js = r#"
+export function makeRunResult(ok, value, error, logs) {
+    return {ok, value, error, logs: logs === undefined ? [] : logs};
+}
+export function makeLogEntry(level, text) {
+    return {level, text};
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(js_name = makeRunResult)]
+    fn make_run_result(ok: bool, value: &str, error: &str, logs: &JsValue) -> JsValue;
+    #[wasm_bindgen(js_name = makeLogEntry)]
+    fn make_log_entry(level: &str, text: &str) -> JsValue;
+}
+
 // ---------------------------------------------------------------------------
 // Marshalling: Value <-> JsValue
 // ---------------------------------------------------------------------------
@@ -130,7 +147,7 @@ fn js_to_value_d(j: &JsValue, depth: usize) -> Result<Value, VmErr> {
         if s.len() > MAX_STRING_LEN {
             return Err(limit_err("Maximum string length exceeded"));
         }
-        return Ok(Value::String((s).into()));
+        return Ok(Value::String(s));
     }
     // A JS function has no callable VM representation in v1.
     if j.is_instance_of::<js_sys::Function>() {
@@ -149,8 +166,8 @@ fn js_to_value_d(j: &JsValue, depth: usize) -> Result<Value, VmErr> {
         let name = read("name", "Error");
         let message = read("message", "");
         return Value::checked_object(vec![
-            ("name".to_string(), Value::String((name).into())),
-            ("message".to_string(), Value::String((message).into())),
+            ("name".to_string(), Value::String(name)),
+            ("message".to_string(), Value::String(message)),
         ]);
     }
     if js_sys::Array::is_array(j) {
@@ -773,21 +790,18 @@ impl WasmVm {
             },
             Err(e) => (false, String::new(), e.to_string()),
         };
-        let obj = js_sys::Object::new();
-        set_prop(&obj, "ok", &JsValue::from_bool(ok));
-        set_prop(&obj, "value", &JsValue::from_str(&value));
-        set_prop(&obj, "error", &JsValue::from_str(&error));
-        set_prop(&obj, "logs", &self.logs_to_js());
-        obj.into()
+        let logs = if self.logs.borrow().is_empty() {
+            JsValue::UNDEFINED
+        } else {
+            self.logs_to_js()
+        };
+        make_run_result(ok, &value, &error, &logs)
     }
 
     fn logs_to_js(&self) -> JsValue {
         let arr = js_sys::Array::new();
         for (level, text) in self.logs.borrow().iter() {
-            let o = js_sys::Object::new();
-            set_prop(&o, "level", &JsValue::from_str(level));
-            set_prop(&o, "text", &JsValue::from_str(text));
-            arr.push(&o);
+            arr.push(&make_log_entry(level, text));
         }
         arr.into()
     }

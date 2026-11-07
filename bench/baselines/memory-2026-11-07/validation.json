@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "validated_matrices": {
+    "baseline": "2 engines \u00d7 4 workloads \u00d7 3 fresh processes; 8 calls \u00d7 2000 objects",
+    "stress": "2 engines \u00d7 4 workloads \u00d7 3 fresh processes; 32 calls \u00d7 4000 objects"
+  },
+  "numeric_results_checked_every_invocation": true,
+  "memory_validator_and_other_benchmark_tests_passed": 10,
+  "timing_binary_smoke_rows_validated": 6,
+  "clippy": "passed for memory binary with -D warnings",
+  "napi_unique_key_stress_counters": [
+    {
+      "ready_heap_tracked": 1113,
+      "last_heap_tracked": 1113,
+      "shapes_minted_delta": 128071
+    },
+    {
+      "ready_heap_tracked": 1113,
+      "last_heap_tracked": 1113,
+      "shapes_minted_delta": 128071
+    },
+    {
+      "ready_heap_tracked": 1113,
+      "last_heap_tracked": 1113,
+      "shapes_minted_delta": 128071
+    }
+  ],
+  "napi_post_gc_rss_growth_mib": 64.8046875,
+  "rquickjs_post_gc_rss_growth_mib": 1.26171875,
+  "limits": [
+    "Bare configured engine processes, not NAPI owner-context lifetimes or WASM/application memory.",
+    "Builtin sets differ; RSS includes mapped code/data, allocator retention, caches and probe allocations.",
+    "No CPU isolation; concurrent desktop/session work was not excluded. Explicit GC durations are descriptive.",
+    "VmRSS/VmHWM are approximate kernel readings; raw hwm-diagnostics.json from an earlier probe reproduces decreasing VmHWM readings and is not a validated comparison report.",
+    "Cumulative shapes minted is not itself a live-shape count. Retention diagnosis also depends on strong transition ownership in shape.rs."
+  ],
+  "linux_counter_reference": "https://man7.org/linux/man-pages/man5/proc_pid_status.5.html"
+}

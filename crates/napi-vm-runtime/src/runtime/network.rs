@@ -64,6 +64,9 @@ async fn fetch_async(
         .timeout(timeout)
         .build()
         .map_err(|e| e.to_string())?;
+    // Keep replayable uploads in shared immutable storage. Cloning a Vec here
+    // copied the complete payload for every hop, including 307/308 redirects.
+    let mut body = request.body.take().map(bytes::Bytes::from);
     let deadline = std::time::Instant::now()
         .checked_add(timeout)
         .ok_or("invalid network timeout")?;
@@ -97,7 +100,7 @@ async fn fetch_async(
             }
             outgoing = outgoing.header(name, value);
         }
-        if let Some(body) = &request.body {
+        if let Some(body) = &body {
             outgoing = outgoing.body(body.clone());
         }
         let mut response = cancellable(outgoing.send(), &cancelled, deadline).await?;
@@ -125,7 +128,7 @@ async fn fetch_async(
                     || matches!(status.as_u16(), 301 | 302) && method == reqwest::Method::POST
                 {
                     request.method = "GET".into();
-                    request.body = None;
+                    body = None;
                     request
                         .headers
                         .retain(|(n, _)| !n.to_ascii_lowercase().starts_with("content-"));

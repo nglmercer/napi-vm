@@ -1,0 +1,15 @@
+test_incomplete_corrupt_or_mismatched_reports_rejected (test_http.HttpTests.test_incomplete_corrupt_or_mismatched_reports_rejected) ... ok
+test_production_changes_allowed_and_fixed_inputs_rejected (test_http.HttpTests.test_production_changes_allowed_and_fixed_inputs_rejected) ... ok
+test_complete_report_and_signed_growth (test_memory_report.MemoryTests.test_complete_report_and_signed_growth) ... ok
+test_core_change_allowed_fixed_harness_and_helper_rejected (test_memory_report.MemoryTests.test_core_change_allowed_fixed_harness_and_helper_rejected) ... ok
+test_corrupt_or_incomplete_reports_rejected (test_memory_report.MemoryTests.test_corrupt_or_incomplete_reports_rejected) ... ok
+test_changed_harness_and_dependencies_fail (test_rquickjs_compare.ComparisonTests.test_changed_harness_and_dependencies_fail) ... ok
+test_engine_and_metadata_wrapper_changes_remain_comparable (test_rquickjs_compare.ComparisonTests.test_engine_and_metadata_wrapper_changes_remain_comparable) ... ok
+test_filtered_workload_reports_keep_added_removed_information (test_rquickjs_compare.ComparisonTests.test_filtered_workload_reports_keep_added_removed_information) ... ok
+test_malformed_rows_fail_instead_of_producing_partial_comparisons (test_rquickjs_compare.ComparisonTests.test_malformed_rows_fail_instead_of_producing_partial_comparisons) ... ok
+test_retained_reports_and_ratios (test_rquickjs_compare.ComparisonTests.test_retained_reports_and_ratios) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.114s
+
+OK

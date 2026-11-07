@@ -1,0 +1,1306 @@
+{
+  "schema": 1,
+  "removed": [],
+  "added": [],
+  "results": [
+    {
+      "workload": "collection_map_construct_1024",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 31083931.8,
+      "after_median": 9983967.2,
+      "after_over_before": 0.3211938330143936
+    },
+    {
+      "workload": "collection_map_construct_1024",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 2014398.0,
+      "after_median": 1740654.0,
+      "after_over_before": 0.8641062987552609
+    },
+    {
+      "workload": "collection_map_construct_1024",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 22511421.6,
+      "after_median": 1984079.8,
+      "after_over_before": 0.08813658396411535
+    },
+    {
+      "workload": "collection_map_construct_1024",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 1555426.4,
+      "after_median": 1526942.0,
+      "after_over_before": 0.9816870795043726
+    },
+    {
+      "workload": "collection_map_construct_1024",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 21784637.6,
+      "after_median": 2167511.0,
+      "after_over_before": 0.09949722551271635
+    },
+    {
+      "workload": "collection_map_construct_1024",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 1631811.0,
+      "after_median": 1642573.2,
+      "after_over_before": 1.0065952490821548
+    },
+    {
+      "workload": "collection_map_construct_16",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 3152458.0,
+      "after_median": 3026124.6,
+      "after_over_before": 0.9599254296171432
+    },
+    {
+      "workload": "collection_map_construct_16",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 205556.8,
+      "after_median": 206394.8,
+      "after_over_before": 1.0040767320760005
+    },
+    {
+      "workload": "collection_map_construct_16",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 54934.6,
+      "after_median": 35124.6,
+      "after_over_before": 0.6393893830117995
+    },
+    {
+      "workload": "collection_map_construct_16",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 7749.0,
+      "after_median": 3394.6,
+      "after_over_before": 0.43806942831333073
+    },
+    {
+      "workload": "collection_map_construct_16",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 51642.4,
+      "after_median": 40063.2,
+      "after_over_before": 0.7757811410778739
+    },
+    {
+      "workload": "collection_map_construct_16",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 11595.6,
+      "after_median": 7887.6,
+      "after_over_before": 0.6802235330642658
+    },
+    {
+      "workload": "collection_map_construct_256",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 8337716.2,
+      "after_median": 6882523.6,
+      "after_over_before": 0.8254686816996721
+    },
+    {
+      "workload": "collection_map_construct_256",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 335339.8,
+      "after_median": 329386.6,
+      "after_over_before": 0.9822472608381111
+    },
+    {
+      "workload": "collection_map_construct_256",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 1945134.4,
+      "after_median": 496799.6,
+      "after_over_before": 0.25540631022720073
+    },
+    {
+      "workload": "collection_map_construct_256",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 136782.2,
+      "after_median": 124660.0,
+      "after_over_before": 0.9113758954015946
+    },
+    {
+      "workload": "collection_map_construct_256",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 2057967.2,
+      "after_median": 494278.6,
+      "after_over_before": 0.24017807475260053
+    },
+    {
+      "workload": "collection_map_construct_256",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 193210.0,
+      "after_median": 131532.6,
+      "after_over_before": 0.6807753221882925
+    },
+    {
+      "workload": "collection_map_construct_64",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 5655460.6,
+      "after_median": 4681495.8,
+      "after_over_before": 0.8277832931945455
+    },
+    {
+      "workload": "collection_map_construct_64",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 223375.6,
+      "after_median": 215497.6,
+      "after_over_before": 0.964732047725893
+    },
+    {
+      "workload": "collection_map_construct_64",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 207837.6,
+      "after_median": 132097.2,
+      "after_over_before": 0.6355789327821337
+    },
+    {
+      "workload": "collection_map_construct_64",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 16794.2,
+      "after_median": 15843.2,
+      "after_over_before": 0.943373307451382
+    },
+    {
+      "workload": "collection_map_construct_64",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 207725.4,
+      "after_median": 130989.8,
+      "after_over_before": 0.630591155438863
+    },
+    {
+      "workload": "collection_map_construct_64",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 24111.4,
+      "after_median": 20309.8,
+      "after_over_before": 0.8423318430286088
+    },
+    {
+      "workload": "collection_map_lookup_numbers_1024",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 49921498.6,
+      "after_median": 14286589.4,
+      "after_over_before": 0.28618110034060557
+    },
+    {
+      "workload": "collection_map_lookup_numbers_1024",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 3464569.2,
+      "after_median": 3543693.4,
+      "after_over_before": 1.0228381063942957
+    },
+    {
+      "workload": "collection_map_lookup_numbers_1024",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 18928084.8,
+      "after_median": 1686108.4,
+      "after_over_before": 0.08907971502748127
+    },
+    {
+      "workload": "collection_map_lookup_numbers_1024",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 1525773.8,
+      "after_median": 1648335.2,
+      "after_over_before": 1.0803273722487565
+    },
+    {
+      "workload": "collection_map_lookup_numbers_1024",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 19078741.0,
+      "after_median": 1485762.8,
+      "after_over_before": 0.07787530634227909
+    },
+    {
+      "workload": "collection_map_lookup_numbers_1024",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 1617181.2,
+      "after_median": 1535474.4,
+      "after_over_before": 0.9494757915810547
+    },
+    {
+      "workload": "collection_map_lookup_numbers_16",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 4235310.8,
+      "after_median": 3503436.6,
+      "after_over_before": 0.8271970500960638
+    },
+    {
+      "workload": "collection_map_lookup_numbers_16",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 248383.0,
+      "after_median": 217811.6,
+      "after_over_before": 0.8769183076136451
+    },
+    {
+      "workload": "collection_map_lookup_numbers_16",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 33500.8,
+      "after_median": 23311.6,
+      "after_over_before": 0.695852039354284
+    },
+    {
+      "workload": "collection_map_lookup_numbers_16",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 3352.8,
+      "after_median": 2493.4,
+      "after_over_before": 0.7436769267477928
+    },
+    {
+      "workload": "collection_map_lookup_numbers_16",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 34757.0,
+      "after_median": 23511.8,
+      "after_over_before": 0.6764622953649624
+    },
+    {
+      "workload": "collection_map_lookup_numbers_16",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 11575.4,
+      "after_median": 5698.6,
+      "after_over_before": 0.49230264180935435
+    },
+    {
+      "workload": "collection_map_lookup_numbers_256",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 11539275.8,
+      "after_median": 8075784.0,
+      "after_over_before": 0.6998518919185552
+    },
+    {
+      "workload": "collection_map_lookup_numbers_256",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 503229.0,
+      "after_median": 513786.4,
+      "after_over_before": 1.0209793155799844
+    },
+    {
+      "workload": "collection_map_lookup_numbers_256",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 1428734.6,
+      "after_median": 371903.0,
+      "after_over_before": 0.26030236826349695
+    },
+    {
+      "workload": "collection_map_lookup_numbers_256",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 119049.0,
+      "after_median": 138461.6,
+      "after_over_before": 1.163063948458198
+    },
+    {
+      "workload": "collection_map_lookup_numbers_256",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 1459846.6,
+      "after_median": 395823.4,
+      "after_over_before": 0.2711404061221227
+    },
+    {
+      "workload": "collection_map_lookup_numbers_256",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 130460.4,
+      "after_median": 127921.6,
+      "after_over_before": 0.9805396886718116
+    },
+    {
+      "workload": "collection_map_lookup_numbers_64",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 6039994.8,
+      "after_median": 5581910.8,
+      "after_over_before": 0.9241582128514415
+    },
+    {
+      "workload": "collection_map_lookup_numbers_64",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 243602.2,
+      "after_median": 242001.4,
+      "after_over_before": 0.9934286307759125
+    },
+    {
+      "workload": "collection_map_lookup_numbers_64",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 166319.6,
+      "after_median": 89615.8,
+      "after_over_before": 0.5388168321713135
+    },
+    {
+      "workload": "collection_map_lookup_numbers_64",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 14372.6,
+      "after_median": 13417.4,
+      "after_over_before": 0.9335402084521937
+    },
+    {
+      "workload": "collection_map_lookup_numbers_64",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 161051.2,
+      "after_median": 90701.6,
+      "after_over_before": 0.5631848753688268
+    },
+    {
+      "workload": "collection_map_lookup_numbers_64",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 22227.4,
+      "after_median": 18909.6,
+      "after_over_before": 0.850733779029486
+    },
+    {
+      "workload": "collection_map_lookup_objects_1024",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 67029843.8,
+      "after_median": 21433661.6,
+      "after_over_before": 0.3197629650451312
+    },
+    {
+      "workload": "collection_map_lookup_objects_1024",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 1014341.0,
+      "after_median": 988389.6,
+      "after_over_before": 0.9744155072110858
+    },
+    {
+      "workload": "collection_map_lookup_objects_1024",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 23841247.8,
+      "after_median": 1654571.4,
+      "after_over_before": 0.06939953033834076
+    },
+    {
+      "workload": "collection_map_lookup_objects_1024",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 154687.0,
+      "after_median": 150324.4,
+      "after_over_before": 0.971797242172904
+    },
+    {
+      "workload": "collection_map_lookup_objects_1024",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 23887262.0,
+      "after_median": 1936619.6,
+      "after_over_before": 0.08107331849083416
+    },
+    {
+      "workload": "collection_map_lookup_objects_1024",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 164213.6,
+      "after_median": 162919.6,
+      "after_over_before": 0.9921200192919466
+    },
+    {
+      "workload": "collection_map_lookup_objects_16",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 5370976.4,
+      "after_median": 4199115.4,
+      "after_over_before": 0.7818160213848641
+    },
+    {
+      "workload": "collection_map_lookup_objects_16",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 248391.6,
+      "after_median": 237721.0,
+      "after_over_before": 0.9570412203955367
+    },
+    {
+      "workload": "collection_map_lookup_objects_16",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 34232.2,
+      "after_median": 27942.6,
+      "after_over_before": 0.8162665560495674
+    },
+    {
+      "workload": "collection_map_lookup_objects_16",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 2863.2,
+      "after_median": 2701.2,
+      "after_over_before": 0.9434199497066219
+    },
+    {
+      "workload": "collection_map_lookup_objects_16",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 33631.4,
+      "after_median": 29629.6,
+      "after_over_before": 0.8810100085039575
+    },
+    {
+      "workload": "collection_map_lookup_objects_16",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 7908.0,
+      "after_median": 7008.6,
+      "after_over_before": 0.8862670713201821
+    },
+    {
+      "workload": "collection_map_lookup_objects_256",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 14198433.8,
+      "after_median": 11076493.6,
+      "after_over_before": 0.7801208045918416
+    },
+    {
+      "workload": "collection_map_lookup_objects_256",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 422888.6,
+      "after_median": 404616.8,
+      "after_over_before": 0.9567928764218284
+    },
+    {
+      "workload": "collection_map_lookup_objects_256",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 1683980.6,
+      "after_median": 406980.8,
+      "after_over_before": 0.2416778435571051
+    },
+    {
+      "workload": "collection_map_lookup_objects_256",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 39610.6,
+      "after_median": 37539.0,
+      "after_over_before": 0.9477008679494883
+    },
+    {
+      "workload": "collection_map_lookup_objects_256",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 1706587.8,
+      "after_median": 419853.0,
+      "after_over_before": 0.2460189859554838
+    },
+    {
+      "workload": "collection_map_lookup_objects_256",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 48099.8,
+      "after_median": 46478.6,
+      "after_over_before": 0.966295078150013
+    },
+    {
+      "workload": "collection_map_lookup_objects_64",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 7351733.4,
+      "after_median": 6212996.8,
+      "after_over_before": 0.8451063799457145
+    },
+    {
+      "workload": "collection_map_lookup_objects_64",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 274460.0,
+      "after_median": 265400.4,
+      "after_over_before": 0.9669911826860017
+    },
+    {
+      "workload": "collection_map_lookup_objects_64",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 181852.8,
+      "after_median": 109393.2,
+      "after_over_before": 0.6015480652483768
+    },
+    {
+      "workload": "collection_map_lookup_objects_64",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 10014.0,
+      "after_median": 10176.4,
+      "after_over_before": 1.0162172957858997
+    },
+    {
+      "workload": "collection_map_lookup_objects_64",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 185226.8,
+      "after_median": 107203.2,
+      "after_over_before": 0.5787672194304496
+    },
+    {
+      "workload": "collection_map_lookup_objects_64",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 16822.2,
+      "after_median": 15652.6,
+      "after_over_before": 0.9304728275730879
+    },
+    {
+      "workload": "collection_map_lookup_strings_1024",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 56900162.8,
+      "after_median": 14213302.4,
+      "after_over_before": 0.24979370357794478
+    },
+    {
+      "workload": "collection_map_lookup_strings_1024",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 807949.0,
+      "after_median": 834328.6,
+      "after_over_before": 1.0326500806362777
+    },
+    {
+      "workload": "collection_map_lookup_strings_1024",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 22894276.6,
+      "after_median": 1831162.0,
+      "after_over_before": 0.07998339637427111
+    },
+    {
+      "workload": "collection_map_lookup_strings_1024",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 234042.8,
+      "after_median": 226281.8,
+      "after_over_before": 0.9668393986057251
+    },
+    {
+      "workload": "collection_map_lookup_strings_1024",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 22888441.6,
+      "after_median": 1898895.6,
+      "after_over_before": 0.08296307949598455
+    },
+    {
+      "workload": "collection_map_lookup_strings_1024",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 244033.0,
+      "after_median": 240597.2,
+      "after_over_before": 0.9859207566189819
+    },
+    {
+      "workload": "collection_map_lookup_strings_16",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 4980955.6,
+      "after_median": 3778359.8,
+      "after_over_before": 0.7585612286927432
+    },
+    {
+      "workload": "collection_map_lookup_strings_16",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 231906.8,
+      "after_median": 224157.6,
+      "after_over_before": 0.9665848521906215
+    },
+    {
+      "workload": "collection_map_lookup_strings_16",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 37738.8,
+      "after_median": 31100.4,
+      "after_over_before": 0.8240961556806258
+    },
+    {
+      "workload": "collection_map_lookup_strings_16",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 4330.4,
+      "after_median": 3789.8,
+      "after_over_before": 0.8751616478847221
+    },
+    {
+      "workload": "collection_map_lookup_strings_16",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 37825.2,
+      "after_median": 31100.6,
+      "after_over_before": 0.8222190497340398
+    },
+    {
+      "workload": "collection_map_lookup_strings_16",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 8343.4,
+      "after_median": 7676.2,
+      "after_over_before": 0.9200326006184529
+    },
+    {
+      "workload": "collection_map_lookup_strings_256",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 11725075.8,
+      "after_median": 7907860.2,
+      "after_over_before": 0.6744400066053304
+    },
+    {
+      "workload": "collection_map_lookup_strings_256",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 351924.0,
+      "after_median": 357022.4,
+      "after_over_before": 1.0144872188313387
+    },
+    {
+      "workload": "collection_map_lookup_strings_256",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 1858930.6,
+      "after_median": 446147.0,
+      "after_over_before": 0.24000196672215734
+    },
+    {
+      "workload": "collection_map_lookup_strings_256",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 60882.6,
+      "after_median": 58457.2,
+      "after_over_before": 0.9601626737360099
+    },
+    {
+      "workload": "collection_map_lookup_strings_256",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 1663025.6,
+      "after_median": 453475.6,
+      "after_over_before": 0.27268106997270514
+    },
+    {
+      "workload": "collection_map_lookup_strings_256",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 66527.0,
+      "after_median": 67999.8,
+      "after_over_before": 1.022138379905903
+    },
+    {
+      "workload": "collection_map_lookup_strings_64",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 6664862.4,
+      "after_median": 5962086.8,
+      "after_over_before": 0.8945551223983258
+    },
+    {
+      "workload": "collection_map_lookup_strings_64",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 256741.6,
+      "after_median": 259067.8,
+      "after_over_before": 1.0090604716960554
+    },
+    {
+      "workload": "collection_map_lookup_strings_64",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 201345.4,
+      "after_median": 115965.0,
+      "after_over_before": 0.5759505804453442
+    },
+    {
+      "workload": "collection_map_lookup_strings_64",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 15533.2,
+      "after_median": 14469.0,
+      "after_over_before": 0.9314886823062859
+    },
+    {
+      "workload": "collection_map_lookup_strings_64",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 200858.2,
+      "after_median": 115463.2,
+      "after_over_before": 0.574849321561181
+    },
+    {
+      "workload": "collection_map_lookup_strings_64",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 23237.4,
+      "after_median": 19397.6,
+      "after_over_before": 0.8347577611953143
+    },
+    {
+      "workload": "collection_set_construct_1024",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 30194460.2,
+      "after_median": 10105542.8,
+      "after_over_before": 0.3346820156102675
+    },
+    {
+      "workload": "collection_set_construct_1024",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 1871901.2,
+      "after_median": 1761817.0,
+      "after_over_before": 0.9411912338108444
+    },
+    {
+      "workload": "collection_set_construct_1024",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 19835246.0,
+      "after_median": 2246450.4,
+      "after_over_before": 0.11325548470636562
+    },
+    {
+      "workload": "collection_set_construct_1024",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 1531642.8,
+      "after_median": 1650996.8,
+      "after_over_before": 1.077925479752851
+    },
+    {
+      "workload": "collection_set_construct_1024",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 20159836.2,
+      "after_median": 2071034.2,
+      "after_over_before": 0.10273070571873
+    },
+    {
+      "workload": "collection_set_construct_1024",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 1570125.8,
+      "after_median": 1517556.8,
+      "after_over_before": 0.9665192432351599
+    },
+    {
+      "workload": "collection_set_construct_16",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 4735558.0,
+      "after_median": 3437753.8,
+      "after_over_before": 0.725944820019098
+    },
+    {
+      "workload": "collection_set_construct_16",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 224168.8,
+      "after_median": 210912.0,
+      "after_over_before": 0.9408624215323453
+    },
+    {
+      "workload": "collection_set_construct_16",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 66344.4,
+      "after_median": 35373.0,
+      "after_over_before": 0.533172355164867
+    },
+    {
+      "workload": "collection_set_construct_16",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 6495.8,
+      "after_median": 3440.4,
+      "after_over_before": 0.5296345330829151
+    },
+    {
+      "workload": "collection_set_construct_16",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 73032.8,
+      "after_median": 35992.0,
+      "after_over_before": 0.49281966458906135
+    },
+    {
+      "workload": "collection_set_construct_16",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 16692.4,
+      "after_median": 6924.6,
+      "after_over_before": 0.4148354939972682
+    },
+    {
+      "workload": "collection_set_construct_256",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 9245324.4,
+      "after_median": 7276719.2,
+      "after_over_before": 0.7870701865258508
+    },
+    {
+      "workload": "collection_set_construct_256",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 326999.0,
+      "after_median": 320849.8,
+      "after_over_before": 0.9811950495261453
+    },
+    {
+      "workload": "collection_set_construct_256",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 1626370.4,
+      "after_median": 502674.2,
+      "after_over_before": 0.30907731719662385
+    },
+    {
+      "workload": "collection_set_construct_256",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 121676.2,
+      "after_median": 122942.6,
+      "after_over_before": 1.0104079515961215
+    },
+    {
+      "workload": "collection_set_construct_256",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 1605178.6,
+      "after_median": 506044.6,
+      "after_over_before": 0.31525750467891855
+    },
+    {
+      "workload": "collection_set_construct_256",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 132326.6,
+      "after_median": 129588.6,
+      "after_over_before": 0.9793087708744879
+    },
+    {
+      "workload": "collection_set_construct_64",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 5913004.0,
+      "after_median": 4705375.2,
+      "after_over_before": 0.7957672952698831
+    },
+    {
+      "workload": "collection_set_construct_64",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 225975.2,
+      "after_median": 212842.6,
+      "after_over_before": 0.9418847731963508
+    },
+    {
+      "workload": "collection_set_construct_64",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 192105.8,
+      "after_median": 133957.2,
+      "after_over_before": 0.6973095034090591
+    },
+    {
+      "workload": "collection_set_construct_64",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 15632.6,
+      "after_median": 15789.6,
+      "after_over_before": 1.01004311502885
+    },
+    {
+      "workload": "collection_set_construct_64",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 205300.2,
+      "after_median": 138127.2,
+      "after_over_before": 0.67280596901513
+    },
+    {
+      "workload": "collection_set_construct_64",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 23423.8,
+      "after_median": 19981.8,
+      "after_over_before": 0.8530554393394753
+    },
+    {
+      "workload": "collection_set_has_1024",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 85240540.2,
+      "after_median": 15033524.4,
+      "after_over_before": 0.17636589778439718
+    },
+    {
+      "workload": "collection_set_has_1024",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 6598083.4,
+      "after_median": 6535301.0,
+      "after_over_before": 0.9904847519811586
+    },
+    {
+      "workload": "collection_set_has_1024",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 57096596.8,
+      "after_median": 2705306.4,
+      "after_over_before": 0.04738121975073653
+    },
+    {
+      "workload": "collection_set_has_1024",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 4654498.4,
+      "after_median": 4500297.0,
+      "after_over_before": 0.9668704580497868
+    },
+    {
+      "workload": "collection_set_has_1024",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 56358519.4,
+      "after_median": 2608560.6,
+      "after_over_before": 0.04628511585774555
+    },
+    {
+      "workload": "collection_set_has_1024",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 4811742.0,
+      "after_median": 4359279.6,
+      "after_over_before": 0.90596702815737
+    },
+    {
+      "workload": "collection_set_has_16",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 5969409.0,
+      "after_median": 4353058.8,
+      "after_over_before": 0.7292277677739957
+    },
+    {
+      "workload": "collection_set_has_16",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 241488.8,
+      "after_median": 225917.4,
+      "after_over_before": 0.9355191627934711
+    },
+    {
+      "workload": "collection_set_has_16",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 55169.4,
+      "after_median": 46587.8,
+      "after_over_before": 0.8444500030814184
+    },
+    {
+      "workload": "collection_set_has_16",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 4933.0,
+      "after_median": 5095.4,
+      "after_over_before": 1.0329211433204946
+    },
+    {
+      "workload": "collection_set_has_16",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 56914.2,
+      "after_median": 49928.0,
+      "after_over_before": 0.877250317144052
+    },
+    {
+      "workload": "collection_set_has_16",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 10385.4,
+      "after_median": 14050.4,
+      "after_over_before": 1.3528992624260983
+    },
+    {
+      "workload": "collection_set_has_256",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 15085435.6,
+      "after_median": 8820605.6,
+      "after_over_before": 0.5847100364804845
+    },
+    {
+      "workload": "collection_set_has_256",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 789163.0,
+      "after_median": 655210.2,
+      "after_over_before": 0.830259654849505
+    },
+    {
+      "workload": "collection_set_has_256",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 4394139.2,
+      "after_median": 640343.4,
+      "after_over_before": 0.14572669887198839
+    },
+    {
+      "workload": "collection_set_has_256",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 397602.4,
+      "after_median": 312934.2,
+      "after_over_before": 0.7870530962589762
+    },
+    {
+      "workload": "collection_set_has_256",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 4145067.2,
+      "after_median": 642106.6,
+      "after_over_before": 0.1549086104080532
+    },
+    {
+      "workload": "collection_set_has_256",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 328002.4,
+      "after_median": 321322.2,
+      "after_over_before": 0.9796336856071785
+    },
+    {
+      "workload": "collection_set_has_64",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 6590476.6,
+      "after_median": 6560389.8,
+      "after_over_before": 0.9954348066420569
+    },
+    {
+      "workload": "collection_set_has_64",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 261076.2,
+      "after_median": 259600.2,
+      "after_over_before": 0.9943464781546537
+    },
+    {
+      "workload": "collection_set_has_64",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 363630.0,
+      "after_median": 164270.0,
+      "after_over_before": 0.45175040563209856
+    },
+    {
+      "workload": "collection_set_has_64",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 30885.8,
+      "after_median": 30365.0,
+      "after_over_before": 0.9831378821335371
+    },
+    {
+      "workload": "collection_set_has_64",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 363126.4,
+      "after_median": 168301.0,
+      "after_over_before": 0.46347773117019303
+    },
+    {
+      "workload": "collection_set_has_64",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 35058.4,
+      "after_median": 37863.4,
+      "after_over_before": 1.0800093558177213
+    }
+  ],
+  "provenance_warnings": [],
+  "build_environment_differences": {},
+  "warning": "Ratios are descriptive. Inspect raw samples/MAD and repeat interleaved measurements."
+}

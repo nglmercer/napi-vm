@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Collect and compare a finite, local performance baseline. See docs/performance.md."""
 import argparse, datetime, hashlib, json, math, os, pathlib, platform, re, shutil, statistics, subprocess, sys
+from collection_report import read_report as read_collections
+from public_api_report import read_report as read_public_api
+import collection_memory
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -78,6 +81,29 @@ def run(out):
     node = json.loads((raw/'node.json').read_text())
     if node['bindingPath'] != str(addon): raise RuntimeError('wrong NAPI binding selected')
     rows.extend(node['results'])
+    with (raw/'collections.json').open('w') as log:
+        call(['node','bench/performance/collections.cjs'], env=env, stdout=log)
+    collections, collection_rows = read_collections(raw/'collections.json')
+    if collections['metadata']['bindingPath'] != str(addon) or collections['metadata']['addonSha256'] != backend['addon_sha256']:
+        raise RuntimeError('wrong collection benchmark binding selected')
+    for name, row in collection_rows.items():
+        if not row['sharedIdentityPreserved']:
+            raise RuntimeError('collection identity regression: '+name)
+        rows.append({**row, 'name':'node/collections/'+name, 'backend':'NAPI retained call and outbound collection conversion'})
+    with (raw/'public-api.json').open('w') as log:
+        call(['node','bench/performance/public-api.cjs'], env=env, stdout=log)
+    public_api, public_rows = read_public_api(raw/'public-api.json')
+    if public_api['metadata']['bindingPath'] != str(addon) or public_api['metadata']['addonSha256'] != backend['addon_sha256']:
+        raise RuntimeError('wrong public API benchmark binding selected')
+    rows.extend(public_rows.values())
+    collection_memory.run(addon, raw/'owner-memory.json', 3)
+    owner_memory = json.loads((raw/'owner-memory.json').read_text())
+    if owner_memory['metadata']['addon_sha256'] != backend['addon_sha256']:
+        raise RuntimeError('wrong owner-memory benchmark binding selected')
+    for row in owner_memory['results']:
+        rows.append({'name':'node_owner_memory/'+row['name']+'/last_collected_rss',
+                     'unit':'bytes', 'samples':[collection_memory.metrics(run)['last_collected_rss_bytes'] for run in row['runs']],
+                     'backend':'Node process RSS after three collection-replacement rounds and explicit native GC; separate owner/process per sample'})
     # Unique Criterion baseline keeps previous runs intact and identifies this run's samples.
     label = 'perf_' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S%f')
     criterion_cmd = ['cargo','bench','--locked','--bench','vm','--','--sample-size','10','--warm-up-time','0.2','--measurement-time','0.5','--save-baseline',label]

@@ -1,0 +1,805 @@
+{
+  "changed_inputs": [
+    "crates/napi-vm-runtime/src/runtime/permissions.rs"
+  ],
+  "results": [
+    {
+      "kind": "allocations",
+      "backend": "file_loader",
+      "name": "load_64k",
+      "before": {
+        "median": 22.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 21.0,
+        "mad": 0.0
+      },
+      "after_over_before": 0.9545454545454546
+    },
+    {
+      "kind": "allocations",
+      "backend": "file_loader",
+      "name": "resolve",
+      "before": {
+        "median": 9.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 9.0,
+        "mad": 0.0
+      },
+      "after_over_before": 1.0
+    },
+    {
+      "kind": "allocations",
+      "backend": "npm_loader",
+      "name": "cjs_resolve_read_64k",
+      "before": {
+        "median": 95.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 91.0,
+        "mad": 0.0
+      },
+      "after_over_before": 0.9578947368421052
+    },
+    {
+      "kind": "allocations",
+      "backend": "npm_loader",
+      "name": "resolve_4m",
+      "before": {
+        "median": 82.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 79.0,
+        "mad": 0.0
+      },
+      "after_over_before": 0.9634146341463414
+    },
+    {
+      "kind": "allocations",
+      "backend": "oxc",
+      "name": "typescript_1000_sourcemap",
+      "before": {
+        "median": 1109.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 1109.0,
+        "mad": 0.0
+      },
+      "after_over_before": 1.0
+    },
+    {
+      "kind": "allocations",
+      "backend": "oxc",
+      "name": "typescript_100_sourcemap",
+      "before": {
+        "median": 189.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 189.0,
+        "mad": 0.0
+      },
+      "after_over_before": 1.0
+    },
+    {
+      "kind": "allocations",
+      "backend": "permissions",
+      "name": "denied_read",
+      "before": {
+        "median": 2.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 2.0,
+        "mad": 0.0
+      },
+      "after_over_before": 1.0
+    },
+    {
+      "kind": "allocations",
+      "backend": "permissions",
+      "name": "mkdir_existing_nested",
+      "before": {
+        "median": 5.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 5.0,
+        "mad": 0.0
+      },
+      "after_over_before": 1.0
+    },
+    {
+      "kind": "allocations",
+      "backend": "permissions",
+      "name": "read_bytes_4k",
+      "before": {
+        "median": 12.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 11.0,
+        "mad": 0.0
+      },
+      "after_over_before": 0.9166666666666666
+    },
+    {
+      "kind": "allocations",
+      "backend": "permissions",
+      "name": "read_bytes_4m",
+      "before": {
+        "median": 22.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 21.0,
+        "mad": 0.0
+      },
+      "after_over_before": 0.9545454545454546
+    },
+    {
+      "kind": "allocations",
+      "backend": "permissions",
+      "name": "read_bytes_64k",
+      "before": {
+        "median": 16.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 15.0,
+        "mad": 0.0
+      },
+      "after_over_before": 0.9375
+    },
+    {
+      "kind": "allocations",
+      "backend": "permissions",
+      "name": "read_bytes_empty",
+      "before": {
+        "median": 3.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 2.0,
+        "mad": 0.0
+      },
+      "after_over_before": 0.6666666666666666
+    },
+    {
+      "kind": "allocations",
+      "backend": "permissions",
+      "name": "read_bytes_nested_4k",
+      "before": {
+        "median": 17.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 15.0,
+        "mad": 0.0
+      },
+      "after_over_before": 0.8823529411764706
+    },
+    {
+      "kind": "allocations",
+      "backend": "permissions",
+      "name": "read_text_64k",
+      "before": {
+        "median": 16.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 15.0,
+        "mad": 0.0
+      },
+      "after_over_before": 0.9375
+    },
+    {
+      "kind": "allocations",
+      "backend": "permissions",
+      "name": "write_bytes_4k",
+      "before": {
+        "median": 3.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 2.0,
+        "mad": 0.0
+      },
+      "after_over_before": 0.6666666666666666
+    },
+    {
+      "kind": "allocations",
+      "backend": "rust_std",
+      "name": "mkdir_existing_nested",
+      "before": {
+        "median": 0.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 0.0,
+        "mad": 0.0
+      },
+      "after_over_before": null
+    },
+    {
+      "kind": "allocations",
+      "backend": "rust_std",
+      "name": "read_bytes_4k",
+      "before": {
+        "median": 1.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 1.0,
+        "mad": 0.0
+      },
+      "after_over_before": 1.0
+    },
+    {
+      "kind": "allocations",
+      "backend": "rust_std",
+      "name": "read_bytes_4m",
+      "before": {
+        "median": 1.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 1.0,
+        "mad": 0.0
+      },
+      "after_over_before": 1.0
+    },
+    {
+      "kind": "allocations",
+      "backend": "rust_std",
+      "name": "read_bytes_64k",
+      "before": {
+        "median": 1.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 1.0,
+        "mad": 0.0
+      },
+      "after_over_before": 1.0
+    },
+    {
+      "kind": "allocations",
+      "backend": "rust_std",
+      "name": "read_bytes_empty",
+      "before": {
+        "median": 0.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 0.0,
+        "mad": 0.0
+      },
+      "after_over_before": null
+    },
+    {
+      "kind": "allocations",
+      "backend": "rust_std",
+      "name": "read_bytes_nested_4k",
+      "before": {
+        "median": 1.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 1.0,
+        "mad": 0.0
+      },
+      "after_over_before": 1.0
+    },
+    {
+      "kind": "allocations",
+      "backend": "rust_std",
+      "name": "read_text_64k",
+      "before": {
+        "median": 1.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 1.0,
+        "mad": 0.0
+      },
+      "after_over_before": 1.0
+    },
+    {
+      "kind": "allocations",
+      "backend": "rust_std",
+      "name": "write_bytes_4k",
+      "before": {
+        "median": 0.0,
+        "mad": 0.0
+      },
+      "after": {
+        "median": 0.0,
+        "mad": 0.0
+      },
+      "after_over_before": null
+    },
+    {
+      "kind": "latency",
+      "backend": "file_loader",
+      "name": "load_64k",
+      "before": {
+        "median": 21907.82,
+        "mad": 1044.7799999999988
+      },
+      "after": {
+        "median": 14200.24,
+        "mad": 161.3000000000011
+      },
+      "after_over_before": 0.6481813343363237
+    },
+    {
+      "kind": "latency",
+      "backend": "file_loader",
+      "name": "resolve",
+      "before": {
+        "median": 958.5,
+        "mad": 169.03999999999996
+      },
+      "after": {
+        "median": 687.0,
+        "mad": 8.039999999999964
+      },
+      "after_over_before": 0.7167449139280125
+    },
+    {
+      "kind": "latency",
+      "backend": "node_cjs",
+      "name": "cjs_resolve_read_64k",
+      "before": {
+        "median": 120765.38,
+        "mad": 24248.86
+      },
+      "after": {
+        "median": 68790.2,
+        "mad": 5097.779999999999
+      },
+      "after_over_before": 0.5696185446524492
+    },
+    {
+      "kind": "latency",
+      "backend": "node_file",
+      "name": "load_64k",
+      "before": {
+        "median": 48843.78,
+        "mad": 7095.519999999997
+      },
+      "after": {
+        "median": 27538.26,
+        "mad": 3047.3199999999997
+      },
+      "after_over_before": 0.5638028015030777
+    },
+    {
+      "kind": "latency",
+      "backend": "node_file",
+      "name": "resolve",
+      "before": {
+        "median": 2673.94,
+        "mad": 386.1399999999999
+      },
+      "after": {
+        "median": 2177.9,
+        "mad": 352.6600000000001
+      },
+      "after_over_before": 0.8144909758633327
+    },
+    {
+      "kind": "latency",
+      "backend": "node_fs",
+      "name": "mkdir_existing_nested",
+      "before": {
+        "median": 9877.12,
+        "mad": 1827.1600000000008
+      },
+      "after": {
+        "median": 7294.86,
+        "mad": 1902.8000000000002
+      },
+      "after_over_before": 0.738561443011728
+    },
+    {
+      "kind": "latency",
+      "backend": "node_fs",
+      "name": "read_bytes_4k",
+      "before": {
+        "median": 12599.86,
+        "mad": 1237.7399999999998
+      },
+      "after": {
+        "median": 9047.58,
+        "mad": 754.3999999999996
+      },
+      "after_over_before": 0.7180698833161638
+    },
+    {
+      "kind": "latency",
+      "backend": "node_fs",
+      "name": "read_bytes_4m",
+      "before": {
+        "median": 1231170.38,
+        "mad": 342658.7799999999
+      },
+      "after": {
+        "median": 1469426.52,
+        "mad": 311906.8999999999
+      },
+      "after_over_before": 1.1935200390379763
+    },
+    {
+      "kind": "latency",
+      "backend": "node_fs",
+      "name": "read_bytes_64k",
+      "before": {
+        "median": 53772.46,
+        "mad": 4160.919999999998
+      },
+      "after": {
+        "median": 42328.78,
+        "mad": 3262.9000000000015
+      },
+      "after_over_before": 0.7871832532861617
+    },
+    {
+      "kind": "latency",
+      "backend": "node_fs",
+      "name": "read_bytes_empty",
+      "before": {
+        "median": 12522.88,
+        "mad": 1690.9799999999996
+      },
+      "after": {
+        "median": 8533.02,
+        "mad": 744.8800000000001
+      },
+      "after_over_before": 0.6813943757346553
+    },
+    {
+      "kind": "latency",
+      "backend": "node_fs",
+      "name": "read_bytes_nested_4k",
+      "before": {
+        "median": 6794.62,
+        "mad": 740.8599999999997
+      },
+      "after": {
+        "median": 6276.88,
+        "mad": 157.03999999999996
+      },
+      "after_over_before": 0.923801478228363
+    },
+    {
+      "kind": "latency",
+      "backend": "node_fs",
+      "name": "read_text_64k",
+      "before": {
+        "median": 34722.9,
+        "mad": 5109.739999999998
+      },
+      "after": {
+        "median": 21411.94,
+        "mad": 1974.0800000000017
+      },
+      "after_over_before": 0.6166518349561816
+    },
+    {
+      "kind": "latency",
+      "backend": "node_fs",
+      "name": "write_bytes_4k",
+      "before": {
+        "median": 53683.8,
+        "mad": 4199.759999999995
+      },
+      "after": {
+        "median": 32475.12,
+        "mad": 873.1800000000039
+      },
+      "after_over_before": 0.6049333318431258
+    },
+    {
+      "kind": "latency",
+      "backend": "npm_loader",
+      "name": "cjs_resolve_read_64k",
+      "before": {
+        "median": 74629.86,
+        "mad": 1468.7599999999948
+      },
+      "after": {
+        "median": 50672.6,
+        "mad": 445.59999999999854
+      },
+      "after_over_before": 0.6789855963819308
+    },
+    {
+      "kind": "latency",
+      "backend": "npm_loader",
+      "name": "resolve_4m",
+      "before": {
+        "median": 736450.72,
+        "mad": 14695.219999999972
+      },
+      "after": {
+        "median": 559305.34,
+        "mad": 15779.020000000019
+      },
+      "after_over_before": 0.7594606465996802
+    },
+    {
+      "kind": "latency",
+      "backend": "oxc",
+      "name": "typescript_1000_sourcemap",
+      "before": {
+        "median": 1918908.0,
+        "mad": 87054.47999999998
+      },
+      "after": {
+        "median": 1226095.54,
+        "mad": 13546.14000000013
+      },
+      "after_over_before": 0.6389548326443999
+    },
+    {
+      "kind": "latency",
+      "backend": "oxc",
+      "name": "typescript_100_sourcemap",
+      "before": {
+        "median": 185234.86,
+        "mad": 8873.5
+      },
+      "after": {
+        "median": 124404.64,
+        "mad": 1510.8199999999924
+      },
+      "after_over_before": 0.671604902014664
+    },
+    {
+      "kind": "latency",
+      "backend": "permissions",
+      "name": "denied_read",
+      "before": {
+        "median": 285.4,
+        "mad": 31.74000000000001
+      },
+      "after": {
+        "median": 204.94,
+        "mad": 1.6599999999999966
+      },
+      "after_over_before": 0.7180798878766643
+    },
+    {
+      "kind": "latency",
+      "backend": "permissions",
+      "name": "mkdir_existing_nested",
+      "before": {
+        "median": 16888.1,
+        "mad": 1205.2200000000012
+      },
+      "after": {
+        "median": 12468.58,
+        "mad": 87.97999999999956
+      },
+      "after_over_before": 0.7383056708569941
+    },
+    {
+      "kind": "latency",
+      "backend": "permissions",
+      "name": "read_bytes_4k",
+      "before": {
+        "median": 9246.42,
+        "mad": 412.10000000000036
+      },
+      "after": {
+        "median": 6607.44,
+        "mad": 55.660000000000764
+      },
+      "after_over_before": 0.714594405186007
+    },
+    {
+      "kind": "latency",
+      "backend": "permissions",
+      "name": "read_bytes_4m",
+      "before": {
+        "median": 699554.32,
+        "mad": 18092.219999999972
+      },
+      "after": {
+        "median": 517229.18,
+        "mad": 11128.599999999977
+      },
+      "after_over_before": 0.7393695746171649
+    },
+    {
+      "kind": "latency",
+      "backend": "permissions",
+      "name": "read_bytes_64k",
+      "before": {
+        "median": 15672.94,
+        "mad": 506.03999999999905
+      },
+      "after": {
+        "median": 10040.820000000002,
+        "mad": 83.3799999999992
+      },
+      "after_over_before": 0.6406468728904724
+    },
+    {
+      "kind": "latency",
+      "backend": "permissions",
+      "name": "read_bytes_empty",
+      "before": {
+        "median": 5085.9,
+        "mad": 247.01999999999953
+      },
+      "after": {
+        "median": 3314.28,
+        "mad": 22.800000000000182
+      },
+      "after_over_before": 0.6516604730726127
+    },
+    {
+      "kind": "latency",
+      "backend": "permissions",
+      "name": "read_bytes_nested_4k",
+      "before": {
+        "median": 20112.519999999997,
+        "mad": 2300.2800000000025
+      },
+      "after": {
+        "median": 15714.52,
+        "mad": 88.44000000000051
+      },
+      "after_over_before": 0.781330236091748
+    },
+    {
+      "kind": "latency",
+      "backend": "permissions",
+      "name": "read_text_64k",
+      "before": {
+        "median": 19761.219999999998,
+        "mad": 581.7999999999993
+      },
+      "after": {
+        "median": 13046.9,
+        "mad": 53.659999999999854
+      },
+      "after_over_before": 0.6602274555923168
+    },
+    {
+      "kind": "latency",
+      "backend": "permissions",
+      "name": "write_bytes_4k",
+      "before": {
+        "median": 34659.84,
+        "mad": 1282.9000000000015
+      },
+      "after": {
+        "median": 29172.46,
+        "mad": 174.5
+      },
+      "after_over_before": 0.8416790152522343
+    },
+    {
+      "kind": "latency",
+      "backend": "rust_std",
+      "name": "mkdir_existing_nested",
+      "before": {
+        "median": 3954.38,
+        "mad": 220.96000000000004
+      },
+      "after": {
+        "median": 2915.62,
+        "mad": 7.800000000000182
+      },
+      "after_over_before": 0.7373140669333751
+    },
+    {
+      "kind": "latency",
+      "backend": "rust_std",
+      "name": "read_bytes_4k",
+      "before": {
+        "median": 4861.28,
+        "mad": 117.11999999999989
+      },
+      "after": {
+        "median": 3623.38,
+        "mad": 25.200000000000273
+      },
+      "after_over_before": 0.7453551328045289
+    },
+    {
+      "kind": "latency",
+      "backend": "rust_std",
+      "name": "read_bytes_4m",
+      "before": {
+        "median": 681796.84,
+        "mad": 16508.540000000037
+      },
+      "after": {
+        "median": 506539.04,
+        "mad": 11630.859999999986
+      },
+      "after_over_before": 0.7429471805706814
+    },
+    {
+      "kind": "latency",
+      "backend": "rust_std",
+      "name": "read_bytes_64k",
+      "before": {
+        "median": 7889.6,
+        "mad": 184.5
+      },
+      "after": {
+        "median": 5381.08,
+        "mad": 38.5600000000004
+      },
+      "after_over_before": 0.6820472520786858
+    },
+    {
+      "kind": "latency",
+      "backend": "rust_std",
+      "name": "read_bytes_empty",
+      "before": {
+        "median": 3850.62,
+        "mad": 152.5999999999999
+      },
+      "after": {
+        "median": 3108.44,
+        "mad": 25.720000000000255
+      },
+      "after_over_before": 0.8072570131563229
+    },
+    {
+      "kind": "latency",
+      "backend": "rust_std",
+      "name": "read_bytes_nested_4k",
+      "before": {
+        "median": 4749.12,
+        "mad": 162.8800000000001
+      },
+      "after": {
+        "median": 3808.34,
+        "mad": 9.0
+      },
+      "after_over_before": 0.8019043528064147
+    },
+    {
+      "kind": "latency",
+      "backend": "rust_std",
+      "name": "read_text_64k",
+      "before": {
+        "median": 10802.44,
+        "mad": 614.4200000000001
+      },
+      "after": {
+        "median": 7284.22,
+        "mad": 86.52000000000044
+      },
+      "after_over_before": 0.6743124701456338
+    },
+    {
+      "kind": "latency",
+      "backend": "rust_std",
+      "name": "write_bytes_4k",
+      "before": {
+        "median": 44165.4,
+        "mad": 2482.459999999999
+      },
+      "after": {
+        "median": 27466.14,
+        "mad": 244.1800000000003
+      },
+      "after_over_before": 0.621892703337907
+    }
+  ]
+}

@@ -49,7 +49,13 @@ def build(directory):
         raise RuntimeError("comparison build inputs changed during compilation")
     executable = directory / "comparison"
     shutil.copy2(TARGET / "release/napi-vm-rquickjs-bench", executable)
-    metadata = {"utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    shutil.copy2(TARGET / "release/memory", directory / "memory")
+    workloads = output([str(executable), '--emit-workloads'])
+    exported = json.loads(workloads)
+    if exported.get('kind') != 'guest_workloads' or not exported.get('workloads'):
+        raise RuntimeError('comparison executable did not export workloads')
+    (directory / 'workloads.json').write_text(workloads+'\n')
+    metadata = {"workloads_sha256": sha(directory / 'workloads.json'), "memory_executable_sha256": sha(directory / "memory"), "utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 "git_head": output(["git", "rev-parse", "HEAD"]),
                 "git_status": output(["git", "status", "--porcelain=v1"]),
                 "inputs": start, "executable_sha256": sha(executable),
@@ -109,8 +115,19 @@ r.add_argument("--output", type=Path, required=True)
 r.add_argument("--samples", type=int, default=15)
 r.add_argument("--iterations", type=int, default=10)
 r.add_argument("--filter", default="")
+m = commands.add_parser("memory")
+m.add_argument("--build", type=Path, required=True)
+m.add_argument("--output", type=Path, required=True)
+m.add_argument("--samples", type=int, default=3)
+m.add_argument("--iterations", type=int, default=8)
+m.add_argument("--objects", type=int, default=2000)
 args = parser.parse_args()
 if args.command == "build":
     build(args.output.resolve())
+elif args.command == "memory":
+    if args.samples <= 0 or args.samples % 2 != 1 or args.iterations <= 0 or args.objects <= 0:
+        parser.error("samples must be positive and odd; iterations and objects must be positive")
+    from memory_report import run_memory
+    run_memory(args.build.resolve(), args.output.resolve(), args.samples, args.iterations, args.objects)
 else:
     run(args.build.resolve(), args.output.resolve(), args.samples, args.iterations, args.filter)

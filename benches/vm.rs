@@ -358,6 +358,58 @@ fn bench_tiers(c: &mut Criterion) {
     group.finish();
 }
 
+/// Metadata refreshes with open documents, including unchanged runtime snapshots.
+fn bench_language_metadata(c: &mut Criterion) {
+    use napi_vm_core::lang::{HostFunctionInfo, LanguageService};
+    let mut group = c.benchmark_group("language_metadata");
+    for count in [1, 20] {
+        for changed in [false, true] {
+            let mut service = LanguageService::new();
+            for i in 0..100 {
+                service.register_host_function(HostFunctionInfo {
+                    name: format!("host{i}"),
+                    params: vec![],
+                    return_type: "number".into(),
+                    documentation: None,
+                    async_fn: false,
+                });
+            }
+            let source = (0..50)
+                .map(|i| format!("const v{i} = host0();\n"))
+                .collect::<String>();
+            for i in 0..count {
+                service.open(format!("file:///{i}.js"), &source);
+            }
+            let mut generation = false;
+            group.bench_function(
+                format!(
+                    "{count}_documents_{}",
+                    if changed { "changed" } else { "unchanged" }
+                ),
+                |b| {
+                    b.iter(|| {
+                        generation = !generation;
+                        service.register_host_function(HostFunctionInfo {
+                            name: "host0".into(),
+                            params: vec![],
+                            return_type: if changed && generation {
+                                "string"
+                            } else {
+                                "number"
+                            }
+                            .into(),
+                            documentation: None,
+                            async_fn: false,
+                        });
+                        black_box(service.hover("file:///0.js", 7));
+                    });
+                },
+            );
+        }
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_run,
@@ -365,6 +417,7 @@ criterion_group!(
     bench_class_methods,
     bench_ast_property_updates,
     bench_plugin_call,
-    bench_tiers
+    bench_tiers,
+    bench_language_metadata
 );
 criterion_main!(benches);

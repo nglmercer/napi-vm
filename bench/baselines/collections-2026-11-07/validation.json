@@ -1,0 +1,88 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "change": "Outbound Map/Set: snapshot once after graph memo lookup; create and memoize native collection before walking entries; direct set/add instead of seed/pair arrays.",
+  "before": {
+    "addon": "artifacts/performance/shape-hot-validation/napi-vm-runtime.node",
+    "sha256": "02b155b05c95eb2dfc31de46ecfa76b0ca382d88b9054c3aca0442a2f904f168",
+    "build_record": "artifacts/performance/shape-hot-validation/build.json",
+    "marshal_source_sha256": "365711b09ea0533166317bbdbdfaebd2f024cf14a14ff00cdbf30e8603915b4e"
+  },
+  "after": {
+    "addon": "artifacts/performance/collections-validation/napi-vm.node",
+    "sha256": "b98ae3af7214458f0987a7d7d611050a924a2b0e5caeb1c645578e4b644d28a2",
+    "marshal_source_sha256": "4c2446c06d5587a975a0d9829889006c9b66865916e672ed5d4c3e1cea32d4e9",
+    "build_command": "cargo build --locked --profile ci-optimized --lib --features runtime"
+  },
+  "shared_build": {
+    "profile": "ci-optimized",
+    "features": "default napi plus runtime",
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)\nbinary: rustc\ncommit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4\ncommit-date: 2026-09-28\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.0\nLLVM version: 23.1.1\n",
+    "Cargo.lock_sha256": "9715d536721bcd1cfec3040d1264293aa6236df0c82a63f254e93e7ea84fca52",
+    "Cargo.toml_sha256": "ce986bd5c0d514df0e939dffa94593023c484820f9db3986c26b3ff53dffc0f4"
+  },
+  "harness_sha256": "334f57a733cbbefb6ddab74c98945f54d82ec738d760ed053dfeeef8fd6a32d0",
+  "validator_sha256": "b4385d0e5eda27f1165d30d4e64391776bec2c0aa91206d865061da66b9a75c4",
+  "production_source_change": "src/bindings/marshal.rs only since immutable before-addon build; current core input hashes independently match its build record.",
+  "validation": {
+    "node_tests": 50,
+    "node_failed": 0,
+    "node_skipped": 0,
+    "collection_tests": 6,
+    "benchmark_validator_tests": 14,
+    "clippy": "napi-vm lib, runtime feature, ci profile, warnings denied"
+  },
+  "capture_order": [
+    "before-1",
+    "after-1",
+    "after-2",
+    "before-2",
+    "before-3",
+    "after-3"
+  ],
+  "ranges": {
+    "map_1_references": {
+      "speedup_min": 2.0244119502800006,
+      "speedup_max": 2.9170819543856945
+    },
+    "map_64_references": {
+      "speedup_min": 110.20110591009423,
+      "speedup_max": 182.21767512290535
+    },
+    "set_1_references": {
+      "speedup_min": 1.1219719393479586,
+      "speedup_max": 1.5882148156284384
+    },
+    "set_64_references": {
+      "speedup_min": 58.253059210783334,
+      "speedup_max": 83.85622300165073
+    }
+  },
+  "limitations": [
+    "Setup/assertions excluded; retained guest call and outbound conversion included.",
+    "Before alias rows return distinct equal collections; these are behavior-changing fixes, not equivalent-semantics engine rankings.",
+    "First pair overlapped Node checks; Test262 two workers and unrelated desktop/browser activity continued; no CPU isolation.",
+    "Both addons use ci-optimized, which differs from the broad host release build.",
+    "Before record retained full core inputs; a full binding input manifest was not captured at that earlier build. Before marshal source was unchanged from HEAD; source comparisons are not substituted for missing contemporaneous input hashes.",
+    "Incoming host-to-guest graph conversion and weak collections are outside this change."
+  ],
+  "host_integration": {
+    "status": "passed",
+    "selected_groups": [
+      "host"
+    ],
+    "all_groups_complete": false,
+    "report": "artifacts/performance/collections-host-suite/host/baseline.json",
+    "sha256": "aec14e0537a19f2f64bde0c993fdd541437a41253ff7f8c2cd0b74e55eb197cc",
+    "result_rows": 51,
+    "limitations": "Collection integration run before adding 26 public API cases."
+  },
+  "expanded_benchmark_validator_tests": 16,
+  "expanded_all_group_suite": {
+    "report": "bench/baselines/full-suite-expanded-2026-11-07/suite.json",
+    "status": "complete",
+    "all_groups_complete": true,
+    "host_rows": 77,
+    "public_api_rows": 26
+  }
+}

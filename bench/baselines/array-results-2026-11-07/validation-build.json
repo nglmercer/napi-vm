@@ -1,0 +1,10 @@
+{
+  "worker_sha256": "2bd90019922692b45de30ad5ce942b582cb1856ca95fbe1f08e29e5e1b090ca2",
+  "runner_sha256": "8d79bb336c2bedcf478ad6b173a9bc1083a671b92e919600dc3714ca258ca22c",
+  "array_source_sha256": "27ad9615a35a39db9f7e62d155e3c6a066327512a52e9ba41d3e6bd18da025eb",
+  "profile": "ci-optimized (release opt-level=3, no LTO, codegen-units=16, debug line-tables-only)",
+  "features": "no-default-features",
+  "git_head": "15f5b9de55b1820aa64cddc410334aab8e5e5c47",
+  "git_status": "M bench/BASELINE.md\n M bench/rquickjs/README.md\n M bench/rquickjs/src/main.rs\n M benches/vm.rs\n M crates/napi-vm-core/src/builtins/array.rs\n M crates/napi-vm-core/src/lang/service.rs\n M docs/performance.md\n?? bench/baselines/operations-2026-11-07/\n?? tests/array_result_fast_path.rs",
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)\nbinary: rustc\ncommit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4\ncommit-date: 2026-09-28\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.0\nLLVM version: 23.1.1\n"
+}

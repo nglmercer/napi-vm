@@ -1,0 +1,42 @@
+✔ persistent owner keeps globals across repeated executions (16.102013ms)
+✔ host functions and Node marshalling execute on Node thread without sync VM deadlock (13.865483ms)
+✔ manual virtual turns preserve unfinished checkpoints and absolute timers (10.388678ms)
+✔ bounded command queue rejects visibly without losing accepted completion (5.502971ms)
+✔ same-session commands from a host function fail instead of deadlocking (8.301697ms)
+✔ deadline interrupts long callback and a never-settled host promise (32.925474ms)
+✔ shutdown cancels guest work and settles every pending completion (8.659429ms)
+✔ shutdown wakes an owner awaiting a never-settled Node completion (11.324092ms)
+✔ idle sessions and pending completions have correct Node lifetimes (194.563439ms)
+✔ immediate cancellation reaches commands not yet dequeued by owner (6.897382ms)
+✔ pending Node promise stays rooted until deadline and retires on disposal (100.006782ms)
+✔ Node worker teardown wakes and terminates the persistent guest owner (36.272214ms)
+✔ throwing checkpoint recovers before new guest code (4.921644ms)
+✔ unawaited host results do not lock admission and remain awaitable (10.28774ms)
+✔ top-level await waits for future and nested real-time timers (73.738217ms)
+✔ cancel and dispose wake a future-timer await after a host barrier (12.418725ms)
+✔ abandoned results are retired while closure-held results survive (1032.129839ms)
+✔ virtual top-level await never advances time and supports host-driven recovery (6.820157ms)
+✔ a short execution deadline caps a far-future timer await (11.852949ms)
+✔ dispatched host dependency rejects reentry before guest await (18.920277ms)
+✔ completed deadlines do not poison idle metadata or new executions (107.350456ms)
+✔ delayed unawaited callback can reenter after its execution completes (8.984329ms)
+✔ metadata and configured limits preserve pending timer deadlines (108.393823ms)
+✔ a saved host result protects reentry across executions and queued admission (11.706192ms)
+✔ mixed UTF-16 property updates and method calls preserve key identity (12.656898ms)
+✔ warm property access survives data and accessor descriptor transitions (9.456475ms)
+✔ own __proto__ data writes preserve the prototype and property attributes (7.145157ms)
+✔ public owners use the same bytecode tier and reuse prepared source (17.159273ms)
+✔ legacy sync and async calls share globals closures modules symbols and shapes (107.764545ms)
+✔ released exports stay bounded and finalization cannot wait for a Node-dependent worker (182.118108ms)
+✔ fresh cycle workloads stabilize without sharing mutable realm objects (7225.546979ms)
+✔ automatic collection bounds retained cyclic containers in a persistent owner (157.011685ms)
+✔ shape-cache pressure preserves live layouts across sync owner leases (632.68402ms)
+✔ async owner pressure preserves callbacks and another owner during cleanup (304.907883ms)
+ℹ tests 34
+ℹ suites 0
+ℹ pass 34
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7778.338769

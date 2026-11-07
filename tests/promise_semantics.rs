@@ -57,6 +57,24 @@ fn then_species_capabilities_survive_collection_with_their_closures() {
 }
 
 #[test]
+fn native_species_results_survive_collection_without_direct_guest_references() {
+    assert_tiers(
+        r#"var result,release;var p=new Promise(function(r){release=r});class C extends Promise{};p.constructor={[Symbol.species]:C};var q=p.then(function(v){return {then:function(resolve){resolve(v+1)}}});var subclass=q instanceof C;q.then(function(v){result=[subclass,v]});p=null;q=null;C=null;"#,
+        "[true,9]",
+        true,
+    );
+}
+
+#[test]
+fn rejected_species_result_survives_collection_and_forwards_the_reason() {
+    assert_tiers(
+        r#"var result,release;var p=new Promise(function(resolve,reject){release=reject});var q=p.then(undefined,function(v){throw v+1});q.catch(function(v){result=v});p=null;q=null;"#,
+        "9",
+        true,
+    );
+}
+
+#[test]
 fn finally_waits_for_returned_thenables_and_preserves_or_replaces_settlement() {
     assert_tiers(
         r#"var result=[],log=[];Promise.resolve(4).finally(function(){log.push('finally');return {then:function(resolve){log.push('thenable');resolve()}}}).then(function(v){result.push(v);result.push(log.join(','))});Promise.reject('original').finally(function(){return Promise.reject('replacement')}).catch(function(e){result.push(e)});"#,

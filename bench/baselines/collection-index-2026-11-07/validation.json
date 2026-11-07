@@ -1,0 +1,126 @@
+{
+  "schema": 1,
+  "status": "collection gains and complete correctness gate verified; memory cost measured; property-read latency neutrality remains unproven",
+  "index_threshold": 32,
+  "tests": {
+    "core_unit": 455,
+    "core_all_unit_integration_doc": 913,
+    "root_index": 6,
+    "selected_node": 50,
+    "node_skipped": 0,
+    "benchmark_validators": 18,
+    "clippy": "core lib/tests, napi feature, ci profile, warnings denied",
+    "wasm": 19
+  },
+  "ranges_1024_warm_call": {
+    "collection_map_construct_1024": {
+      "min_speedup": 8.958116496431382,
+      "max_speedup": 11.346026303982331
+    },
+    "collection_map_lookup_numbers_1024": {
+      "min_speedup": 11.225900303918776,
+      "max_speedup": 12.697894740298764
+    },
+    "collection_map_lookup_objects_1024": {
+      "min_speedup": 13.1600004302697,
+      "max_speedup": 14.409319416496624
+    },
+    "collection_map_lookup_strings_1024": {
+      "min_speedup": 12.090837182423044,
+      "max_speedup": 12.50259485507017
+    },
+    "collection_set_construct_1024": {
+      "min_speedup": 8.785290026470586,
+      "max_speedup": 9.99228008981396
+    },
+    "collection_set_has_1024": {
+      "min_speedup": 20.140075350696602,
+      "max_speedup": 21.10540854078488
+    }
+  },
+  "timing_build_input_changes": [
+    "crates/napi-vm-core/src/bigint.rs",
+    "crates/napi-vm-core/src/builtins/collections.rs",
+    "crates/napi-vm-core/src/builtins/mod.rs",
+    "crates/napi-vm-core/src/value.rs",
+    "crates/napi-vm-core/tests/private_elements.rs"
+  ],
+  "current_compiled_inputs_match_after_build": true,
+  "untimed_test_corrections": "reference-checks.json",
+  "memory": "owner-memory-comparison.json",
+  "reference_engine_caveat": "rquickjs-hash-audit.json",
+  "gate": {
+    "status": "passed",
+    "tool_session": 85097,
+    "report": "bench/baselines/collection-index-2026-11-07/test262-report.json.gz",
+    "checkpoint": "artifacts/performance/collection-index-validation/test262-full.checkpoint",
+    "log": "artifacts/performance/collection-index-validation/test262-full.log",
+    "terminal": true,
+    "total_variants": 102992,
+    "exact_previous_variant_set": true,
+    "zero_outcome_changes": true,
+    "source_checks": "bench/baselines/collection-index-2026-11-07/source-checks.json"
+  },
+  "all_group_suite": {
+    "status": "complete",
+    "all_groups_complete": true,
+    "manifest": "bench/baselines/full-suite-indexed-2026-11-07/suite.json",
+    "rows": {
+      "host": 81,
+      "engines": 294,
+      "memory": 8,
+      "http": 4
+    }
+  },
+  "limits": [
+    "Nine timing samples, five calls per batch; medians/MAD descriptive under Test262 two-worker and desktop/browser load.",
+    "First timing pair overlapped compilation/Node checks; full counterbalanced pair and third focused pair are retained.",
+    "Index adds memory: retain small/large owner RSS controls and exact native counter return after releasing roots.",
+    "Sequential small-integer keys collide in the pinned QuickJS numeric hash; keep string/object comparisons and avoid a universal engine score.",
+    "Two incorrect pre-existing integration-test expectations were corrected only after old worker, candidate worker and stock Node agreed.",
+    "Complete reviewed gate for this exact immutable worker passed all 102,992 variants with matching source inputs and exact previous variant set.",
+    "One full pair showed 4\u20139% slower non-collection controls. Pinned controls: reads 1.102/0.999, class calls 1.020/1.011, indexed arrays 0.976/0.993 after/before. No universal latency-neutrality or statistical significance claim."
+  ],
+  "focused_controls": {
+    "unpinned": "unpinned-controls/",
+    "status": "complete; mixed property-read ratios remain a latency caveat",
+    "pinned_tool_session": 19842,
+    "pinned_manifest": "pinned-controls/controls.json",
+    "pinned_warm_call_ratios": {
+      "property_reads": {
+        "after_over_before": [
+          1.10221686462891,
+          0.998665368935812
+        ],
+        "min": 0.998665368935812,
+        "max": 1.10221686462891
+      },
+      "class_methods": {
+        "after_over_before": [
+          1.0197484647059551,
+          1.0111718501525406
+        ],
+        "min": 1.0111718501525406,
+        "max": 1.0197484647059551
+      },
+      "array_index_updates": {
+        "after_over_before": [
+          0.976085969476351,
+          0.992563380807807
+        ],
+        "min": 0.976085969476351,
+        "max": 0.992563380807807
+      }
+    }
+  },
+  "wasm_validation": {
+    "status": "passed",
+    "tests": 19,
+    "skipped": 0,
+    "package": "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/collection-index-wasm",
+    "build": "wasm-build.json",
+    "test_log": "wasm-tests.log",
+    "explicit_missing_package_rejected": true,
+    "new_test_source_sha256": "d7b7fde56c59daf7fd4363f12da04347949c6194841ef273c802dbedfacf8d55"
+  }
+}

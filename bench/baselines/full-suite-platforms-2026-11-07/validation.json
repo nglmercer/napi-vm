@@ -1,0 +1,95 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "suite_sha256": "23f958896e04c2dd43fa56bec2c0ee5b1e5694b4af7e74aa8c7216b88bb34e0d",
+  "reports": [
+    {
+      "group": "host",
+      "path": "host/baseline.json",
+      "sha256": "de9422360c0f832d3c50a161cb96eac5f55780e670f01cd137c79fe574302ea5",
+      "result_rows": 81
+    },
+    {
+      "group": "engines",
+      "path": "engines.json",
+      "sha256": "4c7ced0bdd83db017c385f9b812ac4c310ff221c989a258e56907d123dac8efe",
+      "result_rows": 390
+    },
+    {
+      "group": "memory",
+      "path": "memory.json",
+      "sha256": "c5af5921833493080f63670225aa4bc59befea7397d89805d4cb8f67960c06fa",
+      "result_rows": 8
+    },
+    {
+      "group": "http",
+      "path": "http.json",
+      "sha256": "af45e1e88af91a2af0760570563dcbf199eaa1f0b297cd5e9b1ad0bf44c065a9",
+      "result_rows": 4
+    },
+    {
+      "group": "platforms",
+      "path": "platforms.json",
+      "sha256": "102d101ffb9853ee4e87bb9893cd30679b95f254c33a00f40eea6492777bd152",
+      "result_rows": 398
+    }
+  ],
+  "matching_guest_sources_and_expected_results": 65,
+  "stable_host_build_inputs": true,
+  "files": {
+    "engine-build/build.json": "dc4fde2769a796bb6ef849b883adffcf78c3e14b636c7729b6e3cf3d785dcdb8",
+    "engine-build/build.log": "d6f14fa414f78cc9fa069b992a2381a482fd9b613d9c0482bf01a39931f158e1",
+    "engine-build/workloads.json": "c3830f014b352cb67d164f6a2cd0026e60258e1b7817b3ee3d4702fb1f85f197",
+    "engine-build.log": "c9aa3e6b7288a11eb36061edd190dc04e74a19d937f28fdacc256bf839289904",
+    "engine-ratios.log": "b837f824939bfaf04959a49ea9c27fdb039b65d22537a126904bf53bcb5f99b5",
+    "engines.json": "4c7ced0bdd83db017c385f9b812ac4c310ff221c989a258e56907d123dac8efe",
+    "engines.log": "ab1b2953e1e7f880f99d1c96c01b33fa94240dc64e2bba965bfddd8b21ddffa6",
+    "host/baseline.json": "de9422360c0f832d3c50a161cb96eac5f55780e670f01cd137c79fe574302ea5",
+    "host/raw/cargo-bench-build.log": "6665820c5cc63f560409016655723c340f15ff1cb3a70624c82f59c9ea9bc54b",
+    "host/raw/cargo-build.log": "6c9b3313cb68d340881bf3c96b7701550fa8768e267bb023091b5721432ac629",
+    "host/raw/collections.json": "2abd2fdf0f037cbb09fa2f04d5d254352551bcfc6959960469f5ac6dcf7a69ec",
+    "host/raw/criterion.log": "d4c7851738e6fe3320236b7da0ffd4fb8b809ec4d2fca904cb016eb73f877548",
+    "host/raw/node.json": "27b243b8b3e9e0009a1d7af8e426752e9463d6927c29ac5ffc0660793064e53f",
+    "host/raw/owner-memory.json": "b9d7baa9c45096f00007a514947af0b67495c5044d9f5a2cf7d690ec0cd64045",
+    "host/raw/plugin-build.log": "5cdaf24bac46dd4dc39b5a6f1468ace7d048783fc3843b620871de99bf5542fa",
+    "host/raw/public-api.json": "82209403c5881860ad379b5f2bfd3a3bf4e094e726fb10800d3f041e53da669c",
+    "host/raw/scheduler-build.log": "3539ce905b54b6383b01d03b366db64a9f1ef0fdac25d232475eb4c93983862c",
+    "host/raw/scheduler-node-legacy-0.jsonl": "e58bb1d93be56ccba4ab48cd7802f5c55accfb6d1610a159596d702e0b87fa9f",
+    "host/raw/scheduler-node-legacy-1.jsonl": "fa12339ec6e2e6222f3b9dbead3d26b53d549072bc265bd8857bcb7e33bdbadd",
+    "host/raw/scheduler-node-legacy-2.jsonl": "b03919778291e93de59ab116efb1fdf40279dd2ca892435c584523a95e25aaa5",
+    "host/raw/scheduler-node-persistent-0.jsonl": "7dd24591d050baadffe553e887eca62f8d68193c2294c17c809b45875b8d46b3",
+    "host/raw/scheduler-node-persistent-1.jsonl": "7612eee20251855b269374c2b79afcdf367764be1158c7384b678af8127664b5",
+    "host/raw/scheduler-node-persistent-2.jsonl": "b73a6220693dfbd50960f5d1e18e4a2b1654d935e1fdfd11b53c9dc39b696e6e",
+    "host/raw/scheduler-rust-0.jsonl": "9787cf5ccc6e664cd9defacf6048a17e34c80a1d6caafb1d7cea7a353b028ff5",
+    "host/raw/scheduler-rust-1.jsonl": "9705d920ae34251bc4297ac4038acb3e90d9d12cbb6cefb3d505dc98d0dfb3f1",
+    "host/raw/scheduler-rust-2.jsonl": "8324cf132f2ade5470d59a523cfe8646e4becfb590d0fe8ce97169afad4239c9",
+    "host/raw/trusted-node-0.jsonl": "b5ac385012825d0c3e3b8bf76d151d253654f4c050bbc2f8a9c76b050a52404e",
+    "host/raw/trusted-node-1.jsonl": "f151243ac7a303b0c5f509a833fbc76474938510175b41e4829e827c43d53674",
+    "host/raw/trusted-node-2.jsonl": "729f70abe8403ac3489ab127f4440ac271960e960252da9ad8f34a61bc4e4781",
+    "host.log": "3339731db9cb31451c5055482ea7dde3ff555f601215684b6a26d17aec17550f",
+    "http-build/build.json": "d8e55e2c93251242475b196d3d0bd5a0f59e34b501e7131d02c34f5d0778a5f7",
+    "http-build/build.log": "98b13200022d30690c9f316ea3e0ad2e6e8691c31b10ba0ba9de971c79642b67",
+    "http-build.log": "3bc6e6bd0ac5c39addee50800ae9fb40f36109a90ed47a5e73e0815b709f2f9f",
+    "http-validate.log": "ab83ea33178ba80e868ab5784abe60db9b9bf2e8b4fa8c4401b5761692595809",
+    "http.json": "af45e1e88af91a2af0760570563dcbf199eaa1f0b297cd5e9b1ad0bf44c065a9",
+    "http.log": "cf869289a7507aee410bce7be8495f2e6d602faeb03a1ae543da0a68d02bcea1",
+    "memory-validate.log": "236404469ddb163195395bbbd81a838933c57390bbb276b7e6ce1a8b35972801",
+    "memory.json": "c5af5921833493080f63670225aa4bc59befea7397d89805d4cb8f67960c06fa",
+    "memory.log": "69cf738dd988a5f9bc19e7544765d3f3c150a07302316cb8060dfae12252ed8a",
+    "platform-build/build.json": "25280ba6d8b412ceb8f5533e1aaa7e2bdcbe2dcfb596dcacaac427d649e02bd6",
+    "platform-build/native-build.log": "a70da5408e7a6da7efe97b23011504833b16a7875bda14543f2504b5b8c7d97a",
+    "platform-build/wasm-build.log": "452e9975709108ebc6705dfe442972b923494a2cf42879c4bb9731e557ef23de",
+    "platform-build/workloads.json": "c3830f014b352cb67d164f6a2cd0026e60258e1b7817b3ee3d4702fb1f85f197",
+    "platform-build.log": "43f33441c5f6adc2d2a2b2ec3586f20a5ba8b6c3eb0cb575cfe2853f691c64fc",
+    "platform-ratios.json": "a50121c85fda29772146d019b1a31cfd4a6f174d8f18470d2ebba8175fd9f93a",
+    "platform-validate.log": "c312c68c703379ce05f11da624f2798c53ee89dbe31815d9f2fa145630693da5",
+    "platforms.json": "102d101ffb9853ee4e87bb9893cd30679b95f254c33a00f40eea6492777bd152",
+    "platforms.log": "6947220587fbd4f0a0647241d1485631c8e07f61b00a5561de37020b85e45fe9",
+    "suite.json": "23f958896e04c2dd43fa56bec2c0ee5b1e5694b4af7e74aa8c7216b88bb34e0d"
+  },
+  "limits": [
+    "Five finite driver groups completed; async, Intl/Temporal timing and broader I/O are still open.",
+    "No CPU isolation or universal aggregate runtime score.",
+    "Public native/WASM/Node result formats, context setup and disposal policies differ; bare rquickjs comparison is a separate layer."
+  ]
+}

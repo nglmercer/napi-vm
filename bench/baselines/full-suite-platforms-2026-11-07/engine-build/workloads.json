@@ -1,0 +1,526 @@
+{
+  "schema": 1,
+  "kind": "guest_workloads",
+  "workloads": [
+    {
+      "name": "startup_dominated",
+      "setup": "function bench(){return 1;}",
+      "source": "function bench(){return 1;}\nbench();",
+      "invocation": "bench();",
+      "expected": 1.0,
+      "source_sha256": "fff80bcbe958d04f074f22fc21578394f4901e218922dc3f96662841588b8b0c"
+    },
+    {
+      "name": "arithmetic_loop",
+      "setup": "function bench(){let s=0; for(let i=0;i<10000;i++){s+=i*2-1;} return s;}",
+      "source": "function bench(){let s=0; for(let i=0;i<10000;i++){s+=i*2-1;} return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 99980000.0,
+      "source_sha256": "a0c037f59a8ba97665a3700ad5dc35e37b27711cdb234fb84c3a36471722cb9a"
+    },
+    {
+      "name": "recursion_fib",
+      "setup": "function bench(){function fib(n){return n<2?n:fib(n-1)+fib(n-2);} return fib(10);}",
+      "source": "function bench(){function fib(n){return n<2?n:fib(n-1)+fib(n-2);} return fib(10);}\nbench();",
+      "invocation": "bench();",
+      "expected": 55.0,
+      "source_sha256": "d2120413ca1e5ec8d4fc6c645d762ddafd195006e280f0955ef21cb522187025"
+    },
+    {
+      "name": "array_chain",
+      "setup": "function bench(){let a=[]; for(let i=0;i<1000;i++){a.push(i);} return a.map(x=>x*2).filter(x=>x%3===0).reduce((s,x)=>s+x,0);}",
+      "source": "function bench(){let a=[]; for(let i=0;i<1000;i++){a.push(i);} return a.map(x=>x*2).filter(x=>x%3===0).reduce((s,x)=>s+x,0);}\nbench();",
+      "invocation": "bench();",
+      "expected": 333666.0,
+      "source_sha256": "0d81bd0e619c007df08dd15d87c4d3e4db093d6461cbb21dfd5ed6d935343e3c"
+    },
+    {
+      "name": "string_ops",
+      "setup": "function bench(){let a=[]; for(let i=0;i<1000;i++){a.push('item'+i);} return a.join(',').split(',').length;}",
+      "source": "function bench(){let a=[]; for(let i=0;i<1000;i++){a.push('item'+i);} return a.join(',').split(',').length;}\nbench();",
+      "invocation": "bench();",
+      "expected": 1000.0,
+      "source_sha256": "43d18c850d117f61531d556d52205b3045ee14d23a54114b22f87cbb0367be5b"
+    },
+    {
+      "name": "closures",
+      "setup": "function bench(){function counter(){let n=0; return ()=>++n;} const c=counter(); for(let i=0;i<1000;i++){c();} return c();}",
+      "source": "function bench(){function counter(){let n=0; return ()=>++n;} const c=counter(); for(let i=0;i<1000;i++){c();} return c();}\nbench();",
+      "invocation": "bench();",
+      "expected": 1001.0,
+      "source_sha256": "85ab6cc4bf34d4444efe21109b1045ea213fd1d89bfe5083f8bced66123158ce"
+    },
+    {
+      "name": "json_roundtrip",
+      "setup": "function bench(){const o={a:1,b:[1,2,3],c:{d:'x',e:[true,null]}}; let r; for(let i=0;i<200;i++){r=JSON.parse(JSON.stringify(o));} return r.c.e.length+r.b.length;}",
+      "source": "function bench(){const o={a:1,b:[1,2,3],c:{d:'x',e:[true,null]}}; let r; for(let i=0;i<200;i++){r=JSON.parse(JSON.stringify(o));} return r.c.e.length+r.b.length;}\nbench();",
+      "invocation": "bench();",
+      "expected": 5.0,
+      "source_sha256": "4628bb8adf931e4d15e81f43177632b5cc1ae1cac800d4be6281031af8596015"
+    },
+    {
+      "name": "property_reads",
+      "setup": "function bench(){const o={x:3,y:5}; let s=0; for(let i=0;i<5000;i++){s+=o.x+o.y;} return s;}",
+      "source": "function bench(){const o={x:3,y:5}; let s=0; for(let i=0;i<5000;i++){s+=o.x+o.y;} return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 40000.0,
+      "source_sha256": "8aec79c74a2d3a9f076833fa2c1f0f8005f1aff7c74ef0ddf67e24875b3058da"
+    },
+    {
+      "name": "property_updates",
+      "setup": "function bench(){const o={x:0,y:0}; for(let i=0;i<3000;i++){o.x++;o.y+=2;} return o.x+o.y;}",
+      "source": "function bench(){const o={x:0,y:0}; for(let i=0;i<3000;i++){o.x++;o.y+=2;} return o.x+o.y;}\nbench();",
+      "invocation": "bench();",
+      "expected": 9000.0,
+      "source_sha256": "18f9b9ba0dcd3b737c843a7295e3ea7c788498956bb422dd9f4745948e34c1d5"
+    },
+    {
+      "name": "class_methods",
+      "setup": "function bench(){class P{constructor(x,y){this.x=x;this.y=y;} sum(){return this.x+this.y;}} let t=0; for(let i=0;i<1000;i++){t+=new P(i,i+1).sum();} return t;}",
+      "source": "function bench(){class P{constructor(x,y){this.x=x;this.y=y;} sum(){return this.x+this.y;}} let t=0; for(let i=0;i<1000;i++){t+=new P(i,i+1).sum();} return t;}\nbench();",
+      "invocation": "bench();",
+      "expected": 1000000.0,
+      "source_sha256": "9843de9ff8d3a977c7200e9057ee775a7dbcbeddfa56011eae5a46b1074c7ed3"
+    },
+    {
+      "name": "bitwise_loop",
+      "setup": "function bench(){let s=0; for(let i=0;i<5000;i++){s=(s^i)&65535;} return s;}",
+      "source": "function bench(){let s=0; for(let i=0;i<5000;i++){s=(s^i)&65535;} return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 0.0,
+      "source_sha256": "d9edcceb4a9219eb5443413f68da0ed3f92a5c486c36924c5e70324e35248bad"
+    },
+    {
+      "name": "array_index_updates",
+      "setup": "function bench(){let a=new Array(1000).fill(0); for(let i=0;i<5000;i++){a[i%1000]++;} return a.reduce((s,x)=>s+x,0);}",
+      "source": "function bench(){let a=new Array(1000).fill(0); for(let i=0;i<5000;i++){a[i%1000]++;} return a.reduce((s,x)=>s+x,0);}\nbench();",
+      "invocation": "bench();",
+      "expected": 5000.0,
+      "source_sha256": "03c7b6a1c3306e06e70a687fa29c364995cdfe29cb53b9ac717f34e340a5020b"
+    },
+    {
+      "name": "array_sort_numeric",
+      "setup": "function bench(){let a=[]; for(let i=999;i>=0;i--){a.push(i);} a.sort((a,b)=>a-b); return a[0]+a[999];}",
+      "source": "function bench(){let a=[]; for(let i=999;i>=0;i--){a.push(i);} a.sort((a,b)=>a-b); return a[0]+a[999];}\nbench();",
+      "invocation": "bench();",
+      "expected": 999.0,
+      "source_sha256": "acf2defcc6cc089b14982cd224e777a7f80d64a6e5cfea242b880bf470eeff7f"
+    },
+    {
+      "name": "map_set_get",
+      "setup": "function bench(){const m=new Map(); for(let i=0;i<1000;i++){m.set(i,i*2);} let s=0; for(let i=0;i<1000;i++){s+=m.get(i);} return s+m.size;}",
+      "source": "function bench(){const m=new Map(); for(let i=0;i<1000;i++){m.set(i,i*2);} let s=0; for(let i=0;i<1000;i++){s+=m.get(i);} return s+m.size;}\nbench();",
+      "invocation": "bench();",
+      "expected": 1000000.0,
+      "source_sha256": "7f6f69836949701cc582ef376fbf573841441e9ed22040403b1abe8a09cf68a3"
+    },
+    {
+      "name": "set_add_has_delete",
+      "setup": "function bench(){const s=new Set(); for(let i=0;i<1000;i++){s.add(i);} let n=0; for(let i=0;i<1000;i++){if(s.has(i)){n++;} if(i%2===0){s.delete(i);}} return n+s.size;}",
+      "source": "function bench(){const s=new Set(); for(let i=0;i<1000;i++){s.add(i);} let n=0; for(let i=0;i<1000;i++){if(s.has(i)){n++;} if(i%2===0){s.delete(i);}} return n+s.size;}\nbench();",
+      "invocation": "bench();",
+      "expected": 1500.0,
+      "source_sha256": "8669108ce6c27129cb21a167817bfe2c085800d7d1556d8ae11da9e4a69e9613"
+    },
+    {
+      "name": "typed_array_index",
+      "setup": "function bench(){const a=new Uint32Array(1000); let s=0; for(let i=0;i<1000;i++){a[i]=i*3;s+=a[i];} return s;}",
+      "source": "function bench(){const a=new Uint32Array(1000); let s=0; for(let i=0;i<1000;i++){a[i]=i*3;s+=a[i];} return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 1498500.0,
+      "source_sha256": "433248c5e40a349b573e188e2cc406abb868799ba16cbd993cd822ba8c7a4311"
+    },
+    {
+      "name": "regexp_exec",
+      "setup": "function bench(){const re=/item(\\d+)/g; let s=0; for(let i=0;i<500;i++){re.lastIndex=0; const m=re.exec('item123 item456'); s+=Number(m[1]);} return s;}",
+      "source": "function bench(){const re=/item(\\d+)/g; let s=0; for(let i=0;i<500;i++){re.lastIndex=0; const m=re.exec('item123 item456'); s+=Number(m[1]);} return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 61500.0,
+      "source_sha256": "a93cce7394c6ab47b97822461dd1f099af9a4e16844809ec7fd8894c8c9e5cb9"
+    },
+    {
+      "name": "unicode_strings",
+      "setup": "function bench(){let s=0; for(let i=0;i<1000;i++){s+='A😀é'.length+'A😀é'.codePointAt(1);} return s;}",
+      "source": "function bench(){let s=0; for(let i=0;i<1000;i++){s+='A😀é'.length+'A😀é'.codePointAt(1);} return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 128516000.0,
+      "source_sha256": "effad3edd1a53e4490a9361f17a9d5e1bd48ef02e26fcd29521599f8f7799944"
+    },
+    {
+      "name": "prototype_getter",
+      "setup": "function bench(){const p={get x(){return this.y+1;}}; const o=Object.create(p); o.y=4; let s=0; for(let i=0;i<1000;i++){s+=o.x;} return s;}",
+      "source": "function bench(){const p={get x(){return this.y+1;}}; const o=Object.create(p); o.y=4; let s=0; for(let i=0;i<1000;i++){s+=o.x;} return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 5000.0,
+      "source_sha256": "6b5114e76bc45c24624ea8eb7d748a31cfee04ea0f936447162cecc8d1b36f4d"
+    },
+    {
+      "name": "property_key_churn",
+      "setup": "function bench(){let s=0; for(let i=0;i<300;i++){const o={a:i}; o['k'+i]=i; s+=o.a; delete o.a; s+=Object.keys(o).length;} return s;}",
+      "source": "function bench(){let s=0; for(let i=0;i<300;i++){const o={a:i}; o['k'+i]=i; s+=o.a; delete o.a; s+=Object.keys(o).length;} return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 45150.0,
+      "source_sha256": "57613dfd002eb9b211dfaf37dba82b5a9023c5eb9a9fcb5712b3224f5bfe9d13"
+    },
+    {
+      "name": "exception_catch",
+      "setup": "function bench(){let s=0; for(let i=0;i<500;i++){try{throw i;}catch(e){s+=e;}} return s;}",
+      "source": "function bench(){let s=0; for(let i=0;i<500;i++){try{throw i;}catch(e){s+=e;}} return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 124750.0,
+      "source_sha256": "33c6bc84fdcc236634b50bb8795e062bff815336eef8e5f4b01e86d15a36dd13"
+    },
+    {
+      "name": "spread_destructure",
+      "setup": "function bench(){let s=0; const a=[1,2,3]; for(let i=0;i<500;i++){const [x,...rest]=[...a,4]; s+=x+rest.length;} return s;}",
+      "source": "function bench(){let s=0; const a=[1,2,3]; for(let i=0;i<500;i++){const [x,...rest]=[...a,4]; s+=x+rest.length;} return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 2000.0,
+      "source_sha256": "ed54d3b47ffe782819e028379fe0534dd1d891b20389a77cf3a293b500855a75"
+    },
+    {
+      "name": "math_builtins",
+      "setup": "function bench(){let s=0; for(let i=0;i<1000;i++){s+=Math.floor(Math.sqrt(i*i))+Math.abs(-i);} return s;}",
+      "source": "function bench(){let s=0; for(let i=0;i<1000;i++){s+=Math.floor(Math.sqrt(i*i))+Math.abs(-i);} return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 999000.0,
+      "source_sha256": "473bb396e36a128eaa038516a9c98788746a8bae04a9960bda9923709c74649d"
+    },
+    {
+      "name": "bigint_arithmetic",
+      "setup": "function bench(){let s=0n; for(let i=0n;i<500n;i++){s+=i*2n;} return Number(s);}",
+      "source": "function bench(){let s=0n; for(let i=0n;i<500n;i++){s+=i*2n;} return Number(s);}\nbench();",
+      "invocation": "bench();",
+      "expected": 249500.0,
+      "source_sha256": "6c5bd5cb9a01f842eee6718f669a9b96b67d2020df97518fe72738e8895fb05a"
+    },
+    {
+      "name": "cyclic_allocations",
+      "setup": "function bench(){let n=0; for(let i=0;i<300;i++){const a={}; const b={peer:a}; a.peer=b; n+=a.peer.peer===a?1:0;} return n;}",
+      "source": "function bench(){let n=0; for(let i=0;i<300;i++){const a={}; const b={peer:a}; a.peer=b; n+=a.peer.peer===a?1:0;} return n;}\nbench();",
+      "invocation": "bench();",
+      "expected": 300.0,
+      "source_sha256": "cdba3ae7ab0fd1042650b31b366a61dad6c4b5f7e3ad2efeaf4a5bbf9a8ecdd2"
+    },
+    {
+      "name": "generator_iteration",
+      "setup": "function bench(){function* values(){for(let i=0;i<200;i++)yield i;}let s=0;for(const n of values())s+=n;return s;}",
+      "source": "function bench(){function* values(){for(let i=0;i<200;i++)yield i;}let s=0;for(const n of values())s+=n;return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 19900.0,
+      "source_sha256": "6b241c6d1a09e5f9cb69ba33ffac6dda6c827d40915e2f7ce91194729f8bbc26"
+    },
+    {
+      "name": "custom_iterator",
+      "setup": "function bench(){const a={[Symbol.iterator](){let n=0;return{next(){return n<200?{value:n++,done:false}:{done:true};}};}};let s=0;for(const n of a)s+=n;return s;}",
+      "source": "function bench(){const a={[Symbol.iterator](){let n=0;return{next(){return n<200?{value:n++,done:false}:{done:true};}};}};let s=0;for(const n of a)s+=n;return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 19900.0,
+      "source_sha256": "9f7fb4fff4e018a943db6bb09eff8540bc8447ebd8fee32200af4756e70dd578"
+    },
+    {
+      "name": "proxy_reflect_get",
+      "setup": "function bench(){const p=new Proxy({x:1},{get(t,k,r){return Reflect.get(t,k,r)+1;}});let s=0;for(let i=0;i<1000;i++)s+=p.x;return s;}",
+      "source": "function bench(){const p=new Proxy({x:1},{get(t,k,r){return Reflect.get(t,k,r)+1;}});let s=0;for(let i=0;i<1000;i++)s+=p.x;return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 2000.0,
+      "source_sha256": "6a53515aaf9c9acdd5a539727ffc3d3cac9ad847befbb47f3d21be247290fc5c"
+    },
+    {
+      "name": "reflect_define_property",
+      "setup": "function bench(){const o={};let s=0;for(let i=0;i<500;i++){Reflect.defineProperty(o,'k'+i,{value:i,enumerable:true,configurable:true,writable:true});s+=Reflect.get(o,'k'+i);}return s;}",
+      "source": "function bench(){const o={};let s=0;for(let i=0;i<500;i++){Reflect.defineProperty(o,'k'+i,{value:i,enumerable:true,configurable:true,writable:true});s+=Reflect.get(o,'k'+i);}return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 124750.0,
+      "source_sha256": "2d1ed5df3f90bfcf20813c554c75f4010c2b76c5a72cc9ff848541cd4d580118"
+    },
+    {
+      "name": "reflect_own_keys",
+      "setup": "function bench(){const o=Object.create(null);for(let i=0;i<100;i++)o['k'+i]=i;Object.defineProperty(o,'hidden',{value:1});let s=0;for(let i=0;i<100;i++)s+=Reflect.ownKeys(o).length+Object.keys(o).length;return s;}",
+      "source": "function bench(){const o=Object.create(null);for(let i=0;i<100;i++)o['k'+i]=i;Object.defineProperty(o,'hidden',{value:1});let s=0;for(let i=0;i<100;i++)s+=Reflect.ownKeys(o).length+Object.keys(o).length;return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 20100.0,
+      "source_sha256": "19c5ceba7a0fedca347d06cc0e1608269d16662dbbe0bc97d6f38dfc40550f86"
+    },
+    {
+      "name": "date_utc_fields",
+      "setup": "function bench(){const d=new Date(Date.UTC(2020,0,2,3,4,5));let s=0;for(let i=0;i<500;i++)s+=d.getUTCFullYear()+d.getUTCMonth()+d.getUTCDate()+d.getUTCHours()+d.getUTCMinutes()+d.getUTCSeconds();return s;}",
+      "source": "function bench(){const d=new Date(Date.UTC(2020,0,2,3,4,5));let s=0;for(let i=0;i<500;i++)s+=d.getUTCFullYear()+d.getUTCMonth()+d.getUTCDate()+d.getUTCHours()+d.getUTCMinutes()+d.getUTCSeconds();return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 1017000.0,
+      "source_sha256": "f26b046f3a3173d81e96f7c38bf94c1de7fef14ad3c8ae0316de40bff5f3600b"
+    },
+    {
+      "name": "date_iso_parse",
+      "setup": "function bench(){const n=Date.UTC(2020,0,2,3,4,5);const text=new Date(n).toISOString();let s=0;for(let i=0;i<200;i++)if(Date.parse(text)===n)s++;return s;}",
+      "source": "function bench(){const n=Date.UTC(2020,0,2,3,4,5);const text=new Date(n).toISOString();let s=0;for(let i=0;i<200;i++)if(Date.parse(text)===n)s++;return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 200.0,
+      "source_sha256": "38a559ecdbe759071cbe5a4c65b68b88928562fdfd7b21c04c380d08a7720950"
+    },
+    {
+      "name": "bigint_division_modulo",
+      "setup": "function bench(){const n=12345678901234567890n;let s=0n;for(let i=1n;i<=200n;i++)s+=(n/i)%97n;return Number(s);}",
+      "source": "function bench(){const n=12345678901234567890n;let s=0n;for(let i=1n;i<=200n;i++)s+=(n/i)%97n;return Number(s);}\nbench();",
+      "invocation": "bench();",
+      "expected": 9320.0,
+      "source_sha256": "b425c689aec0100d9f47741168d7d9e9eb58284f59f9529b4ec5789fc617a98c"
+    },
+    {
+      "name": "string_replace_callback",
+      "setup": "function bench(){let s=0;for(let i=0;i<500;i++)if('v1-v2-v3'.replace(/(\\d+)/g,(_,n)=>String(Number(n)+1))==='v2-v3-v4')s++;return s;}",
+      "source": "function bench(){let s=0;for(let i=0;i<500;i++)if('v1-v2-v3'.replace(/(\\d+)/g,(_,n)=>String(Number(n)+1))==='v2-v3-v4')s++;return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 500.0,
+      "source_sha256": "35395b5e1874815ae4c49357f65aed56ce613a5127e1cc562cb44c99df89ad36"
+    },
+    {
+      "name": "data_view_read_write",
+      "setup": "function bench(){const d=new DataView(new ArrayBuffer(4096));let s=0;for(let i=0;i<1000;i++){d.setUint32(i*4,i,true);s+=d.getUint32(i*4,true);}return s;}",
+      "source": "function bench(){const d=new DataView(new ArrayBuffer(4096));let s=0;for(let i=0;i<1000;i++){d.setUint32(i*4,i,true);s+=d.getUint32(i*4,true);}return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 499500.0,
+      "source_sha256": "ea8a78c513c3f66e4334a754b4d3222aa772e6175e65758f7858ba154df352e1"
+    },
+    {
+      "name": "typed_array_bulk_set",
+      "setup": "function bench(){const a=new Uint8Array(4096).fill(7);const b=new Uint8Array(8192);for(let i=0;i<100;i++)b.set(a,2048);return b[2048]+b[6143]+b[0];}",
+      "source": "function bench(){const a=new Uint8Array(4096).fill(7);const b=new Uint8Array(8192);for(let i=0;i<100;i++)b.set(a,2048);return b[2048]+b[6143]+b[0];}\nbench();",
+      "invocation": "bench();",
+      "expected": 14.0,
+      "source_sha256": "d3c0292e55f25d3fdac72e67abdeb4f3bba43012dac8c435083431ced43322dd"
+    },
+    {
+      "name": "weak_map_objects",
+      "setup": "function bench(){const keys=[];const m=new WeakMap();for(let i=0;i<256;i++){const k={id:i};keys.push(k);m.set(k,i);}let s=0;for(let i=0;i<256;i++)s+=m.get(keys[i]);return s;}",
+      "source": "function bench(){const keys=[];const m=new WeakMap();for(let i=0;i<256;i++){const k={id:i};keys.push(k);m.set(k,i);}let s=0;for(let i=0;i<256;i++)s+=m.get(keys[i]);return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 32640.0,
+      "source_sha256": "793d3e5bd31dc513cdfdb5eeb3e5c7dee1d91c27f7b62cba48d592501d6c031e"
+    },
+    {
+      "name": "weak_set_objects",
+      "setup": "function bench(){const keys=[];const s=new WeakSet();for(let i=0;i<256;i++){const k={id:i};keys.push(k);s.add(k);}let n=0;for(let i=0;i<256;i++){if(s.has(keys[i]))n++;if(i%2===0)s.delete(keys[i]);}for(let i=0;i<256;i++)if(s.has(keys[i]))n++;return n;}",
+      "source": "function bench(){const keys=[];const s=new WeakSet();for(let i=0;i<256;i++){const k={id:i};keys.push(k);s.add(k);}let n=0;for(let i=0;i<256;i++){if(s.has(keys[i]))n++;if(i%2===0)s.delete(keys[i]);}for(let i=0;i<256;i++)if(s.has(keys[i]))n++;return n;}\nbench();",
+      "invocation": "bench();",
+      "expected": 384.0,
+      "source_sha256": "27c0ca2626ddd1479f53481afeab2faf12d75d9d37da2c60e483cb104d0fb0a7"
+    },
+    {
+      "name": "array_buffer_slice",
+      "setup": "function bench(){const a=new ArrayBuffer(4096);new Uint8Array(a).fill(7);let b;for(let i=0;i<100;i++)b=a.slice(1024,3072);return b.byteLength+new Uint8Array(b)[2047];}",
+      "source": "function bench(){const a=new ArrayBuffer(4096);new Uint8Array(a).fill(7);let b;for(let i=0;i<100;i++)b=a.slice(1024,3072);return b.byteLength+new Uint8Array(b)[2047];}\nbench();",
+      "invocation": "bench();",
+      "expected": 2055.0,
+      "source_sha256": "78d36b4562fdd8a9e11a9c27d540f509abdd2ecb03a7bb66f68dd7453905f33e"
+    },
+    {
+      "name": "string_normalization",
+      "setup": "function bench(){let n=0;for(let i=0;i<500;i++)if('e\\u0301'.normalize('NFC')==='é')n++;return n;}",
+      "source": "function bench(){let n=0;for(let i=0;i<500;i++)if('e\\u0301'.normalize('NFC')==='é')n++;return n;}\nbench();",
+      "invocation": "bench();",
+      "expected": 500.0,
+      "source_sha256": "0473938a9a2511d4e17af7924aebe488417af1929d1f1770d9c8668fe8bc7593"
+    },
+    {
+      "name": "sparse_array_map",
+      "setup": "function bench(){const a=new Array(1000);for(let i=0;i<1000;i+=2)a[i]=i;const b=a.map(x=>x+1);let s=0;for(let i=0;i<b.length;i++)if(i in b)s+=b[i];return s;}",
+      "source": "function bench(){const a=new Array(1000);for(let i=0;i<1000;i+=2)a[i]=i;const b=a.map(x=>x+1);let s=0;for(let i=0;i<b.length;i++)if(i in b)s+=b[i];return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 250000.0,
+      "source_sha256": "9daeb60098bef2af273880001c1551f724b44c19129d48c7aa46f840914fd427"
+    },
+    {
+      "name": "collection_map_construct_16",
+      "setup": "function bench(){const m=new Map();for(let i=0;i<16;i++)m.set(i,i);return m.size;}",
+      "source": "function bench(){const m=new Map();for(let i=0;i<16;i++)m.set(i,i);return m.size;}\nbench();",
+      "invocation": "bench();",
+      "expected": 16.0,
+      "source_sha256": "59302c3c71cbd388201fd8cb652761217e3a987b3f69ef843a00da18ac5825cf"
+    },
+    {
+      "name": "collection_set_construct_16",
+      "setup": "function bench(){const m=new Set();for(let i=0;i<16;i++)m.add(i);return m.size;}",
+      "source": "function bench(){const m=new Set();for(let i=0;i<16;i++)m.add(i);return m.size;}\nbench();",
+      "invocation": "bench();",
+      "expected": 16.0,
+      "source_sha256": "365ae4c289b64ba2b60d51d5738ee5c2a5064f79cc1cd371663959303fab8958"
+    },
+    {
+      "name": "collection_map_lookup_numbers_16",
+      "setup": "var collectionFixture=new Map();for(var i=0;i<16;i++)collectionFixture.set(i,i);\nfunction bench(){let s=0;for(let i=0;i<16;i++)s+=collectionFixture.get(i);return s;}",
+      "source": "var collectionFixture=new Map();for(var i=0;i<16;i++)collectionFixture.set(i,i);\nfunction bench(){let s=0;for(let i=0;i<16;i++)s+=collectionFixture.get(i);return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 120.0,
+      "source_sha256": "95db8c9c1ec7cc130d42b15cc5c636cb6d61367081ecfe4603fed28577b9eb29"
+    },
+    {
+      "name": "collection_map_lookup_strings_16",
+      "setup": "var collectionFixture=new Map();for(var i=0;i<16;i++)collectionFixture.set('key'+i,i);\nfunction bench(){let s=0;for(let i=0;i<16;i++)s+=collectionFixture.get('key'+i);return s;}",
+      "source": "var collectionFixture=new Map();for(var i=0;i<16;i++)collectionFixture.set('key'+i,i);\nfunction bench(){let s=0;for(let i=0;i<16;i++)s+=collectionFixture.get('key'+i);return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 120.0,
+      "source_sha256": "ec326cbe7fa823535faa9a2f0d902079b1d72dfafca54c9d02dc81697c55510f"
+    },
+    {
+      "name": "collection_map_lookup_objects_16",
+      "setup": "var collectionKeys=[];for(var j=0;j<16;j++)collectionKeys.push({id:j});var collectionFixture=new Map();for(var i=0;i<16;i++)collectionFixture.set(collectionKeys[i],i);\nfunction bench(){let s=0;for(let i=0;i<16;i++)s+=collectionFixture.get(collectionKeys[i]);return s;}",
+      "source": "var collectionKeys=[];for(var j=0;j<16;j++)collectionKeys.push({id:j});var collectionFixture=new Map();for(var i=0;i<16;i++)collectionFixture.set(collectionKeys[i],i);\nfunction bench(){let s=0;for(let i=0;i<16;i++)s+=collectionFixture.get(collectionKeys[i]);return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 120.0,
+      "source_sha256": "5e647e6d1870329a011d1b986e7b726b71e8bba15557c866e3848c52f7a2cbcf"
+    },
+    {
+      "name": "collection_set_has_16",
+      "setup": "var collectionFixture=new Set();for(var i=0;i<16;i++)collectionFixture.add(i);\nfunction bench(){let s=0;for(let i=0;i<16;i++){if(collectionFixture.has(i))s++;if(collectionFixture.has(i+16))s++;}return s;}",
+      "source": "var collectionFixture=new Set();for(var i=0;i<16;i++)collectionFixture.add(i);\nfunction bench(){let s=0;for(let i=0;i<16;i++){if(collectionFixture.has(i))s++;if(collectionFixture.has(i+16))s++;}return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 16.0,
+      "source_sha256": "0549b9c0796927ed6be81667b9bf4d24405028c57897049087db074cb10b3c5f"
+    },
+    {
+      "name": "collection_map_construct_64",
+      "setup": "function bench(){const m=new Map();for(let i=0;i<64;i++)m.set(i,i);return m.size;}",
+      "source": "function bench(){const m=new Map();for(let i=0;i<64;i++)m.set(i,i);return m.size;}\nbench();",
+      "invocation": "bench();",
+      "expected": 64.0,
+      "source_sha256": "ab1bd66b38be2a83edf6dbd3f8cca39c4e22196be89529293ebc2d494e59dff3"
+    },
+    {
+      "name": "collection_set_construct_64",
+      "setup": "function bench(){const m=new Set();for(let i=0;i<64;i++)m.add(i);return m.size;}",
+      "source": "function bench(){const m=new Set();for(let i=0;i<64;i++)m.add(i);return m.size;}\nbench();",
+      "invocation": "bench();",
+      "expected": 64.0,
+      "source_sha256": "daad5e4f964467b91796069c0fcb9091324d041f9c4dbf34b8b270e8524e7127"
+    },
+    {
+      "name": "collection_map_lookup_numbers_64",
+      "setup": "var collectionFixture=new Map();for(var i=0;i<64;i++)collectionFixture.set(i,i);\nfunction bench(){let s=0;for(let i=0;i<64;i++)s+=collectionFixture.get(i);return s;}",
+      "source": "var collectionFixture=new Map();for(var i=0;i<64;i++)collectionFixture.set(i,i);\nfunction bench(){let s=0;for(let i=0;i<64;i++)s+=collectionFixture.get(i);return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 2016.0,
+      "source_sha256": "3196cee4460534099fe872374ee3621e0a3ca89f82a727c2e99397eb247a6b20"
+    },
+    {
+      "name": "collection_map_lookup_strings_64",
+      "setup": "var collectionFixture=new Map();for(var i=0;i<64;i++)collectionFixture.set('key'+i,i);\nfunction bench(){let s=0;for(let i=0;i<64;i++)s+=collectionFixture.get('key'+i);return s;}",
+      "source": "var collectionFixture=new Map();for(var i=0;i<64;i++)collectionFixture.set('key'+i,i);\nfunction bench(){let s=0;for(let i=0;i<64;i++)s+=collectionFixture.get('key'+i);return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 2016.0,
+      "source_sha256": "ba8754a1de653144ae952cbc226fac0ae3eec582f6a092ec05c797e46d2d6e85"
+    },
+    {
+      "name": "collection_map_lookup_objects_64",
+      "setup": "var collectionKeys=[];for(var j=0;j<64;j++)collectionKeys.push({id:j});var collectionFixture=new Map();for(var i=0;i<64;i++)collectionFixture.set(collectionKeys[i],i);\nfunction bench(){let s=0;for(let i=0;i<64;i++)s+=collectionFixture.get(collectionKeys[i]);return s;}",
+      "source": "var collectionKeys=[];for(var j=0;j<64;j++)collectionKeys.push({id:j});var collectionFixture=new Map();for(var i=0;i<64;i++)collectionFixture.set(collectionKeys[i],i);\nfunction bench(){let s=0;for(let i=0;i<64;i++)s+=collectionFixture.get(collectionKeys[i]);return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 2016.0,
+      "source_sha256": "893254c3828fac6d76e3d30141ba7785f437047f3992cd9af789243ca3bf802b"
+    },
+    {
+      "name": "collection_set_has_64",
+      "setup": "var collectionFixture=new Set();for(var i=0;i<64;i++)collectionFixture.add(i);\nfunction bench(){let s=0;for(let i=0;i<64;i++){if(collectionFixture.has(i))s++;if(collectionFixture.has(i+64))s++;}return s;}",
+      "source": "var collectionFixture=new Set();for(var i=0;i<64;i++)collectionFixture.add(i);\nfunction bench(){let s=0;for(let i=0;i<64;i++){if(collectionFixture.has(i))s++;if(collectionFixture.has(i+64))s++;}return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 64.0,
+      "source_sha256": "3ee9ccfbb9aed186037d60e507b622b9dcbd2e8403d3589aba498853f7fbec67"
+    },
+    {
+      "name": "collection_map_construct_256",
+      "setup": "function bench(){const m=new Map();for(let i=0;i<256;i++)m.set(i,i);return m.size;}",
+      "source": "function bench(){const m=new Map();for(let i=0;i<256;i++)m.set(i,i);return m.size;}\nbench();",
+      "invocation": "bench();",
+      "expected": 256.0,
+      "source_sha256": "01ae574217be042ff2578158829bd929e2733677d5136125f0b170dab2ce2639"
+    },
+    {
+      "name": "collection_set_construct_256",
+      "setup": "function bench(){const m=new Set();for(let i=0;i<256;i++)m.add(i);return m.size;}",
+      "source": "function bench(){const m=new Set();for(let i=0;i<256;i++)m.add(i);return m.size;}\nbench();",
+      "invocation": "bench();",
+      "expected": 256.0,
+      "source_sha256": "ae2ac9e8181b9130911567c29c7d038d307eaa25e29d0a027374ee5ef716b694"
+    },
+    {
+      "name": "collection_map_lookup_numbers_256",
+      "setup": "var collectionFixture=new Map();for(var i=0;i<256;i++)collectionFixture.set(i,i);\nfunction bench(){let s=0;for(let i=0;i<256;i++)s+=collectionFixture.get(i);return s;}",
+      "source": "var collectionFixture=new Map();for(var i=0;i<256;i++)collectionFixture.set(i,i);\nfunction bench(){let s=0;for(let i=0;i<256;i++)s+=collectionFixture.get(i);return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 32640.0,
+      "source_sha256": "8f45d15b403cad76310c3f6d383cc3f8fc74a698aa6cab14339eb9037c33943a"
+    },
+    {
+      "name": "collection_map_lookup_strings_256",
+      "setup": "var collectionFixture=new Map();for(var i=0;i<256;i++)collectionFixture.set('key'+i,i);\nfunction bench(){let s=0;for(let i=0;i<256;i++)s+=collectionFixture.get('key'+i);return s;}",
+      "source": "var collectionFixture=new Map();for(var i=0;i<256;i++)collectionFixture.set('key'+i,i);\nfunction bench(){let s=0;for(let i=0;i<256;i++)s+=collectionFixture.get('key'+i);return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 32640.0,
+      "source_sha256": "5201f170649898d48442255d282eebf49be5d49637ce8c76f64370117636f763"
+    },
+    {
+      "name": "collection_map_lookup_objects_256",
+      "setup": "var collectionKeys=[];for(var j=0;j<256;j++)collectionKeys.push({id:j});var collectionFixture=new Map();for(var i=0;i<256;i++)collectionFixture.set(collectionKeys[i],i);\nfunction bench(){let s=0;for(let i=0;i<256;i++)s+=collectionFixture.get(collectionKeys[i]);return s;}",
+      "source": "var collectionKeys=[];for(var j=0;j<256;j++)collectionKeys.push({id:j});var collectionFixture=new Map();for(var i=0;i<256;i++)collectionFixture.set(collectionKeys[i],i);\nfunction bench(){let s=0;for(let i=0;i<256;i++)s+=collectionFixture.get(collectionKeys[i]);return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 32640.0,
+      "source_sha256": "51a265160b8dcb946ae6e24248fefdd77fa356f2c554bba80dce29f03679162b"
+    },
+    {
+      "name": "collection_set_has_256",
+      "setup": "var collectionFixture=new Set();for(var i=0;i<256;i++)collectionFixture.add(i);\nfunction bench(){let s=0;for(let i=0;i<256;i++){if(collectionFixture.has(i))s++;if(collectionFixture.has(i+256))s++;}return s;}",
+      "source": "var collectionFixture=new Set();for(var i=0;i<256;i++)collectionFixture.add(i);\nfunction bench(){let s=0;for(let i=0;i<256;i++){if(collectionFixture.has(i))s++;if(collectionFixture.has(i+256))s++;}return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 256.0,
+      "source_sha256": "30e157232c925e68d4eceeafb583b822a3f48f57e685bfd74416f961a61bdbb1"
+    },
+    {
+      "name": "collection_map_construct_1024",
+      "setup": "function bench(){const m=new Map();for(let i=0;i<1024;i++)m.set(i,i);return m.size;}",
+      "source": "function bench(){const m=new Map();for(let i=0;i<1024;i++)m.set(i,i);return m.size;}\nbench();",
+      "invocation": "bench();",
+      "expected": 1024.0,
+      "source_sha256": "3e6abefff3926726a187b69bb98ae546fb01c3c624db07a4617136521ba5b191"
+    },
+    {
+      "name": "collection_set_construct_1024",
+      "setup": "function bench(){const m=new Set();for(let i=0;i<1024;i++)m.add(i);return m.size;}",
+      "source": "function bench(){const m=new Set();for(let i=0;i<1024;i++)m.add(i);return m.size;}\nbench();",
+      "invocation": "bench();",
+      "expected": 1024.0,
+      "source_sha256": "a2fdcc88e888365873c71611afe00d0c9a1feb9ae5c4e573dcb946633f42eb9d"
+    },
+    {
+      "name": "collection_map_lookup_numbers_1024",
+      "setup": "var collectionFixture=new Map();for(var i=0;i<1024;i++)collectionFixture.set(i,i);\nfunction bench(){let s=0;for(let i=0;i<1024;i++)s+=collectionFixture.get(i);return s;}",
+      "source": "var collectionFixture=new Map();for(var i=0;i<1024;i++)collectionFixture.set(i,i);\nfunction bench(){let s=0;for(let i=0;i<1024;i++)s+=collectionFixture.get(i);return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 523776.0,
+      "source_sha256": "9bc03fa127a3e93d3c2fd7ac5eb9bb42efe63ffa5afb0ae155ffd915097efb29"
+    },
+    {
+      "name": "collection_map_lookup_strings_1024",
+      "setup": "var collectionFixture=new Map();for(var i=0;i<1024;i++)collectionFixture.set('key'+i,i);\nfunction bench(){let s=0;for(let i=0;i<1024;i++)s+=collectionFixture.get('key'+i);return s;}",
+      "source": "var collectionFixture=new Map();for(var i=0;i<1024;i++)collectionFixture.set('key'+i,i);\nfunction bench(){let s=0;for(let i=0;i<1024;i++)s+=collectionFixture.get('key'+i);return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 523776.0,
+      "source_sha256": "dd1d617174fa4b7f5cb4b510601ce7593c568a7414b734fb7d35c5e5b0bcc978"
+    },
+    {
+      "name": "collection_map_lookup_objects_1024",
+      "setup": "var collectionKeys=[];for(var j=0;j<1024;j++)collectionKeys.push({id:j});var collectionFixture=new Map();for(var i=0;i<1024;i++)collectionFixture.set(collectionKeys[i],i);\nfunction bench(){let s=0;for(let i=0;i<1024;i++)s+=collectionFixture.get(collectionKeys[i]);return s;}",
+      "source": "var collectionKeys=[];for(var j=0;j<1024;j++)collectionKeys.push({id:j});var collectionFixture=new Map();for(var i=0;i<1024;i++)collectionFixture.set(collectionKeys[i],i);\nfunction bench(){let s=0;for(let i=0;i<1024;i++)s+=collectionFixture.get(collectionKeys[i]);return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 523776.0,
+      "source_sha256": "b1176fc60d77bce4bc74260ed82adb197c5b113ed98030acf6084492060ed349"
+    },
+    {
+      "name": "collection_set_has_1024",
+      "setup": "var collectionFixture=new Set();for(var i=0;i<1024;i++)collectionFixture.add(i);\nfunction bench(){let s=0;for(let i=0;i<1024;i++){if(collectionFixture.has(i))s++;if(collectionFixture.has(i+1024))s++;}return s;}",
+      "source": "var collectionFixture=new Set();for(var i=0;i<1024;i++)collectionFixture.add(i);\nfunction bench(){let s=0;for(let i=0;i<1024;i++){if(collectionFixture.has(i))s++;if(collectionFixture.has(i+1024))s++;}return s;}\nbench();",
+      "invocation": "bench();",
+      "expected": 1024.0,
+      "source_sha256": "1b3ee59372d0fa4ca9c25e24cdada29b776adae1083102746c308527b8fcd0c9"
+    }
+  ]
+}

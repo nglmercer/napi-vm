@@ -1,0 +1,841 @@
+{
+  "schema": 1,
+  "changed_inputs": [
+    "crates/napi-vm-core/src/builtins/promise.rs",
+    "crates/napi-vm-core/src/interpreter/promise.rs"
+  ],
+  "results": [
+    {
+      "engine": "napi-vm",
+      "mode": "enqueue",
+      "workload": "resolved",
+      "before": 26741.9,
+      "after": 26103.9,
+      "after_over_before": 0.9761423085121103
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "enqueue",
+      "workload": "resolved",
+      "before": 4973.2,
+      "after": 5043.6,
+      "after_over_before": 1.0141558754926407
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "checkpoint",
+      "workload": "resolved",
+      "before": 5940.4,
+      "after": 5662.6,
+      "after_over_before": 0.9532354723587638
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "checkpoint",
+      "workload": "resolved",
+      "before": 427.7,
+      "after": 437.5,
+      "after_over_before": 1.0229132569558101
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "source_completed",
+      "workload": "resolved",
+      "before": 32364.1,
+      "after": 31150.8,
+      "after_over_before": 0.962510930320942
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "source_completed",
+      "workload": "resolved",
+      "before": 5371.9,
+      "after": 5343.0,
+      "after_over_before": 0.9946201530184852
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "call_completed",
+      "workload": "resolved",
+      "before": 32128.1,
+      "after": 30747.6,
+      "after_over_before": 0.957031383741958
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "call_completed",
+      "workload": "resolved",
+      "before": 2818.4,
+      "after": 2991.3,
+      "after_over_before": 1.0613468634686347
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "enqueue",
+      "workload": "chain_128",
+      "before": 1540374.7,
+      "after": 1517236.0,
+      "after_over_before": 0.9849785250303059
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "enqueue",
+      "workload": "chain_128",
+      "before": 93751.7,
+      "after": 91560.2,
+      "after_over_before": 0.9766244238771137
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "checkpoint",
+      "workload": "chain_128",
+      "before": 589889.1,
+      "after": 591216.0,
+      "after_over_before": 1.0022494058628986
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "checkpoint",
+      "workload": "chain_128",
+      "before": 32719.3,
+      "after": 33513.3,
+      "after_over_before": 1.0242670228275055
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "source_completed",
+      "workload": "chain_128",
+      "before": 2137102.1,
+      "after": 2108951.5,
+      "after_over_before": 0.9868276766000089
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "source_completed",
+      "workload": "chain_128",
+      "before": 126379.4,
+      "after": 125157.9,
+      "after_over_before": 0.9903346589713197
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "call_completed",
+      "workload": "chain_128",
+      "before": 2123442.6,
+      "after": 2110618.0,
+      "after_over_before": 0.9939604677800097
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "call_completed",
+      "workload": "chain_128",
+      "before": 123236.2,
+      "after": 121001.6,
+      "after_over_before": 0.9818673409274223
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "enqueue",
+      "workload": "fanout_128",
+      "before": 4788856.6,
+      "after": 4880938.6,
+      "after_over_before": 1.0192283895074243
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "enqueue",
+      "workload": "fanout_128",
+      "before": 213063.2,
+      "after": 207493.3,
+      "after_over_before": 0.9738579914316502
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "checkpoint",
+      "workload": "fanout_128",
+      "before": 2222225.2,
+      "after": 2054788.4,
+      "after_over_before": 0.924653540964255
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "checkpoint",
+      "workload": "fanout_128",
+      "before": 78214.8,
+      "after": 78271.1,
+      "after_over_before": 1.0007198126185837
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "source_completed",
+      "workload": "fanout_128",
+      "before": 7152942.6,
+      "after": 6824772.1,
+      "after_over_before": 0.9541209096239637
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "source_completed",
+      "workload": "fanout_128",
+      "before": 291153.6,
+      "after": 286443.2,
+      "after_over_before": 0.9838215979469257
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "call_completed",
+      "workload": "fanout_128",
+      "before": 7158800.5,
+      "after": 6952787.1,
+      "after_over_before": 0.9712223577120217
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "call_completed",
+      "workload": "fanout_128",
+      "before": 287763.7,
+      "after": 281743.7,
+      "after_over_before": 0.97908005770012
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "enqueue",
+      "workload": "all_values_128",
+      "before": 3809850.4,
+      "after": 3616477.6,
+      "after_over_before": 0.9492439913126248
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "enqueue",
+      "workload": "all_values_128",
+      "before": 180035.9,
+      "after": 178118.3,
+      "after_over_before": 0.98934879099113
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "checkpoint",
+      "workload": "all_values_128",
+      "before": 1160929.4,
+      "after": 1100464.5,
+      "after_over_before": 0.9479168156134216
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "checkpoint",
+      "workload": "all_values_128",
+      "before": 43741.7,
+      "after": 43893.7,
+      "after_over_before": 1.003474944960987
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "source_completed",
+      "workload": "all_values_128",
+      "before": 4940364.5,
+      "after": 4740727.2,
+      "after_over_before": 0.9595905727198875
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "source_completed",
+      "workload": "all_values_128",
+      "before": 223468.7,
+      "after": 222456.7,
+      "after_over_before": 0.9954714015877839
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "call_completed",
+      "workload": "all_values_128",
+      "before": 5051346.2,
+      "after": 4743126.7,
+      "after_over_before": 0.9389827012846595
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "call_completed",
+      "workload": "all_values_128",
+      "before": 220944.7,
+      "after": 220121.1,
+      "after_over_before": 0.9962723704166698
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "enqueue",
+      "workload": "all_promises_128",
+      "before": 3969267.4,
+      "after": 3808130.9,
+      "after_over_before": 0.9594039696091021
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "enqueue",
+      "workload": "all_promises_128",
+      "before": 206173.2,
+      "after": 203101.6,
+      "after_over_before": 0.9851018464087475
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "checkpoint",
+      "workload": "all_promises_128",
+      "before": 1022081.2,
+      "after": 948676.4,
+      "after_over_before": 0.9281810486290131
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "checkpoint",
+      "workload": "all_promises_128",
+      "before": 43361.0,
+      "after": 43392.2,
+      "after_over_before": 1.0007195406010008
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "source_completed",
+      "workload": "all_promises_128",
+      "before": 4963862.8,
+      "after": 4827080.1,
+      "after_over_before": 0.9724443028522061
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "source_completed",
+      "workload": "all_promises_128",
+      "before": 249128.8,
+      "after": 247056.9,
+      "after_over_before": 0.991683418376358
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "call_completed",
+      "workload": "all_promises_128",
+      "before": 5004402.1,
+      "after": 4860900.8,
+      "after_over_before": 0.9713249860557768
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "call_completed",
+      "workload": "all_promises_128",
+      "before": 244954.4,
+      "after": 242562.4,
+      "after_over_before": 0.990234917192751
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "enqueue",
+      "workload": "all_settled_128",
+      "before": 4158999.2,
+      "after": 4177264.2,
+      "after_over_before": 1.0043916815372314
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "enqueue",
+      "workload": "all_settled_128",
+      "before": 234966.0,
+      "after": 233344.6,
+      "after_over_before": 0.9930994271511623
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "checkpoint",
+      "workload": "all_settled_128",
+      "before": 1471271.2,
+      "after": 1598008.0,
+      "after_over_before": 1.0861410187326443
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "checkpoint",
+      "workload": "all_settled_128",
+      "before": 72947.0,
+      "after": 72959.9,
+      "after_over_before": 1.0001768407199747
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "source_completed",
+      "workload": "all_settled_128",
+      "before": 5498853.9,
+      "after": 5596198.1,
+      "after_over_before": 1.0177026343616802
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "source_completed",
+      "workload": "all_settled_128",
+      "before": 307973.6,
+      "after": 303975.5,
+      "after_over_before": 0.9870180431049935
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "call_completed",
+      "workload": "all_settled_128",
+      "before": 5549975.6,
+      "after": 6136404.1,
+      "after_over_before": 1.1056632573303566
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "call_completed",
+      "workload": "all_settled_128",
+      "before": 304287.6,
+      "after": 302201.1,
+      "after_over_before": 0.9931430002405619
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "enqueue",
+      "workload": "race_128",
+      "before": 3825284.4,
+      "after": 3745147.4,
+      "after_over_before": 0.9790507079682755
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "enqueue",
+      "workload": "race_128",
+      "before": 179398.9,
+      "after": 179380.2,
+      "after_over_before": 0.999895763017499
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "checkpoint",
+      "workload": "race_128",
+      "before": 544233.9,
+      "after": 645298.2,
+      "after_over_before": 1.1857001190113294
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "checkpoint",
+      "workload": "race_128",
+      "before": 19506.6,
+      "after": 20031.5,
+      "after_over_before": 1.0269088411101883
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "source_completed",
+      "workload": "race_128",
+      "before": 4303577.4,
+      "after": 4792514.9,
+      "after_over_before": 1.1136118755526507
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "source_completed",
+      "workload": "race_128",
+      "before": 201142.2,
+      "after": 201871.8,
+      "after_over_before": 1.0036272845777763
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "call_completed",
+      "workload": "race_128",
+      "before": 4456105.0,
+      "after": 4852428.5,
+      "after_over_before": 1.0889394437518864
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "call_completed",
+      "workload": "race_128",
+      "before": 196559.5,
+      "after": 196082.4,
+      "after_over_before": 0.9975727451484155
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "enqueue",
+      "workload": "any_reject_127",
+      "before": 4146792.7,
+      "after": 3941570.7,
+      "after_over_before": 0.9505106681604798
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "enqueue",
+      "workload": "any_reject_127",
+      "before": 218259.7,
+      "after": 214035.8,
+      "after_over_before": 0.9806473664171625
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "checkpoint",
+      "workload": "any_reject_127",
+      "before": 953273.8,
+      "after": 972400.8,
+      "after_over_before": 1.0200645396946817
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "checkpoint",
+      "workload": "any_reject_127",
+      "before": 34490.7,
+      "after": 34491.8,
+      "after_over_before": 1.0000318926551217
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "source_completed",
+      "workload": "any_reject_127",
+      "before": 5097453.7,
+      "after": 4724436.2,
+      "after_over_before": 0.9268227782039492
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "source_completed",
+      "workload": "any_reject_127",
+      "before": 252169.2,
+      "after": 244580.4,
+      "after_over_before": 0.9699059203106485
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "call_completed",
+      "workload": "any_reject_127",
+      "before": 5002752.0,
+      "after": 4732828.7,
+      "after_over_before": 0.9460450368117389
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "call_completed",
+      "workload": "any_reject_127",
+      "before": 247364.9,
+      "after": 242240.6,
+      "after_over_before": 0.9792844498148283
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "enqueue",
+      "workload": "thenable_chain_64",
+      "before": 819884.7,
+      "after": 797091.0,
+      "after_over_before": 0.972198895771564
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "enqueue",
+      "workload": "thenable_chain_64",
+      "before": 51456.4,
+      "after": 50227.4,
+      "after_over_before": 0.9761157018368949
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "checkpoint",
+      "workload": "thenable_chain_64",
+      "before": 900719.8,
+      "after": 838592.8,
+      "after_over_before": 0.9310251645406263
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "checkpoint",
+      "workload": "thenable_chain_64",
+      "before": 71079.2,
+      "after": 68690.7,
+      "after_over_before": 0.9663966392418598
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "source_completed",
+      "workload": "thenable_chain_64",
+      "before": 1720885.3,
+      "after": 1650146.3,
+      "after_over_before": 0.9588938321455823
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "source_completed",
+      "workload": "thenable_chain_64",
+      "before": 122690.4,
+      "after": 118997.8,
+      "after_over_before": 0.9699031057034618
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "call_completed",
+      "workload": "thenable_chain_64",
+      "before": 1782904.6,
+      "after": 1719370.5,
+      "after_over_before": 0.9643648347757923
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "call_completed",
+      "workload": "thenable_chain_64",
+      "before": 118791.1,
+      "after": 115075.1,
+      "after_over_before": 0.9687181952183287
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "enqueue",
+      "workload": "catch_finally_64",
+      "before": 2913451.4,
+      "after": 2853934.4,
+      "after_over_before": 0.9795716516843219
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "enqueue",
+      "workload": "catch_finally_64",
+      "before": 158848.0,
+      "after": 156493.0,
+      "after_over_before": 0.9851745064464141
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "checkpoint",
+      "workload": "catch_finally_64",
+      "before": 4828511.1,
+      "after": 4702496.2,
+      "after_over_before": 0.9739019135733168
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "checkpoint",
+      "workload": "catch_finally_64",
+      "before": 217920.3,
+      "after": 218892.3,
+      "after_over_before": 1.004460346282563
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "source_completed",
+      "workload": "catch_finally_64",
+      "before": 7786457.3,
+      "after": 7507559.5,
+      "after_over_before": 0.9641816824706662
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "source_completed",
+      "workload": "catch_finally_64",
+      "before": 379000.7,
+      "after": 374413.8,
+      "after_over_before": 0.9878973838306895
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "call_completed",
+      "workload": "catch_finally_64",
+      "before": 7550060.3,
+      "after": 7514543.7,
+      "after_over_before": 0.9952958521404127
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "call_completed",
+      "workload": "catch_finally_64",
+      "before": 374485.5,
+      "after": 372628.0,
+      "after_over_before": 0.9950398613564477
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "enqueue",
+      "workload": "await_values_128",
+      "before": 161392.7,
+      "after": 162163.3,
+      "after_over_before": 1.0047746893137048
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "enqueue",
+      "workload": "await_values_128",
+      "before": 8998.1,
+      "after": 9018.4,
+      "after_over_before": 1.0022560318289415
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "checkpoint",
+      "workload": "await_values_128",
+      "before": 377270.5,
+      "after": 385791.3,
+      "after_over_before": 1.0225853863474614
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "checkpoint",
+      "workload": "await_values_128",
+      "before": 96622.1,
+      "after": 95367.4,
+      "after_over_before": 0.9870143579988429
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "source_completed",
+      "workload": "await_values_128",
+      "before": 543036.7,
+      "after": 540119.3,
+      "after_over_before": 0.9946276190909382
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "source_completed",
+      "workload": "await_values_128",
+      "before": 105126.1,
+      "after": 104601.9,
+      "after_over_before": 0.995013607467603
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "call_completed",
+      "workload": "await_values_128",
+      "before": 542152.2,
+      "after": 540443.3,
+      "after_over_before": 0.9968479331080831
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "call_completed",
+      "workload": "await_values_128",
+      "before": 100614.0,
+      "after": 100263.0,
+      "after_over_before": 0.9965114198819249
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "enqueue",
+      "workload": "await_promises_128",
+      "before": 376301.8,
+      "after": 383950.1,
+      "after_over_before": 1.0203249094211082
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "enqueue",
+      "workload": "await_promises_128",
+      "before": 8903.3,
+      "after": 9063.9,
+      "after_over_before": 1.0180382554783058
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "checkpoint",
+      "workload": "await_promises_128",
+      "before": 5737215.6,
+      "after": 5591870.8,
+      "after_over_before": 0.9746663172288662
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "checkpoint",
+      "workload": "await_promises_128",
+      "before": 107336.1,
+      "after": 107304.2,
+      "after_over_before": 0.9997028026917317
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "source_completed",
+      "workload": "await_promises_128",
+      "before": 6173901.6,
+      "after": 5999213.0,
+      "after_over_before": 0.9717053151608377
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "source_completed",
+      "workload": "await_promises_128",
+      "before": 116454.2,
+      "after": 116171.8,
+      "after_over_before": 0.997575012322441
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "call_completed",
+      "workload": "await_promises_128",
+      "before": 6085326.4,
+      "after": 5984815.7,
+      "after_over_before": 0.9834831045381559
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "call_completed",
+      "workload": "await_promises_128",
+      "before": 111990.5,
+      "after": 111013.9,
+      "after_over_before": 0.991279617467553
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "enqueue",
+      "workload": "async_generator_64",
+      "before": 365713.1,
+      "after": 373278.0,
+      "after_over_before": 1.0206853405032525
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "enqueue",
+      "workload": "async_generator_64",
+      "before": 10615.3,
+      "after": 10694.1,
+      "after_over_before": 1.0074232475766112
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "checkpoint",
+      "workload": "async_generator_64",
+      "before": 2986218.1,
+      "after": 2974838.6,
+      "after_over_before": 0.9961893272296488
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "checkpoint",
+      "workload": "async_generator_64",
+      "before": 134226.0,
+      "after": 131777.8,
+      "after_over_before": 0.9817606126979869
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "source_completed",
+      "workload": "async_generator_64",
+      "before": 3334165.9,
+      "after": 3328580.1,
+      "after_over_before": 0.9983246784450648
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "source_completed",
+      "workload": "async_generator_64",
+      "before": 144713.9,
+      "after": 143643.4,
+      "after_over_before": 0.9926026456339024
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "call_completed",
+      "workload": "async_generator_64",
+      "before": 3313136.5,
+      "after": 3346181.9,
+      "after_over_before": 1.009974053287572
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "call_completed",
+      "workload": "async_generator_64",
+      "before": 139917.7,
+      "after": 142681.3,
+      "after_over_before": 1.019751611125683
+    }
+  ]
+}

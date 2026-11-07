@@ -1,0 +1,137 @@
+{
+  "schema": 1,
+  "metadata": {
+    "bindingPath": "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/shape-hot-validation/napi-vm-runtime.node",
+    "addonSha256": "02b155b05c95eb2dfc31de46ecfa76b0ca382d88b9054c3aca0442a2f904f168",
+    "scriptSha256": "334f57a733cbbefb6ddab74c98945f54d82ec738d760ed053dfeeef8fd6a32d0",
+    "node": "v26.13.0",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "AMD BC-250",
+    "samples": 15,
+    "iterations": 10,
+    "limitations": [
+      "Guest setup and assertions excluded; native guest call and outbound conversion included.",
+      "Alias identity is recorded separately so the known before-build defect remains visible.",
+      "No CPU isolation; GC and host activity can affect batches."
+    ]
+  },
+  "results": [
+    {
+      "name": "map_1_references",
+      "unit": "ns/call",
+      "source": "var collection=new Map();for(var i=0;i<256;i++)collection.set(i,i);var output=[];for(var i=0;i<1;i++)output.push(collection);function get(){return output;}",
+      "expectedEntries": 256,
+      "references": 1,
+      "sharedIdentityPreserved": true,
+      "samples": [
+        433612.9,
+        303919.8,
+        472087.1,
+        299341.1,
+        307600,
+        279172.1,
+        267081.6,
+        266579.3,
+        271077.8,
+        253574,
+        257239.5,
+        171535,
+        242886.5,
+        280326.1,
+        269502.3
+      ],
+      "summary": {
+        "median": 271077.8,
+        "mad": 17503.79999999999
+      }
+    },
+    {
+      "name": "map_64_references",
+      "unit": "ns/call",
+      "source": "var collection=new Map();for(var i=0;i<256;i++)collection.set(i,i);var output=[];for(var i=0;i<64;i++)output.push(collection);function get(){return output;}",
+      "expectedEntries": 256,
+      "references": 64,
+      "sharedIdentityPreserved": false,
+      "samples": [
+        14462206,
+        15032216.6,
+        14517040.2,
+        17800956.3,
+        15563538.2,
+        15740329.2,
+        15281788,
+        14581043,
+        14171676.4,
+        19885635.5,
+        18325296.5,
+        14265628.1,
+        16662415.8,
+        12718287,
+        14402622.4
+      ],
+      "summary": {
+        "median": 15032216.6,
+        "mad": 708112.5999999996
+      }
+    },
+    {
+      "name": "set_1_references",
+      "unit": "ns/call",
+      "source": "var collection=new Set();for(var i=0;i<256;i++)collection.add(i);var output=[];for(var i=0;i<1;i++)output.push(collection);function get(){return output;}",
+      "expectedEntries": 256,
+      "references": 1,
+      "sharedIdentityPreserved": true,
+      "samples": [
+        89263.7,
+        85544.4,
+        97843.8,
+        105955,
+        122147.9,
+        113021,
+        112618.6,
+        121948.6,
+        119770.8,
+        119641.1,
+        119779.8,
+        119599.8,
+        112057.8,
+        141636.1,
+        118792.8
+      ],
+      "summary": {
+        "median": 118792.8,
+        "mad": 5771.800000000003
+      }
+    },
+    {
+      "name": "set_64_references",
+      "unit": "ns/call",
+      "source": "var collection=new Set();for(var i=0;i<256;i++)collection.add(i);var output=[];for(var i=0;i<64;i++)output.push(collection);function get(){return output;}",
+      "expectedEntries": 256,
+      "references": 64,
+      "sharedIdentityPreserved": false,
+      "samples": [
+        6950774.3,
+        10968573.9,
+        7964168.4,
+        6994327.9,
+        5256194.6,
+        5362110.4,
+        5746367.6,
+        5900573.3,
+        5911312.6,
+        6408906.6,
+        6233698.1,
+        6759851.7,
+        6183119.6,
+        5686181,
+        6293251.9
+      ],
+      "summary": {
+        "median": 6233698.1,
+        "mad": 526153.6000000006
+      }
+    }
+  ]
+}

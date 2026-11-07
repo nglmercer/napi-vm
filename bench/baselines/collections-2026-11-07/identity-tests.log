@@ -1,0 +1,14 @@
+✔ outbound Map and Set aliases preserve native identity and insertion order (9.215572ms)
+✔ self-references in Map keys, Map values and Sets survive conversion (10.251711ms)
+✔ mixed collection array and object cycles preserve shared keys (4.678775ms)
+✔ distinct equal collections are not merged (5.825249ms)
+✔ large alias graphs do not expand duplicate collections (11.971009ms)
+✔ depth limit still rejects deep noncyclic collection graphs (19.497161ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 175.146208

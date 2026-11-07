@@ -1,0 +1,117 @@
+{
+  "schema": 1,
+  "wasm_sha256": "db534fe0a8efbac1bcef6c277afff0e2a1866ae09802b9387991cddd1c9db14f",
+  "original_glue_sha256": "23fab92475db28ee9fe1305268e7087e59cee5be6bc229765192a0cf4160056e",
+  "profiled_glue_sha256": "7dbce887e722763fac005a526959beea78212718cbff50fe5e9b2a1f33c41b32",
+  "node": "v26.13.0",
+  "limitations": [
+    "Import wrappers change call overhead; these are operation counts, not latency measurements.",
+    "Only a derived package copy is instrumented. The compiled WASM bytes remain unchanged."
+  ],
+  "results": [
+    {
+      "name": "constant",
+      "source": "1;",
+      "repetitions": 100,
+      "counts": {
+        "./napi_vm_bg.js.__wbg_length_02c64e687322fa34": 100,
+        "./napi_vm_bg.js.__wbg_charCodeAt_2a30bc7c17474cc6": 200,
+        "./napi_vm_bg.js.__wbg_now_86c0d4ba3fa605b8": 100,
+        "./napi_vm_bg.js.__wbg_makeRunResult_22de568e18f8d06b": 100
+      },
+      "total_imports_per_call": 5
+    },
+    {
+      "name": "call",
+      "source": "bench();",
+      "repetitions": 100,
+      "counts": {
+        "./napi_vm_bg.js.__wbg_length_02c64e687322fa34": 100,
+        "./napi_vm_bg.js.__wbg_charCodeAt_2a30bc7c17474cc6": 800,
+        "./napi_vm_bg.js.__wbg_now_86c0d4ba3fa605b8": 100,
+        "./napi_vm_bg.js.__wbg_makeRunResult_22de568e18f8d06b": 100
+      },
+      "total_imports_per_call": 11
+    },
+    {
+      "name": "logs",
+      "source": "console.log('x');42;",
+      "repetitions": 100,
+      "counts": {
+        "./napi_vm_bg.js.__wbg_length_02c64e687322fa34": 100,
+        "./napi_vm_bg.js.__wbg_charCodeAt_2a30bc7c17474cc6": 2000,
+        "./napi_vm_bg.js.__wbg_new_32b398fb48b6d94a": 200,
+        "./napi_vm_bg.js.__wbindgen_cast_0000000000000003": 200,
+        "./napi_vm_bg.js.__wbg_fromCharCode_ad1e3c557999d1e6": 200,
+        "./napi_vm_bg.js.__wbg_concat_2aa06260073610e2": 200,
+        "./napi_vm_bg.js.__wbg_push_d2ae3af0c1217ae6": 300,
+        "./napi_vm_bg.js.__wbg_apply_3ac86a26fdb56c05": 100,
+        "./napi_vm_bg.js.__wbg___wbindgen_is_undefined_c05833b95a3cf397": 100,
+        "./napi_vm_bg.js.__wbg_now_86c0d4ba3fa605b8": 100,
+        "./napi_vm_bg.js.__wbg_makeLogEntry_971d06558bcceef7": 100,
+        "./napi_vm_bg.js.__wbg_makeRunResult_22de568e18f8d06b": 100
+      },
+      "total_imports_per_call": 37
+    },
+    {
+      "name": "error",
+      "source": "throw Error('x');",
+      "repetitions": 100,
+      "counts": {
+        "./napi_vm_bg.js.__wbg_length_02c64e687322fa34": 100,
+        "./napi_vm_bg.js.__wbg_charCodeAt_2a30bc7c17474cc6": 1700,
+        "./napi_vm_bg.js.__wbg_now_86c0d4ba3fa605b8": 100,
+        "./napi_vm_bg.js.__wbg_makeRunResult_22de568e18f8d06b": 100
+      },
+      "total_imports_per_call": 20
+    },
+    {
+      "name": "unicode",
+      "source": "'😀';",
+      "repetitions": 100,
+      "counts": {
+        "./napi_vm_bg.js.__wbg_length_02c64e687322fa34": 100,
+        "./napi_vm_bg.js.__wbg_charCodeAt_2a30bc7c17474cc6": 500,
+        "./napi_vm_bg.js.__wbg_now_86c0d4ba3fa605b8": 100,
+        "./napi_vm_bg.js.__wbg_makeRunResult_22de568e18f8d06b": 100
+      },
+      "total_imports_per_call": 8
+    }
+  ],
+  "import_sources": {
+    "./napi_vm_bg.js.__wbg___wbindgen_boolean_get_fa956cfa2d1bd751": "function(arg0) {\n            const v = arg0;\n            const ret = typeof(v) === 'boolean' ? v : undefined;\n            return isLikeNone(ret) ? 0xFFFFFF : ret ? 1 : 0;\n        }",
+    "./napi_vm_bg.js.__wbg___wbindgen_is_null_ea9085d691f535d3": "function(arg0) {\n            const ret = arg0 === null;\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg___wbindgen_is_object_a27215656b807791": "function(arg0) {\n            const val = arg0;\n            const ret = typeof(val) === 'object' && val !== null;\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg___wbindgen_is_string_ea5e6cc2e4141dfe": "function(arg0) {\n            const ret = typeof(arg0) === 'string';\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg___wbindgen_is_undefined_c05833b95a3cf397": "function(arg0) {\n            const ret = arg0 === undefined;\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg___wbindgen_number_get_394265ed1e1b84ee": "function(arg0, arg1) {\n            const obj = arg1;\n            const ret = typeof(obj) === 'number' ? obj : undefined;\n            getDataViewMemory0().setFloat64(arg0 + 8 * 1, isLikeNone(ret) ? 0 : ret, true);\n            getDataViewMemory0().setInt32(arg0 + 4 * 0, !isLikeNone(ret), true);\n        }",
+    "./napi_vm_bg.js.__wbg___wbindgen_string_get_b0ca35b86a603356": "function(arg0, arg1) {\n            const obj = arg1;\n            const ret = typeof(obj) === 'string' ? obj : undefined;\n            var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);\n            var len1 = WASM_VECTOR_LEN;\n            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);\n            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);\n        }",
+    "./napi_vm_bg.js.__wbg___wbindgen_throw_344f42d3211c4765": "function(arg0, arg1) {\n            throw new Error(getStringFromWasm0(arg0, arg1));\n        }",
+    "./napi_vm_bg.js.__wbg__wbg_cb_unref_fffb441def202758": "function(arg0) {\n            arg0._wbg_cb_unref();\n        }",
+    "./napi_vm_bg.js.__wbg_apply_3ac86a26fdb56c05": "function() { return handleError(function (arg0, arg1, arg2) {\n            const ret = arg0.apply(arg1, arg2);\n            return ret;\n        }, arguments); }",
+    "./napi_vm_bg.js.__wbg_charCodeAt_2a30bc7c17474cc6": "function(arg0, arg1) {\n            const ret = arg0.charCodeAt(arg1 >>> 0);\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg_concat_2aa06260073610e2": "function(arg0, arg1) {\n            const ret = arg0.concat(arg1);\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg_create_8dbb796b6159a8e4": "function(arg0) {\n            const ret = Object.create(arg0);\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg_fromCharCode_ad1e3c557999d1e6": "function(arg0, arg1) {\n            const ret = String.fromCharCode(...getArrayU16FromWasm0(arg0, arg1));\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg_from_13e323c65fc8f464": "function(arg0) {\n            const ret = Array.from(arg0);\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg_get_507a50627bffa49b": "function(arg0, arg1) {\n            const ret = arg0[arg1 >>> 0];\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg_get_78f252d074a84d0b": "function() { return handleError(function (arg0, arg1) {\n            const ret = Reflect.get(arg0, arg1);\n            return ret;\n        }, arguments); }",
+    "./napi_vm_bg.js.__wbg_instanceof_Error_1fdac9f13a8181ba": "function(arg0) {\n            let result;\n            try {\n                result = arg0 instanceof Error;\n            } catch (_) {\n                result = false;\n            }\n            const ret = result;\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg_instanceof_Function_5ab636d175047924": "function(arg0) {\n            let result;\n            try {\n                result = arg0 instanceof Function;\n            } catch (_) {\n                result = false;\n            }\n            const ret = result;\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg_isArray_0677c962b281d01a": "function(arg0) {\n            const ret = Array.isArray(arg0);\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg_keys_58421f8f96795607": "function(arg0) {\n            const ret = Object.keys(arg0);\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg_length_02c64e687322fa34": "function(arg0) {\n            const ret = arg0.length;\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg_length_370319915dc99107": "function(arg0) {\n            const ret = arg0.length;\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg_makeLogEntry_971d06558bcceef7": "function(arg0, arg1, arg2, arg3) {\n            const ret = makeLogEntry(getStringFromWasm0(arg0, arg1), getStringFromWasm0(arg2, arg3));\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg_makeRunResult_22de568e18f8d06b": "function(arg0, arg1, arg2, arg3, arg4, arg5) {\n            const ret = makeRunResult(arg0 !== 0, getStringFromWasm0(arg1, arg2), getStringFromWasm0(arg3, arg4), arg5);\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg_new_32b398fb48b6d94a": "function() {\n            const ret = new Array();\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg_new_da52cf8fe3429cb2": "function() {\n            const ret = new Object();\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg_now_86c0d4ba3fa605b8": "function() {\n            const ret = Date.now();\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg_push_d2ae3af0c1217ae6": "function(arg0, arg1) {\n            const ret = arg0.push(arg1);\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbg_set_8535240470bf2500": "function() { return handleError(function (arg0, arg1, arg2) {\n            const ret = Reflect.set(arg0, arg1, arg2);\n            return ret;\n        }, arguments); }",
+    "./napi_vm_bg.js.__wbindgen_cast_0000000000000001": "function(arg0, arg1) {\n            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [String, String], shim_idx: 1, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.\n            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_288e9a9bd88878fd___convert__closures_____invoke___alloc_cb2b8d99256f33df___string__String__alloc_cb2b8d99256f33df___string__String______true_);\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbindgen_cast_0000000000000002": "function(arg0) {\n            // Cast intrinsic for `F64 -> Externref`.\n            const ret = arg0;\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbindgen_cast_0000000000000003": "function(arg0, arg1) {\n            // Cast intrinsic for `Ref(String) -> Externref`.\n            const ret = getStringFromWasm0(arg0, arg1);\n            return ret;\n        }",
+    "./napi_vm_bg.js.__wbindgen_init_externref_table": "function() {\n            const table = wasm.__wbindgen_externrefs;\n            const offset = table.grow(4);\n            table.set(0, undefined);\n            table.set(offset + 0, undefined);\n            table.set(offset + 1, null);\n            table.set(offset + 2, true);\n            table.set(offset + 3, false);\n        }"
+  }
+}

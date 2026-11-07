@@ -1,0 +1,81 @@
+   Compiling napi-vm-runtime v0.1.5 (/home/meme/Documentos/Default Project/node-vm/crates/napi-vm-runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.15s
+     Running unittests src/lib.rs (target/debug/deps/napi_vm_runtime-903fc967c44dfb08)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/optional_runtime.rs (target/debug/deps/optional_runtime-613672c69818a210)
+
+running 12 tests
+test cancellation_ignores_late_completion ... ok
+test executing_intervals_and_atomics_timeouts_share_the_timer_cap ... ok
+test filesystem_denies_traversal_symlinks_and_ungranted_operations ... ok
+test completion_wakes_sleeping_owner_and_pending_roots_survive_gc ... ok
+test permissions_are_denied_by_default_and_scoped ... ok
+test idle_does_not_wait_for_future_timers ... ok
+test queue_backpressure_and_shutdown_are_explicit ... ok
+test intervals_repeat_and_can_cancel_inside_callback ... ok
+test stale_completions_do_not_hide_ready_work_after_a_bounded_batch ... ok
+test runtime_globals_require_builder_opt_in ... ok
+test timer_and_elapsed_limits_are_enforced ... ok
+test worker_completion_settles_on_owner_and_follows_microtasks ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+
+     Running tests/permission_traversal.rs (target/debug/deps/permission_traversal-7905387ef7811b46)
+
+running 5 tests
+test zero_length_metadata_is_only_a_hint_for_virtual_files ... ok
+test read_limits_empty_files_and_utf8_errors ... ok
+test descriptor_traversal_reads_writes_and_reuses_grants_after_errors ... ok
+test most_specific_grant_stays_anchored_after_directory_replacement ... ok
+test symlinks_aliases_and_special_files_remain_denied ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/runtime_byte_modules.rs (target/debug/deps/runtime_byte_modules-a2a159862791f327)
+
+running 1 test
+test runtime_binary_adapters_preserve_bytes_permissions_and_limits ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/runtime_node.rs (target/debug/deps/runtime_node-2bffd3c88d906e3a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/runtime_packages.rs (target/debug/deps/runtime_packages-14bf3f49d3b6e12c)
+
+running 5 tests
+test npm_semver_and_integrity_have_exact_version_semantics ... ok
+test data_urls_preserve_plus_decode_base64_and_enforce_limits ... ok
+test package_targets_and_read_access_fail_closed ... ok
+test archives_validate_before_writing_and_reject_links ... ok
+test conditional_exports_subpaths_imports_and_cjs_interop ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/runtime_typescript.rs (target/debug/deps/runtime_typescript-bfaa26cfd1fc61d4)
+
+running 2 tests
+test typescript_runs_as_javascript_with_source_map ... ok
+test enums_and_tsx_transform_without_engine_syntax_changes ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/runtime_web.rs (target/debug/deps/runtime_web-ec8987c8f458b438)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests napi_vm_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

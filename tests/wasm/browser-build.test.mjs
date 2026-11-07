@@ -12,12 +12,14 @@ import { test, before, beforeEach, afterEach, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import propertyUpdateCases from "../fixtures/property-update-cases.cjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const pkg = join(root, "playground", "pkg");
+const requestedPackage = process.env.NAPI_VM_WASM_PACKAGE;
+const pkg = requestedPackage ? resolve(requestedPackage) : join(root, "playground", "pkg");
 const built = existsSync(join(pkg, "napi_vm_bg.wasm"));
+assert.ok(!requestedPackage || built, `requested WASM package is not built: ${pkg}`);
 
 let vm;
 let WasmVm;
@@ -164,6 +166,54 @@ describe("browser build", { skip: built ? false : "playground/pkg is not built" 
     assert.equal(run("'a-b'.replace(/-/, '+');"), "a+b");
   });
 
+  test("indexed collections preserve mixed keys and live iteration on wasm32", () => {
+    assert.equal(run(`
+      var m=new Map(),s=new Set();for(var i=0;i<64;i++){m.set(i,i);s.add(i);}
+      var traps=0;var object={toString(){traps++;throw 1;}};
+      var revoked=Proxy.revocable({},{});var proxy=revoked.proxy;revoked.revoke();
+      var keys=[object,proxy,Symbol('x'),function(){},new Uint8Array(2),1n,'\\ud800',NaN];
+      for(var i=0;i<keys.length;i++){m.set(keys[i],i);s.add(keys[i]);}
+      var ok=true;for(var i=0;i<keys.length;i++)ok=ok&&m.get(keys[i])===i&&s.has(keys[i]);
+      m.set(-0,99);s.add(-0);ok=ok&&m.get(0)===99&&m.size===64+keys.length&&s.size===64+keys.length;
+      var pair=m.entries().next().value;pair[0]='changed';ok=ok&&!m.has('changed');
+      var iterator=m.keys();iterator.next();m.delete(1);m.set(1,88);ok=ok&&iterator.next().value===2;
+      m.set(m,m);s.add(s);ok=ok&&m.get(m)===m&&s.has(s)&&traps===0;
+      m.clear();s.clear();m.set('last',42);s.add('last');
+      var step=iterator.next();ok&&!step.done&&step.value==='last'&&iterator.next().done&&m.size===1&&s.size===1;
+    `), "true");
+  });
+
+  test("result records and logs have independent own data properties", () => {
+    const first=vm.run("1;"),second=vm.run("2;");
+    assert.notEqual(first,second);assert.notEqual(first.logs,second.logs);
+    first.logs.push({level:"changed",text:"changed"});
+    assert.deepEqual(second.logs,[]);
+    const properties=["ok","error","logs","level","text"];
+    const saved=properties.map(key=>[key,Object.getOwnPropertyDescriptor(Object.prototype,key)]);
+    let setters=0,result;
+    try {
+      for(const key of properties)Object.defineProperty(Object.prototype,key,{configurable:true,set(){setters++;}});
+      result=vm.run("console.log('x');42;");
+    } finally {
+      for(const [key,descriptor] of saved) {
+        if(descriptor)Object.defineProperty(Object.prototype,key,descriptor);
+        else delete Object.prototype[key];
+      }
+    }
+    assert.equal(setters,0);assert.equal(result.ok,true);assert.equal(result.value,"42");
+    assert.deepEqual(Object.keys(result),["ok","value","error","logs"]);
+    assert.equal(result.logs.length,1);assert.equal(result.logs[0].text,"x");
+    assert.deepEqual(Object.keys(result.logs[0]),["level","text"]);
+    for(const key of Object.keys(result)) {
+      const descriptor=Object.getOwnPropertyDescriptor(result,key);
+      assert(descriptor.writable&&descriptor.enumerable&&descriptor.configurable);
+    }
+    const failed=vm.run("throw Error('bad');");
+    assert.equal(failed.ok,false);assert.equal(failed.value,"");assert(failed.error.includes("bad"));
+    assert.deepEqual(failed.logs,[]);
+    assert.equal(vm.run("'😀';").value,"😀");
+  });
+
   test("promise reactions run as microtasks", () => {
     assert.equal(
       run("let o = []; o.push('a'); Promise.resolve().then(() => o.push('c')); o.push('b'); await 0; o.join('');"),
@@ -194,6 +244,25 @@ describe("browser build", { skip: built ? false : "playground/pkg is not built" 
     assert.equal(vm.poll_event_loop(1).executedJobs,1);
     assert.equal(run("fired"),"true");
     vm.set_clock("legacy");
+  });
+
+  test("Intl bound getters preserve receiver brands and legacy effects", () => {
+    assert.equal(run(`
+var n=new Intl.NumberFormat('en-US'),d=new Intl.DateTimeFormat('en-US',{timeZone:'UTC',year:'numeric',month:'2-digit',day:'2-digit'}),c=new Intl.Collator('en-US');
+var nf=n.format,df=d.format,cf=c.compare;
+var ng=Object.getOwnPropertyDescriptor(Intl.NumberFormat.prototype,'format').get,dg=Object.getOwnPropertyDescriptor(Intl.DateTimeFormat.prototype,'format').get,cg=Object.getOwnPropertyDescriptor(Intl.Collator.prototype,'compare').get;
+
+      var nw=Object.create(Intl.NumberFormat.prototype),dw=Object.create(Intl.DateTimeFormat.prototype);
+      Intl.NumberFormat.call(nw,'en-US');Intl.DateTimeFormat.call(dw,'en-US');
+      var ns=Object.getOwnPropertySymbols(nw),ds=Object.getOwnPropertySymbols(dw);
+      var forgedN=Object.create(Intl.NumberFormat.prototype),forgedD=Object.create(Intl.DateTimeFormat.prototype);
+      forgedN[ns[0]]=d;forgedD[ds[0]]=n;
+var ok=ns.length===1&&ds.length===1&&nf===n.format&&df===d.format&&cf===c.compare;
+for(var pair of [[ng,forgedN],[dg,forgedD],[ng,d],[dg,n],[cg,n]]){try{pair[0].call(pair[1]);ok=false;}catch(e){ok=ok&&e instanceof TypeError;}}
+var marker={},traps=0;try{ng.call(new Proxy(n,{get(){traps++;throw marker;}}));ok=false;}catch(e){ok=ok&&e===marker&&traps===1;}
+var wrapper=Object.create(Intl.NumberFormat.prototype);Intl.NumberFormat.call(wrapper,'en-US');
+ok&&wrapper.format===wrapper.format&&wrapper.format(1234)==='1,234'&&nf(1234)==='1,234'&&df(1704067200000)==='01/01/2024'&&cf('a','b')<0;
+`), "true");
   });
 
 });

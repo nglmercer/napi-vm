@@ -171,18 +171,15 @@ fn to_napi_d(
                     chk(sys::napi_set_element(env, out, i as u32, ev))?;
                 }
             }
-            // A VM `Map`/`Set` becomes a host one, built through the host's
-            // own constructor so it is a real `Map`, not an object shaped like
-            // its internals.
-            Value::Object { .. } if crate::builtins::collection_entries_of(v).is_some() => {
-                let (kind, entries) =
-                    crate::builtins::collection_entries_of(v).expect("checked in the guard");
-                out = make_collection(env, kind, &entries, depth, active)?;
-            }
             Value::Object { props, .. } => {
                 let identity = std::rc::Rc::as_ptr(props) as usize;
                 if let Some(existing) = active.get(&identity) {
                     return Ok(*existing);
+                }
+                // Snapshot once, after consulting the same graph memo used by
+                // ordinary objects. Collections can alias or contain themselves.
+                if let Some((kind, entries)) = crate::builtins::collection_entries_of(v) {
+                    return make_collection(env, kind, &entries, depth, identity, active);
                 }
                 chk(sys::napi_create_object(env, &mut out))?;
                 active.insert(identity, out);
@@ -285,13 +282,14 @@ fn make_collection(
     kind: &str,
     entries: &[(Value, Value)],
     depth: usize,
+    identity: usize,
     active: &mut HashMap<usize, sys::napi_value>,
 ) -> Result<sys::napi_value, VmErr> {
     // The weak collections are deliberately not bridged: their contents are
     // not enumerable in the host either, so there is nothing to hand over.
-    let (constructor_name, keyed) = match kind {
-        "Map" => ("Map", true),
-        "Set" => ("Set", false),
+    let (constructor_name, method_name, keyed) = match kind {
+        "Map" => ("Map", "set", true),
+        "Set" => ("Set", "add", false),
         _ => return Err(VmErr::Msg(format!("cannot marshal a {}", kind))),
     };
     unsafe {
@@ -306,29 +304,43 @@ fn make_collection(
             &mut constructor,
         ))?;
 
-        let mut seed = ptr::null_mut();
-        chk(sys::napi_create_array_with_length(
-            env,
-            entries.len(),
-            &mut seed,
-        ))?;
-        for (index, (entry_key, entry_value)) in entries.iter().enumerate() {
-            let element = if keyed {
-                let mut pair = ptr::null_mut();
-                chk(sys::napi_create_array_with_length(env, 2, &mut pair))?;
-                let k = to_napi_d(env, entry_key, depth + 1, active)?;
-                let v = to_napi_d(env, entry_value, depth + 1, active)?;
-                chk(sys::napi_set_element(env, pair, 0, k))?;
-                chk(sys::napi_set_element(env, pair, 1, v))?;
-                pair
-            } else {
-                to_napi_d(env, entry_key, depth + 1, active)?
-            };
-            chk(sys::napi_set_element(env, seed, index as u32, element))?;
-        }
-
         let mut out = ptr::null_mut();
-        chk(sys::napi_new_instance(env, constructor, 1, &seed, &mut out))?;
+        chk(sys::napi_new_instance(
+            env,
+            constructor,
+            0,
+            ptr::null(),
+            &mut out,
+        ))?;
+        // Register the empty collection before following entries, just as for
+        // arrays/objects, so both repeated references and cycles resolve to it.
+        active.insert(identity, out);
+        let method_key = CString::new(method_name).expect("literal has no NUL");
+        let mut method = ptr::null_mut();
+        chk(sys::napi_get_named_property(
+            env,
+            out,
+            method_key.as_ptr(),
+            &mut method,
+        ))?;
+        for (entry_key, entry_value) in entries {
+            let key = to_napi_d(env, entry_key, depth + 1, active)?;
+            let value = if keyed {
+                to_napi_d(env, entry_value, depth + 1, active)?
+            } else {
+                ptr::null_mut()
+            };
+            let args = [key, value];
+            let mut ignored = ptr::null_mut();
+            chk(sys::napi_call_function(
+                env,
+                out,
+                method,
+                if keyed { 2 } else { 1 },
+                args.as_ptr(),
+                &mut ignored,
+            ))?;
+        }
         Ok(out)
     }
 }

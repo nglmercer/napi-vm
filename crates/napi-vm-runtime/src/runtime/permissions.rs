@@ -129,8 +129,22 @@ impl Permissions {
         String::from_utf8(self.read_bytes(path, max_bytes)?).map_err(|e| VmErr::Msg(e.to_string()))
     }
     pub fn read_bytes(&self, path: impl AsRef<Path>, max_bytes: usize) -> Result<Vec<u8>, VmErr> {
-        let file = self.open(path.as_ref(), false)?;
+        let (file, length) = self.open(path.as_ref(), false)?;
         let mut bytes = Vec::new();
+        // Reuse the length obtained while validating the opened descriptor.
+        // It is only a capacity hint: the file may change, and Take still
+        // enforces the read limit. Spare space permits an EOF probe without
+        // growing an exactly full buffer; zero-length/virtual files stay lazy.
+        let capacity = if length == 0 {
+            0
+        } else {
+            length
+                .saturating_add(1)
+                .min(max_bytes.saturating_add(1) as u64) as usize
+        };
+        bytes
+            .try_reserve_exact(capacity)
+            .map_err(|_| VmErr::Msg("ResourceLimit: file buffer allocation failed".into()))?;
         file.take(max_bytes.saturating_add(1) as u64)
             .read_to_end(&mut bytes)
             .map_err(|e| VmErr::Msg(e.to_string()))?;
@@ -156,7 +170,7 @@ impl Permissions {
         if bytes.len() > max_bytes {
             return Err(VmErr::Msg("ResourceLimit: file size exceeded".into()));
         }
-        let mut file = self.open(path.as_ref(), true)?;
+        let (mut file, _) = self.open(path.as_ref(), true)?;
         // Never truncate before checking that this is a regular, non-aliased file.
         file.set_len(0).map_err(|e| VmErr::Msg(e.to_string()))?;
         file.write_all(bytes).map_err(|e| VmErr::Msg(e.to_string()))
@@ -184,10 +198,9 @@ impl Permissions {
             use std::ffi::CString;
             use std::os::fd::{AsRawFd, FromRawFd};
             use std::os::unix::ffi::OsStrExt;
-            let mut directory = grant
-                .directory
-                .try_clone()
-                .map_err(|e| VmErr::Msg(e.to_string()))?;
+            // The grant keeps the root descriptor alive throughout traversal.
+            // Own only child descriptors; borrowing the root avoids dup/close.
+            let mut directory: Option<File> = None;
             for name in relative.components().filter_map(|c| {
                 if let Component::Normal(n) = c {
                     Some(n)
@@ -196,9 +209,10 @@ impl Permissions {
                 }
             }) {
                 let name = CString::new(name.as_bytes()).map_err(|_| denied("filesystem"))?;
+                let parent = directory.as_ref().unwrap_or(&grant.directory).as_raw_fd();
                 // SAFETY: live descriptor and valid NUL-terminated component. The
                 // created directory is immediately reopened without following links.
-                let status = unsafe { libc::mkdirat(directory.as_raw_fd(), name.as_ptr(), 0o700) };
+                let status = unsafe { libc::mkdirat(parent, name.as_ptr(), 0o700) };
                 if status != 0
                     && std::io::Error::last_os_error().raw_os_error() != Some(libc::EEXIST)
                 {
@@ -206,7 +220,7 @@ impl Permissions {
                 }
                 let fd = unsafe {
                     libc::openat(
-                        directory.as_raw_fd(),
+                        parent,
                         name.as_ptr(),
                         libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_RDONLY | libc::O_CLOEXEC,
                     )
@@ -214,7 +228,7 @@ impl Permissions {
                 if fd < 0 {
                     return Err(VmErr::Msg(std::io::Error::last_os_error().to_string()));
                 }
-                directory = unsafe { File::from_raw_fd(fd) };
+                directory = Some(unsafe { File::from_raw_fd(fd) });
             }
             Ok(())
         }
@@ -226,7 +240,7 @@ impl Permissions {
             ))
         }
     }
-    fn open(&self, path: &Path, write: bool) -> Result<File, VmErr> {
+    fn open(&self, path: &Path, write: bool) -> Result<(File, u64), VmErr> {
         let absolute = if path.is_absolute() {
             path.to_path_buf()
         } else {
@@ -253,23 +267,20 @@ impl Permissions {
             use std::os::fd::{AsRawFd, FromRawFd};
             use std::os::unix::ffi::OsStrExt;
             use std::os::unix::fs::MetadataExt;
-            let names: Vec<_> = relative
+            let mut names = relative
                 .components()
                 .filter_map(|c| match c {
                     Component::Normal(n) => Some(n),
                     _ => None,
                 })
-                .collect();
-            if names.is_empty() {
+                .peekable();
+            if names.peek().is_none() {
                 return Err(denied("filesystem"));
             }
-            let mut directory = grant
-                .directory
-                .try_clone()
-                .map_err(|e| VmErr::Msg(e.to_string()))?;
-            for (index, name) in names.iter().enumerate() {
+            let mut directory: Option<File> = None;
+            while let Some(name) = names.next() {
                 let name = CString::new(name.as_bytes()).map_err(|_| denied("filesystem"))?;
-                let last = index + 1 == names.len();
+                let last = names.peek().is_none();
                 let flags = libc::O_NOFOLLOW
                     | libc::O_CLOEXEC
                     | libc::O_NONBLOCK
@@ -282,8 +293,8 @@ impl Permissions {
                     };
                 // SAFETY: live directory descriptor, valid NUL-terminated name;
                 // a successful fd is immediately owned by File.
-                let fd =
-                    unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(), flags, 0o600) };
+                let parent = directory.as_ref().unwrap_or(&grant.directory).as_raw_fd();
+                let fd = unsafe { libc::openat(parent, name.as_ptr(), flags, 0o600) };
                 if fd < 0 {
                     return Err(VmErr::Msg(std::io::Error::last_os_error().to_string()));
                 }
@@ -293,9 +304,9 @@ impl Permissions {
                     if !meta.is_file() || meta.nlink() != 1 {
                         return Err(denied("filesystem"));
                     }
-                    return Ok(file);
+                    return Ok((file, meta.len()));
                 }
-                directory = file;
+                directory = Some(file);
             }
             Err(denied("filesystem"))
         }

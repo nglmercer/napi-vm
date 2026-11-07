@@ -1,0 +1,454 @@
+{
+  "schema": 1,
+  "results": [
+    {
+      "engine": "napi-vm",
+      "workload": "cycles",
+      "metrics": {
+        "ready_rss_bytes": {
+          "before": 16744448,
+          "after": 16744448,
+          "delta": 0
+        },
+        "last_allocated_rss_bytes": {
+          "before": 21753856,
+          "after": 21753856,
+          "delta": 0
+        },
+        "last_collected_rss_bytes": {
+          "before": 21753856,
+          "after": 21753856,
+          "delta": 0
+        },
+        "collected_growth_bytes": {
+          "before": 5021696,
+          "after": 5021696,
+          "delta": 0
+        },
+        "released_rss_bytes": {
+          "before": 21753856,
+          "after": 21753856,
+          "delta": 0
+        },
+        "dropped_rss_bytes": {
+          "before": 21753856,
+          "after": 21753856,
+          "delta": 0
+        },
+        "retained_after_drop_bytes": {
+          "before": 12591104,
+          "after": 12591104,
+          "delta": 0
+        },
+        "peak_rss_bytes": {
+          "before": 21753856,
+          "after": 21753856,
+          "delta": 0
+        },
+        "peak_increment_bytes": {
+          "before": 12591104,
+          "after": 12591104,
+          "delta": 0
+        },
+        "gc_median_ns": {
+          "before": 3123538.5,
+          "after": 3123538.5,
+          "delta": 0.0
+        }
+      }
+    },
+    {
+      "engine": "napi-vm",
+      "workload": "live_cycles",
+      "metrics": {
+        "ready_rss_bytes": {
+          "before": 16621568,
+          "after": 16621568,
+          "delta": 0
+        },
+        "last_allocated_rss_bytes": {
+          "before": 27828224,
+          "after": 27828224,
+          "delta": 0
+        },
+        "last_collected_rss_bytes": {
+          "before": 27828224,
+          "after": 27828224,
+          "delta": 0
+        },
+        "collected_growth_bytes": {
+          "before": 11206656,
+          "after": 11206656,
+          "delta": 0
+        },
+        "released_rss_bytes": {
+          "before": 27828224,
+          "after": 27828224,
+          "delta": 0
+        },
+        "dropped_rss_bytes": {
+          "before": 27828224,
+          "after": 27828224,
+          "delta": 0
+        },
+        "retained_after_drop_bytes": {
+          "before": 18776064,
+          "after": 18776064,
+          "delta": 0
+        },
+        "peak_rss_bytes": {
+          "before": 27963392,
+          "after": 27963392,
+          "delta": 0
+        },
+        "peak_increment_bytes": {
+          "before": 18898944,
+          "after": 18898944,
+          "delta": 0
+        },
+        "gc_median_ns": {
+          "before": 7567146.5,
+          "after": 7567146.5,
+          "delta": 0.0
+        }
+      }
+    },
+    {
+      "engine": "napi-vm",
+      "workload": "objects",
+      "metrics": {
+        "ready_rss_bytes": {
+          "before": 16658432,
+          "after": 16658432,
+          "delta": 0
+        },
+        "last_allocated_rss_bytes": {
+          "before": 20819968,
+          "after": 20819968,
+          "delta": 0
+        },
+        "last_collected_rss_bytes": {
+          "before": 19845120,
+          "after": 19845120,
+          "delta": 0
+        },
+        "collected_growth_bytes": {
+          "before": 3158016,
+          "after": 3158016,
+          "delta": 0
+        },
+        "released_rss_bytes": {
+          "before": 19845120,
+          "after": 19845120,
+          "delta": 0
+        },
+        "dropped_rss_bytes": {
+          "before": 19845120,
+          "after": 19845120,
+          "delta": 0
+        },
+        "retained_after_drop_bytes": {
+          "before": 10641408,
+          "after": 10641408,
+          "delta": 0
+        },
+        "peak_rss_bytes": {
+          "before": 20860928,
+          "after": 20860928,
+          "delta": 0
+        },
+        "peak_increment_bytes": {
+          "before": 11665408,
+          "after": 11665408,
+          "delta": 0
+        },
+        "gc_median_ns": {
+          "before": 1379900.5,
+          "after": 1379900.5,
+          "delta": 0.0
+        }
+      }
+    },
+    {
+      "engine": "napi-vm",
+      "workload": "unique_keys",
+      "metrics": {
+        "ready_rss_bytes": {
+          "before": 16769024,
+          "after": 16769024,
+          "delta": 0
+        },
+        "last_allocated_rss_bytes": {
+          "before": 23199744,
+          "after": 23199744,
+          "delta": 0
+        },
+        "last_collected_rss_bytes": {
+          "before": 23199744,
+          "after": 23199744,
+          "delta": 0
+        },
+        "collected_growth_bytes": {
+          "before": 6447104,
+          "after": 6447104,
+          "delta": 0
+        },
+        "released_rss_bytes": {
+          "before": 23199744,
+          "after": 23199744,
+          "delta": 0
+        },
+        "dropped_rss_bytes": {
+          "before": 23199744,
+          "after": 23199744,
+          "delta": 0
+        },
+        "retained_after_drop_bytes": {
+          "before": 13983744,
+          "after": 13983744,
+          "delta": 0
+        },
+        "peak_rss_bytes": {
+          "before": 23318528,
+          "after": 23318528,
+          "delta": 0
+        },
+        "peak_increment_bytes": {
+          "before": 14106624,
+          "after": 14106624,
+          "delta": 0
+        },
+        "gc_median_ns": {
+          "before": 1503213.5,
+          "after": 1503213.5,
+          "delta": 0.0
+        }
+      }
+    },
+    {
+      "engine": "rquickjs",
+      "workload": "cycles",
+      "metrics": {
+        "ready_rss_bytes": {
+          "before": 10833920,
+          "after": 10833920,
+          "delta": 0
+        },
+        "last_allocated_rss_bytes": {
+          "before": 10956800,
+          "after": 10956800,
+          "delta": 0
+        },
+        "last_collected_rss_bytes": {
+          "before": 10956800,
+          "after": 10956800,
+          "delta": 0
+        },
+        "collected_growth_bytes": {
+          "before": 122880,
+          "after": 122880,
+          "delta": 0
+        },
+        "released_rss_bytes": {
+          "before": 10956800,
+          "after": 10956800,
+          "delta": 0
+        },
+        "dropped_rss_bytes": {
+          "before": 10956800,
+          "after": 10956800,
+          "delta": 0
+        },
+        "retained_after_drop_bytes": {
+          "before": 1888256,
+          "after": 1888256,
+          "delta": 0
+        },
+        "peak_rss_bytes": {
+          "before": 10956800,
+          "after": 10956800,
+          "delta": 0
+        },
+        "peak_increment_bytes": {
+          "before": 1888256,
+          "after": 1888256,
+          "delta": 0
+        },
+        "gc_median_ns": {
+          "before": 23471.0,
+          "after": 23471.0,
+          "delta": 0.0
+        }
+      }
+    },
+    {
+      "engine": "rquickjs",
+      "workload": "live_cycles",
+      "metrics": {
+        "ready_rss_bytes": {
+          "before": 10792960,
+          "after": 10792960,
+          "delta": 0
+        },
+        "last_allocated_rss_bytes": {
+          "before": 11653120,
+          "after": 11653120,
+          "delta": 0
+        },
+        "last_collected_rss_bytes": {
+          "before": 11653120,
+          "after": 11653120,
+          "delta": 0
+        },
+        "collected_growth_bytes": {
+          "before": 860160,
+          "after": 860160,
+          "delta": 0
+        },
+        "released_rss_bytes": {
+          "before": 11653120,
+          "after": 11653120,
+          "delta": 0
+        },
+        "dropped_rss_bytes": {
+          "before": 11653120,
+          "after": 11653120,
+          "delta": 0
+        },
+        "retained_after_drop_bytes": {
+          "before": 2654208,
+          "after": 2654208,
+          "delta": 0
+        },
+        "peak_rss_bytes": {
+          "before": 11653120,
+          "after": 11653120,
+          "delta": 0
+        },
+        "peak_increment_bytes": {
+          "before": 2654208,
+          "after": 2654208,
+          "delta": 0
+        },
+        "gc_median_ns": {
+          "before": 99278.5,
+          "after": 99278.5,
+          "delta": 0.0
+        }
+      }
+    },
+    {
+      "engine": "rquickjs",
+      "workload": "objects",
+      "metrics": {
+        "ready_rss_bytes": {
+          "before": 10723328,
+          "after": 10723328,
+          "delta": 0
+        },
+        "last_allocated_rss_bytes": {
+          "before": 10874880,
+          "after": 10874880,
+          "delta": 0
+        },
+        "last_collected_rss_bytes": {
+          "before": 10874880,
+          "after": 10874880,
+          "delta": 0
+        },
+        "collected_growth_bytes": {
+          "before": 143360,
+          "after": 143360,
+          "delta": 0
+        },
+        "released_rss_bytes": {
+          "before": 10874880,
+          "after": 10874880,
+          "delta": 0
+        },
+        "dropped_rss_bytes": {
+          "before": 10874880,
+          "after": 10874880,
+          "delta": 0
+        },
+        "retained_after_drop_bytes": {
+          "before": 1658880,
+          "after": 1658880,
+          "delta": 0
+        },
+        "peak_rss_bytes": {
+          "before": 11030528,
+          "after": 11030528,
+          "delta": 0
+        },
+        "peak_increment_bytes": {
+          "before": 1818624,
+          "after": 1818624,
+          "delta": 0
+        },
+        "gc_median_ns": {
+          "before": 14004.0,
+          "after": 14004.0,
+          "delta": 0.0
+        }
+      }
+    },
+    {
+      "engine": "rquickjs",
+      "workload": "unique_keys",
+      "metrics": {
+        "ready_rss_bytes": {
+          "before": 10706944,
+          "after": 10706944,
+          "delta": 0
+        },
+        "last_allocated_rss_bytes": {
+          "before": 11423744,
+          "after": 11423744,
+          "delta": 0
+        },
+        "last_collected_rss_bytes": {
+          "before": 11423744,
+          "after": 11423744,
+          "delta": 0
+        },
+        "collected_growth_bytes": {
+          "before": 716800,
+          "after": 716800,
+          "delta": 0
+        },
+        "released_rss_bytes": {
+          "before": 11423744,
+          "after": 11423744,
+          "delta": 0
+        },
+        "dropped_rss_bytes": {
+          "before": 11255808,
+          "after": 11255808,
+          "delta": 0
+        },
+        "retained_after_drop_bytes": {
+          "before": 2072576,
+          "after": 2072576,
+          "delta": 0
+        },
+        "peak_rss_bytes": {
+          "before": 11423744,
+          "after": 11423744,
+          "delta": 0
+        },
+        "peak_increment_bytes": {
+          "before": 2240512,
+          "after": 2240512,
+          "delta": 0
+        },
+        "gc_median_ns": {
+          "before": 15291.0,
+          "after": 15291.0,
+          "delta": 0.0
+        }
+      }
+    }
+  ],
+  "warning": "RSS includes allocator/cache retention. Differences do not alone establish live-object leaks; GC durations are descriptive."
+}

@@ -1,0 +1,45 @@
+   Compiling zerocopy v0.8.55
+   Compiling icu_provider v2.3.1
+   Compiling chrono-tz v0.10.4
+   Compiling rayon v1.12.0
+   Compiling tokio v1.53.1
+   Compiling icu_locale_fallback v2.3.0
+   Compiling icu_properties v2.3.0
+   Compiling icu_normalizer v2.3.0
+   Compiling ahash v0.8.12
+   Compiling half v2.7.1
+   Compiling icu_casemap v2.3.0
+   Compiling icu_segmenter v2.3.0
+   Compiling icu_plurals v2.3.0
+   Compiling icu_calendar v2.3.0
+   Compiling icu_locale v2.3.1
+   Compiling icu_list v2.3.0
+   Compiling idna_adapter v1.2.2
+   Compiling icu_collator v2.3.1
+   Compiling ciborium-ll v0.2.2
+   Compiling idna v1.1.0
+   Compiling ciborium v0.2.2
+   Compiling icu_decimal v2.3.0
+   Compiling url v2.5.8
+   Compiling textwrap v0.16.4
+   Compiling icu_experimental v0.6.0
+   Compiling criterion v0.5.1
+   Compiling oxc-miette v2.7.1
+   Compiling icu_time v2.3.0
+   Compiling temporal_rs v0.2.6
+   Compiling oxc_span v0.120.0
+   Compiling oxc_diagnostics v0.120.0
+   Compiling icu_datetime v2.3.0
+   Compiling oxc_regular_expression v0.120.0
+   Compiling napi-vm-core v0.1.5 (/home/meme/Documentos/Default Project/node-vm/crates/napi-vm-core)
+   Compiling napi-vm v0.1.5 (/home/meme/Documentos/Default Project/node-vm)
+    Finished `ci` profile [unoptimized] target(s) in 39.43s
+     Running tests/array_result_fast_path.rs (target/ci/deps/array_result_fast_path-1ec268eb7921ef6b)
+
+running 3 tests
+test holes_and_function_values_remain_data_properties ... ok
+test proxies_and_protected_properties_keep_define_semantics ... ok
+test species_result_rechecked_after_each_callback ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+

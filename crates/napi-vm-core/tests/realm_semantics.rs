@@ -206,7 +206,7 @@ fn concrete_typed_array_metadata_identifies_each_realms_constructor() {
         truth(
             &mut vm,
             &format!(
-                "var target=other.{name}.bind(null);target.prototype=undefined;Object.getPrototypeOf(Reflect.construct({name},[0],target))===other[C.name].prototype;"
+                "var target=other.{name}.bind(null);target.prototype=undefined;Object.getPrototypeOf(Reflect.construct({name},[0],target))===Object.getPrototypeOf(other[C.name].prototype);"
             ),
         );
     }

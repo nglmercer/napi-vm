@@ -1,0 +1,298 @@
+{
+  "schema": 1,
+  "results": [
+    {
+      "name": "map_small",
+      "before": {
+        "ready_rss_bytes": {
+          "median": 68337664,
+          "mad": 4096
+        },
+        "last_collected_rss_bytes": {
+          "median": 80080896,
+          "mad": 16384
+        },
+        "collected_growth_bytes": {
+          "median": 11747328,
+          "mad": 20480
+        },
+        "released_rss_bytes": {
+          "median": 79810560,
+          "mad": 20480
+        },
+        "disposed_rss_bytes": {
+          "median": 79810560,
+          "mad": 20480
+        },
+        "peak_rss_bytes": {
+          "median": 80080896,
+          "mad": 16384
+        },
+        "ready_tracked": {
+          "median": 1115,
+          "mad": 0
+        },
+        "released_tracked": {
+          "median": 1115,
+          "mad": 0
+        }
+      },
+      "after": {
+        "ready_rss_bytes": {
+          "median": 68112384,
+          "mad": 81920
+        },
+        "last_collected_rss_bytes": {
+          "median": 80158720,
+          "mad": 16384
+        },
+        "collected_growth_bytes": {
+          "median": 11984896,
+          "mad": 20480
+        },
+        "released_rss_bytes": {
+          "median": 79888384,
+          "mad": 16384
+        },
+        "disposed_rss_bytes": {
+          "median": 79888384,
+          "mad": 16384
+        },
+        "peak_rss_bytes": {
+          "median": 80158720,
+          "mad": 16384
+        },
+        "ready_tracked": {
+          "median": 1115,
+          "mad": 0
+        },
+        "released_tracked": {
+          "median": 1115,
+          "mad": 0
+        }
+      }
+    },
+    {
+      "name": "map_large",
+      "before": {
+        "ready_rss_bytes": {
+          "median": 68767744,
+          "mad": 233472
+        },
+        "last_collected_rss_bytes": {
+          "median": 93421568,
+          "mad": 167936
+        },
+        "collected_growth_bytes": {
+          "median": 24653824,
+          "mad": 4096
+        },
+        "released_rss_bytes": {
+          "median": 92147712,
+          "mad": 167936
+        },
+        "disposed_rss_bytes": {
+          "median": 92147712,
+          "mad": 167936
+        },
+        "peak_rss_bytes": {
+          "median": 93421568,
+          "mad": 167936
+        },
+        "ready_tracked": {
+          "median": 1115,
+          "mad": 0
+        },
+        "released_tracked": {
+          "median": 1115,
+          "mad": 0
+        }
+      },
+      "after": {
+        "ready_rss_bytes": {
+          "median": 67555328,
+          "mad": 86016
+        },
+        "last_collected_rss_bytes": {
+          "median": 93220864,
+          "mad": 155648
+        },
+        "collected_growth_bytes": {
+          "median": 25665536,
+          "mad": 12288
+        },
+        "released_rss_bytes": {
+          "median": 92000256,
+          "mad": 155648
+        },
+        "disposed_rss_bytes": {
+          "median": 92000256,
+          "mad": 155648
+        },
+        "peak_rss_bytes": {
+          "median": 93220864,
+          "mad": 155648
+        },
+        "ready_tracked": {
+          "median": 1115,
+          "mad": 0
+        },
+        "released_tracked": {
+          "median": 1115,
+          "mad": 0
+        }
+      }
+    },
+    {
+      "name": "set_small",
+      "before": {
+        "ready_rss_bytes": {
+          "median": 69263360,
+          "mad": 94208
+        },
+        "last_collected_rss_bytes": {
+          "median": 80998400,
+          "mad": 61440
+        },
+        "collected_growth_bytes": {
+          "median": 11735040,
+          "mad": 12288
+        },
+        "released_rss_bytes": {
+          "median": 80723968,
+          "mad": 49152
+        },
+        "disposed_rss_bytes": {
+          "median": 80723968,
+          "mad": 49152
+        },
+        "peak_rss_bytes": {
+          "median": 80998400,
+          "mad": 61440
+        },
+        "ready_tracked": {
+          "median": 1115,
+          "mad": 0
+        },
+        "released_tracked": {
+          "median": 1115,
+          "mad": 0
+        }
+      },
+      "after": {
+        "ready_rss_bytes": {
+          "median": 67854336,
+          "mad": 139264
+        },
+        "last_collected_rss_bytes": {
+          "median": 79863808,
+          "mad": 98304
+        },
+        "collected_growth_bytes": {
+          "median": 12009472,
+          "mad": 40960
+        },
+        "released_rss_bytes": {
+          "median": 79593472,
+          "mad": 98304
+        },
+        "disposed_rss_bytes": {
+          "median": 79593472,
+          "mad": 98304
+        },
+        "peak_rss_bytes": {
+          "median": 79863808,
+          "mad": 98304
+        },
+        "ready_tracked": {
+          "median": 1115,
+          "mad": 0
+        },
+        "released_tracked": {
+          "median": 1115,
+          "mad": 0
+        }
+      }
+    },
+    {
+      "name": "set_large",
+      "before": {
+        "ready_rss_bytes": {
+          "median": 68538368,
+          "mad": 221184
+        },
+        "last_collected_rss_bytes": {
+          "median": 93319168,
+          "mad": 344064
+        },
+        "collected_growth_bytes": {
+          "median": 24780800,
+          "mad": 20480
+        },
+        "released_rss_bytes": {
+          "median": 92979200,
+          "mad": 737280
+        },
+        "disposed_rss_bytes": {
+          "median": 92979200,
+          "mad": 737280
+        },
+        "peak_rss_bytes": {
+          "median": 93319168,
+          "mad": 339968
+        },
+        "ready_tracked": {
+          "median": 1115,
+          "mad": 0
+        },
+        "released_tracked": {
+          "median": 1115,
+          "mad": 0
+        }
+      },
+      "after": {
+        "ready_rss_bytes": {
+          "median": 67493888,
+          "mad": 86016
+        },
+        "last_collected_rss_bytes": {
+          "median": 93212672,
+          "mad": 53248
+        },
+        "collected_growth_bytes": {
+          "median": 25665536,
+          "mad": 8192
+        },
+        "released_rss_bytes": {
+          "median": 92672000,
+          "mad": 544768
+        },
+        "disposed_rss_bytes": {
+          "median": 92672000,
+          "mad": 544768
+        },
+        "peak_rss_bytes": {
+          "median": 93216768,
+          "mad": 57344
+        },
+        "ready_tracked": {
+          "median": 1115,
+          "mad": 0
+        },
+        "released_tracked": {
+          "median": 1115,
+          "mad": 0
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "Linux process RSS includes Node, builtins, native/V8 allocator retention and probe buffers.",
+    "No host/CPU isolation; medians/MAD are descriptive; small differences may be noise.",
+    "VmRSS and VmHWM are approximate. Use maximum observed high-water reading, without assuming monotonicity.",
+    "Separate owner per process; three replacement rounds, explicit collection, root release, then disposal.",
+    "Heap counters are native tracked containers, not a complete allocation census or a rquickjs object count."
+  ],
+  "before_addon_sha256": "b98ae3af7214458f0987a7d7d611050a924a2b0e5caeb1c645578e4b644d28a2",
+  "after_addon_sha256": "e0a5597fdf1a8c701941f82a89a0a2eb1a31e3b389430bcc656291b8e78122db"
+}

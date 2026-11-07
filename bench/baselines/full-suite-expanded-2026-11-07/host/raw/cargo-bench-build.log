@@ -1,0 +1,3 @@
+   Compiling napi-vm v0.1.5 (/home/meme/Documentos/Default Project/node-vm)
+    Finished `bench` profile [optimized] target(s) in 0.52s
+  Executable benches/vm.rs (target/release/deps/vm-a6717a7d569e4d7b)

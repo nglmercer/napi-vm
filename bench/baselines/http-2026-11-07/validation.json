@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "changed_build_inputs": [
+    "crates/napi-vm-runtime/src/runtime/network.rs"
+  ],
+  "cargo_package_versions_and_checksums_unchanged": true,
+  "dependency_change": "runtime-net now directly enables the already locked bytes package; both measured builds use this manifest and lockfile.",
+  "runtime_tests_passed": 24,
+  "zero_test_target": "runtime_byte_modules needs additional npm/typescript features and is not counted as tested here.",
+  "benchmark_validator_tests_passed": 7,
+  "clippy": "passed with -D warnings for runtime-net HTTP example",
+  "limitations": [
+    "No CPU isolation; desktop activity and the two-worker full Test262 gate ran concurrently.",
+    "Final harness reports show 1.13\u20131.35x POST speedups; GET controls vary and redirects show no stable gain.",
+    "Synthetic server drains and validates upload bytes; this is loopback transport, not guest fetch latency.",
+    "Input allocation excluded. Client/runtime creation, transport, redirects, base64 and JSON response creation included.",
+    "Connection: close excludes pooling; HTTP excludes TLS and external DNS."
+  ]
+}

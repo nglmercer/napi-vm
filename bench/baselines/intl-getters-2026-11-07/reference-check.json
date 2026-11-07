@@ -1,0 +1,8 @@
+{
+  "source": "\nvar n=new Intl.NumberFormat('en-US'),d=new Intl.DateTimeFormat('en-US',{timeZone:'UTC',year:'numeric',month:'2-digit',day:'2-digit'}),c=new Intl.Collator('en-US');\nvar nf=n.format,df=d.format,cf=c.compare;\nvar ng=Object.getOwnPropertyDescriptor(Intl.NumberFormat.prototype,'format').get,dg=Object.getOwnPropertyDescriptor(Intl.DateTimeFormat.prototype,'format').get,cg=Object.getOwnPropertyDescriptor(Intl.Collator.prototype,'compare').get;\n\n      var nw=Object.create(Intl.NumberFormat.prototype),dw=Object.create(Intl.DateTimeFormat.prototype);\n      Intl.NumberFormat.call(nw,'en-US');Intl.DateTimeFormat.call(dw,'en-US');\n      var ns=Object.getOwnPropertySymbols(nw),ds=Object.getOwnPropertySymbols(dw);\n      var forgedN=Object.create(Intl.NumberFormat.prototype),forgedD=Object.create(Intl.DateTimeFormat.prototype);\n      forgedN[ns[0]]=d;forgedD[ds[0]]=n;\nvar ok=ns.length===1&&ds.length===1&&nf===n.format&&df===d.format&&cf===c.compare;\nfor(var pair of [[ng,forgedN],[dg,forgedD],[ng,d],[dg,n],[cg,n]]){try{pair[0].call(pair[1]);ok=false;}catch(e){ok=ok&&e instanceof TypeError;}}\nvar marker={},traps=0;try{ng.call(new Proxy(n,{get(){traps++;throw marker;}}));ok=false;}catch(e){ok=ok&&e===marker&&traps===1;}\nvar wrapper=Object.create(Intl.NumberFormat.prototype);Intl.NumberFormat.call(wrapper,'en-US');\nok&&wrapper.format===wrapper.format&&wrapper.format(1234)==='1,234'&&nf(1234)==='1,234'&&df(1704067200000)==='01/01/2024'&&cf('a','b')<0;\n",
+  "node": true,
+  "native": "true",
+  "node_version": "v26.13.0",
+  "source_sha256": "a090b276544a4380b16f4d441a80bc31416280ab8126be4cee142e26771522bf",
+  "before_addon_sha256": "34280f5088cd808e0260b6ef2db80f95a6f75dcef048582d7882ddb5479b9139"
+}

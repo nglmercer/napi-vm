@@ -1,0 +1,35 @@
+Gnuplot not found, using plotters backend
+Benchmarking language_metadata/1_documents_unchanged
+Benchmarking language_metadata/1_documents_unchanged: Warming up for 200.00 ms
+Benchmarking language_metadata/1_documents_unchanged: Collecting 10 samples in estimated 500.55 ms (3795 iterations)
+Benchmarking language_metadata/1_documents_unchanged: Analyzing
+language_metadata/1_documents_unchanged
+                        time:   [129.84 µs 132.61 µs 137.64 µs]
+Found 2 outliers among 10 measurements (20.00%)
+  2 (20.00%) high severe
+Benchmarking language_metadata/1_documents_changed
+Benchmarking language_metadata/1_documents_changed: Warming up for 200.00 ms
+Benchmarking language_metadata/1_documents_changed: Collecting 10 samples in estimated 507.07 ms (3410 iterations)
+Benchmarking language_metadata/1_documents_changed: Analyzing
+language_metadata/1_documents_changed
+                        time:   [143.48 µs 146.21 µs 148.58 µs]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+Benchmarking language_metadata/20_documents_unchanged
+Benchmarking language_metadata/20_documents_unchanged: Warming up for 200.00 ms
+Benchmarking language_metadata/20_documents_unchanged: Collecting 10 samples in estimated 509.14 ms (165 iterations)
+Benchmarking language_metadata/20_documents_unchanged: Analyzing
+language_metadata/20_documents_unchanged
+                        time:   [2.8839 ms 2.9179 ms 2.9723 ms]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+Benchmarking language_metadata/20_documents_changed
+Benchmarking language_metadata/20_documents_changed: Warming up for 200.00 ms
+Benchmarking language_metadata/20_documents_changed: Collecting 10 samples in estimated 647.87 ms (220 iterations)
+Benchmarking language_metadata/20_documents_changed: Analyzing
+language_metadata/20_documents_changed
+                        time:   [2.8330 ms 2.8777 ms 2.9618 ms]
+Found 2 outliers among 10 measurements (20.00%)
+  1 (10.00%) high mild
+  1 (10.00%) high severe
+

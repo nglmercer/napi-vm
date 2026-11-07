@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "harness_clippy_exit_code": 0,
+  "harness_clippy_log_sha256": "eaa9f2820f00adc22eba5919a7d6c55a7fa14c6cecaa3eabea15009b93646561",
+  "bun_promises_exit_code": 0,
+  "bun_promises_passed": 53,
+  "bun_promises_failed": 0,
+  "bun_log_sha256": "592b6ad3e80d798a1059b8b49f1796df8038dd3bcec2045890f96b86e4ab4f7c"
+}

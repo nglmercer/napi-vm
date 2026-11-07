@@ -1,0 +1,175 @@
+{
+  "schema": 1,
+  "status": "complete",
+  "all_groups_complete": true,
+  "selected_groups": [
+    "engines",
+    "memory",
+    "http",
+    "host"
+  ],
+  "unselected_groups": [],
+  "started_utc": "2026-11-07T09:13:47.782965+00:00",
+  "driver_sha256": "d330379e8282f9f6d015d09eef1bdce09f7794fde0d4682dceb43b6a3fb0a0c8",
+  "steps": [
+    {
+      "name": "engine-build",
+      "command": [
+        "/usr/bin/python3",
+        "bench/rquickjs.py",
+        "build",
+        "--output",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/expanded-suite/engine-build"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "http-build",
+      "command": [
+        "/usr/bin/python3",
+        "bench/http.py",
+        "build",
+        "--output",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/expanded-suite/http-build"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "host",
+      "command": [
+        "/usr/bin/python3",
+        "bench/performance.py",
+        "run",
+        "--output",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/expanded-suite/host"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "engines",
+      "command": [
+        "/usr/bin/python3",
+        "bench/rquickjs.py",
+        "run",
+        "--build",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/expanded-suite/engine-build",
+        "--output",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/expanded-suite/engines.json",
+        "--samples",
+        "7",
+        "--iterations",
+        "5"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "engine-ratios",
+      "command": [
+        "/usr/bin/python3",
+        "bench/rquickjs-compare.py",
+        "engines",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/expanded-suite/engines.json"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "memory",
+      "command": [
+        "/usr/bin/python3",
+        "bench/rquickjs.py",
+        "memory",
+        "--build",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/expanded-suite/engine-build",
+        "--output",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/expanded-suite/memory.json",
+        "--samples",
+        "3",
+        "--iterations",
+        "8",
+        "--objects",
+        "2000"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "memory-validate",
+      "command": [
+        "/usr/bin/python3",
+        "bench/memory_report.py",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/expanded-suite/memory.json",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/expanded-suite/memory.json"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "http",
+      "command": [
+        "/usr/bin/python3",
+        "bench/http.py",
+        "run",
+        "--build",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/expanded-suite/http-build",
+        "--output",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/expanded-suite/http.json",
+        "--samples",
+        "7",
+        "--iterations",
+        "5"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "http-validate",
+      "command": [
+        "/usr/bin/python3",
+        "bench/http.py",
+        "compare",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/expanded-suite/http.json",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/expanded-suite/http.json"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    }
+  ],
+  "reports": [
+    {
+      "group": "host",
+      "path": "host/baseline.json",
+      "sha256": "1369db7bb8f50157b10a96c2cacd5058ef99de22fe42b60c5f3ac99c66d91895",
+      "result_rows": 77
+    },
+    {
+      "group": "engines",
+      "path": "engines.json",
+      "sha256": "2449ec1e3baa79753d6d7b980ebb31379f4d98bb20bc97b715a4c905e1e89559",
+      "result_rows": 150
+    },
+    {
+      "group": "memory",
+      "path": "memory.json",
+      "sha256": "a064e3829337a5152847173a971fff6305497feec4dfd4891af96c061a74f5eb",
+      "result_rows": 8
+    },
+    {
+      "group": "http",
+      "path": "http.json",
+      "sha256": "ea568d17a78b971dd977e14c8f67898f250793d727a8401ae227ff7a565751ec",
+      "result_rows": 4
+    }
+  ],
+  "limitations": [
+    "Finite representative operation coverage; see docs/performance.md for unmeasured families.",
+    "Each layer has its own units and timed boundary; no aggregate runtime score is computed.",
+    "Drivers run sequentially, so suite compilation does not overlap suite measurements.",
+    "External host activity is not isolated; retain samples/MAD and repeat comparisons."
+  ],
+  "finished_utc": "2026-11-07T09:15:35.034234+00:00"
+}

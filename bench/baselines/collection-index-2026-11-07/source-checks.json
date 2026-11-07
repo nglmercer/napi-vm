@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "utc": "2026-11-07T10:05:18.551943+00:00",
+  "variant_count": 102992,
+  "exact_previous_variant_set": true,
+  "zero_outcome_changes": true,
+  "no_duplicate_variants": true,
+  "same_configuration_fields": [
+    "revision",
+    "corpus_provenance",
+    "selection",
+    "groups",
+    "skip_features",
+    "worker_jobs",
+    "timeout_seconds",
+    "denominator"
+  ],
+  "all_core_worker_inputs_match": true,
+  "worker_sha256": "2e7c92633c70801693281f179e1372a5b9a51bbf74fff36b46bfe493a02ab603",
+  "runner_sha256": "8d79bb336c2bedcf478ad6b173a9bc1083a671b92e919600dc3714ca258ca22c",
+  "report_sha256": "9478e898dd1e6855bc6630ab9ef967ddca0001a05ba020ba3e70e28fd86b5747",
+  "compressed_report_sha256": "97ebea6251835ed3a18db95b4671b1e6743c1c4a992e4414151b27dbaf0c1c2f"
+}

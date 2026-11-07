@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "utc": "2026-11-07T11:11:04Z",
+  "load_average": [
+    2.95751953125,
+    3.32763671875,
+    3.3740234375
+  ],
+  "logical_cpus": 12,
+  "affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+  ],
+  "observation": "Unrelated browser/e2e activity was observed during the first after capture. No CPU isolation is enforced. Controls and both interleaved pairs must be retained; small latency changes are inconclusive."
+}

@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "utc": "2026-11-07T09:18:24.854116+00:00",
+  "variant_count": 102992,
+  "exact_previous_variant_set": true,
+  "no_duplicate_variants": true,
+  "identical_fields": [
+    "revision",
+    "corpus_provenance",
+    "selection",
+    "groups",
+    "skip_features",
+    "worker_jobs",
+    "timeout_seconds",
+    "denominator"
+  ],
+  "zero_outcome_changes": true,
+  "worker_sha256": "b51b95d12d1c8a24ea828e2be862a90613b541651ef737b7dba06e03e74c7c05",
+  "runner_sha256": "8d79bb336c2bedcf478ad6b173a9bc1083a671b92e919600dc3714ca258ca22c",
+  "shape_source_sha256": "20e91ad86e6f5acb07da45b2b025319461b626e24f7ee508a9ac2953ae8b1ddc",
+  "all_recorded_core_inputs_match": true,
+  "report_sha256": "c317989e77f51fd02d2ba729798f4c9757e778b2fe239d7f878faedc304b5a2d",
+  "compressed_report_sha256": "71705a57ea35c7ebdb8410f34db43a253ba70267bda3ec0a1eb114b885348854",
+  "limits": [
+    "Bare-core ECMAScript correctness gate; Node collection conversion is validated separately.",
+    "Timing and memory claims use their own retained probes; a Test262 pass is not a performance measurement."
+  ]
+}

@@ -15,7 +15,7 @@ use std::cmp::Ordering;
 /// sandbox; the cap turns that into a catchable error.
 const MAX_LIMBS: usize = 4096;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BigInt {
     /// `true` for a negative value. Zero is always positive.
     negative: bool,

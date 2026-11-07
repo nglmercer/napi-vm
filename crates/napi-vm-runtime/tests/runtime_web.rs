@@ -9,6 +9,71 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::time::Duration;
 
+#[test]
+fn upload_redirects_replay_or_discard_body_and_headers() {
+    for status in [301, 302, 303, 307, 308] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            use std::io::BufRead;
+            for hop in 0..2 {
+                let (stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut reader = std::io::BufReader::new(stream);
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let keeps_body = hop == 0 || status >= 307;
+                assert!(line.starts_with(if keeps_body { "POST " } else { "GET " }));
+                let (mut length, mut content_type) = (0, false);
+                loop {
+                    line.clear();
+                    assert!(reader.read_line(&mut line).unwrap() > 0);
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some((name, value)) = line.split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            length = value.trim().parse::<usize>().unwrap();
+                        }
+                        if name.eq_ignore_ascii_case("content-type") {
+                            content_type = true;
+                        }
+                    }
+                }
+                assert_eq!(content_type, keeps_body);
+                assert_eq!(length, if keeps_body { 300_000 } else { 0 });
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                assert!(body.iter().all(|byte| *byte == 173));
+                let stream = reader.get_mut();
+                if hop == 0 {
+                    write!(stream, "HTTP/1.1 {status} Redirect\r\nLocation: /done\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+                } else {
+                    stream
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                        )
+                        .unwrap();
+                }
+            }
+        });
+        let mut runtime = RuntimeBuilder::new()
+            .web_apis()
+            .network(Permissions::new().allow_net("127.0.0.1", Some(port)))
+            .build()
+            .unwrap();
+        runtime.eval(&format!("let uploadResult='pending';let upload=new Uint8Array(300000);upload.fill(173);fetch('http://127.0.0.1:{port}/start',{{method:'POST',headers:{{'Content-Type':'application/octet-stream'}},body:upload}}).then(r=>r.text()).then(v=>uploadResult=v).catch(e=>uploadResult=String(e));")).unwrap();
+        runtime.run_event_loop().unwrap();
+        assert!(
+            matches!(runtime.eval("uploadResult").unwrap(), Value::String(ref s) if s == "ok"),
+            "status {status}"
+        );
+        server.join().unwrap();
+    }
+}
+
 fn server(response: &'static str) -> (u16, std::thread::JoinHandle<String>) {
     let socket = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = socket.local_addr().unwrap().port();

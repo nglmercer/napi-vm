@@ -1,0 +1,699 @@
+{
+  "schema": 1,
+  "metadata": {
+    "bindingPath": "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-platform-suite/host/raw/napi-vm.node",
+    "addonSha256": "1a83ac5144b1812860cb9098fca6e5467f1593f80c5d3991f27bc3ff216702fe",
+    "scriptSha256": "25101bf01666588f18f8e30c62ec5171bb58bbfe5e13a985a66efd986b84ae34",
+    "node": "v26.13.0",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "AMD BC-250",
+    "samples": 15,
+    "iterations": 10,
+    "limitations": [
+      "Preparation and correctness checks excluded; timers surround one public API call except explicit construct/dispose pair.",
+      "Checks may execute guest code between timed calls and warm caches or trigger GC.",
+      "Persistent owner reused; no CPU isolation; allocation, automatic GC and host activity affect samples.",
+      "Idle explicit GC is API overhead, not a garbage-collection throughput workload.",
+      "No equivalent rquickjs host adapter or whole-application engine ranking."
+    ]
+  },
+  "results": [
+    {
+      "name": "node_api/construct_dispose",
+      "unit": "ns/call",
+      "backend": "NAPI Vm construction and explicit disposal, including builtin setup/cleanup",
+      "samples": [
+        3404553.1,
+        3393445.1,
+        3381039.3,
+        3367344.2,
+        3411379.8,
+        3396157.6,
+        3350136.6,
+        3354255.6,
+        3363155.5,
+        3365895.4,
+        3361255.5,
+        3369561.1,
+        3388006.9,
+        3368349.7,
+        3274182.4
+      ],
+      "summary": {
+        "median": 3368349.7,
+        "mad": 14094.100000000093
+      }
+    },
+    {
+      "name": "node_api/run_cached_source",
+      "unit": "ns/call",
+      "backend": "NAPI persistent run with warmed identical source and scalar string result",
+      "samples": [
+        3305.3,
+        2484,
+        2186.1,
+        2193.4,
+        2190.7,
+        2515.8,
+        2193.7,
+        2201.5,
+        2191.7,
+        2237.6,
+        2622.5,
+        5207.9,
+        2955.9,
+        3029.9,
+        2338.7
+      ],
+      "summary": {
+        "median": 2338.7,
+        "mad": 148
+      }
+    },
+    {
+      "name": "node_api/get_global_scalar",
+      "unit": "ns/call",
+      "backend": "NAPI getGlobal with existing scalar and string result",
+      "samples": [
+        1522.2,
+        1180,
+        1175.5,
+        1183.7,
+        1176.4,
+        1184.5,
+        1180,
+        1189.5,
+        1180.3,
+        1233.6,
+        1192.7,
+        1387.4,
+        1818.5,
+        1178.7,
+        1182.1
+      ],
+      "summary": {
+        "median": 1183.7,
+        "mad": 5.7999999999999545
+      }
+    },
+    {
+      "name": "node_api/has_global",
+      "unit": "ns/call",
+      "backend": "NAPI hasGlobal existing name",
+      "samples": [
+        2590.1,
+        1017.1,
+        1026,
+        1024.1,
+        1024.1,
+        1022.5,
+        1020.2,
+        1058.7,
+        1018.5,
+        1073.6,
+        1023.6,
+        1214.4,
+        1026.9,
+        1027.5,
+        1023.5
+      ],
+      "summary": {
+        "median": 1024.1,
+        "mad": 3.400000000000091
+      }
+    },
+    {
+      "name": "node_api/set_global_scalar",
+      "unit": "ns/call",
+      "backend": "NAPI setGlobal existing scalar; verification read excluded",
+      "samples": [
+        9366.7,
+        8898,
+        9796.7,
+        9981.6,
+        9817,
+        9778.3,
+        10376.4,
+        9897.1,
+        9857.9,
+        9599.3,
+        10765.6,
+        9984,
+        9650.6,
+        9865.1,
+        10143
+      ],
+      "summary": {
+        "median": 9857.9,
+        "mad": 126.10000000000036
+      }
+    },
+    {
+      "name": "node_api/remove_global",
+      "unit": "ns/call",
+      "backend": "NAPI removeGlobal existing scalar; reseeding excluded",
+      "samples": [
+        3203.3,
+        2862.8,
+        2959.6,
+        2774,
+        2890.5,
+        2776.6,
+        2754.2,
+        2751.6,
+        2754.8,
+        2856.2,
+        2983.6,
+        3075,
+        3037.2,
+        3159.1,
+        2741.7
+      ],
+      "summary": {
+        "median": 2862.8,
+        "mad": 108.60000000000036
+      }
+    },
+    {
+      "name": "node_api/call_no_arguments",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call, no arguments, scalar outbound result",
+      "samples": [
+        2484.3,
+        2045.8,
+        2046.9,
+        2048.3,
+        2201.4,
+        2296.7,
+        2046.5,
+        2214.8,
+        2209.5,
+        2027.1,
+        2920.1,
+        2129.1,
+        2050.7,
+        2044.1,
+        2035.2
+      ],
+      "summary": {
+        "median": 2050.7,
+        "mad": 23.59999999999991
+      }
+    },
+    {
+      "name": "node_api/call_eight_numbers",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call, eight scalar incoming arguments, scalar result",
+      "samples": [
+        4151.7,
+        3348.1,
+        3319.8,
+        3324.6,
+        3340.3,
+        3323.5,
+        3341.3,
+        3327,
+        3333.5,
+        3335.3,
+        3320.6,
+        3324.6,
+        3323.7,
+        3330.4,
+        3335
+      ],
+      "summary": {
+        "median": 3330.4,
+        "mad": 6.700000000000273
+      }
+    },
+    {
+      "name": "node_api/call_plain_control",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call with scalar guest addition",
+      "samples": [
+        2439.2,
+        2073.2,
+        2072.9,
+        2071.6,
+        2277.2,
+        2076,
+        2071.4,
+        2073.7,
+        2089.3,
+        2074,
+        2259,
+        2070.1,
+        10887,
+        4817.1,
+        4789
+      ],
+      "summary": {
+        "median": 2076,
+        "mad": 5.900000000000091
+      }
+    },
+    {
+      "name": "node_api/call_host_callback",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call, synchronous Node callback and scalar result",
+      "samples": [
+        9920.8,
+        6327.9,
+        6288.7,
+        6359,
+        6346.1,
+        3622.2,
+        2986.5,
+        2815.9,
+        2808.2,
+        2809.9,
+        2970.2,
+        2815.4,
+        2815.8,
+        12797.9,
+        3545
+      ],
+      "summary": {
+        "median": 3545,
+        "mad": 735.0999999999999
+      }
+    },
+    {
+      "name": "node_api/replace_host_function",
+      "unit": "ns/call",
+      "backend": "NAPI exposeFunction replacement including callback registration/revocation; invocation check excluded",
+      "samples": [
+        14814.9,
+        12333.7,
+        12451.3,
+        13942.7,
+        12989.3,
+        12539.1,
+        13489,
+        12432.3,
+        12725.9,
+        13176.1,
+        13222.4,
+        12345,
+        12480.8,
+        13156.9,
+        13601.5
+      ],
+      "summary": {
+        "median": 12989.3,
+        "mad": 508.5
+      }
+    },
+    {
+      "name": "node_api/set_object_1",
+      "unit": "ns/call",
+      "backend": "NAPI setGlobal plain incoming object with 1 numeric own properties; guest sum check excluded",
+      "samples": [
+        15423.5,
+        14409.8,
+        14165.7,
+        13406.9,
+        13476.8,
+        13470,
+        14043.1,
+        25889.5,
+        16592.8,
+        12725.4,
+        12270.8,
+        12357.9,
+        11768,
+        12035,
+        11517.3
+      ],
+      "summary": {
+        "median": 13470,
+        "mad": 1112.1000000000004
+      }
+    },
+    {
+      "name": "node_api/return_object_1",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call and outgoing plain object with 1 numeric own properties",
+      "samples": [
+        4192.2,
+        3554.7,
+        3350.6,
+        4137,
+        3816,
+        3293.8,
+        3493.5,
+        3246,
+        3277.1,
+        3519.1,
+        3177.2,
+        3208.1,
+        3637.2,
+        3168.7,
+        3585
+      ],
+      "summary": {
+        "median": 3493.5,
+        "mad": 216.4000000000001
+      }
+    },
+    {
+      "name": "node_api/set_object_128",
+      "unit": "ns/call",
+      "backend": "NAPI setGlobal plain incoming object with 128 numeric own properties; guest sum check excluded",
+      "samples": [
+        87352,
+        82960.1,
+        81410.6,
+        81160.6,
+        79587.6,
+        152520.3,
+        74702.9,
+        77547.6,
+        82037.2,
+        76403.8,
+        77926.9,
+        77943.3,
+        75424,
+        77815.7,
+        81585.2
+      ],
+      "summary": {
+        "median": 79587.6,
+        "mad": 2040
+      }
+    },
+    {
+      "name": "node_api/return_object_128",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call and outgoing plain object with 128 numeric own properties",
+      "samples": [
+        54527.3,
+        94320.3,
+        57244.4,
+        56281,
+        54374.1,
+        51917.6,
+        53914,
+        52393,
+        68747.3,
+        54276.4,
+        52691.5,
+        55417.4,
+        65499,
+        52329.1,
+        53706.9
+      ],
+      "summary": {
+        "median": 54374.1,
+        "mad": 1906.9000000000015
+      }
+    },
+    {
+      "name": "node_api/set_bytes_1024",
+      "unit": "ns/call",
+      "backend": "NAPI setGlobal full Uint8Array copy of 1024 bytes; guest endpoint check excluded",
+      "samples": [
+        11993.2,
+        10173.8,
+        9796.6,
+        10119,
+        10169.1,
+        9985.2,
+        9331,
+        9468.5,
+        8720.6,
+        8850.1,
+        9253.2,
+        9139.7,
+        9042.4,
+        9166.5,
+        9156
+      ],
+      "summary": {
+        "median": 9331,
+        "mad": 465.60000000000036
+      }
+    },
+    {
+      "name": "node_api/return_bytes_1024",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call and outgoing Uint8Array copy of 1024 bytes",
+      "samples": [
+        3685.7,
+        3276.1,
+        3158.3,
+        3137.3,
+        3209.1,
+        3201.3,
+        3171.3,
+        3259.9,
+        3245.1,
+        3284.1,
+        3250.1,
+        3175.7,
+        3165.9,
+        3154.2,
+        3292.4
+      ],
+      "summary": {
+        "median": 3209.1,
+        "mad": 50.79999999999973
+      }
+    },
+    {
+      "name": "node_api/set_bytes_65536",
+      "unit": "ns/call",
+      "backend": "NAPI setGlobal full Uint8Array copy of 65536 bytes; guest endpoint check excluded",
+      "samples": [
+        10966.5,
+        11260.8,
+        10533.9,
+        10762,
+        10827,
+        11135.7,
+        10879.4,
+        11332,
+        10991.1,
+        11583.1,
+        11030.2,
+        10817.3,
+        10968.1,
+        10890.9,
+        10984.5
+      ],
+      "summary": {
+        "median": 10968.1,
+        "mad": 141.10000000000036
+      }
+    },
+    {
+      "name": "node_api/return_bytes_65536",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call and outgoing Uint8Array copy of 65536 bytes",
+      "samples": [
+        35247.6,
+        17749.4,
+        35440,
+        36118.1,
+        34499.6,
+        35893.5,
+        35359.8,
+        32496.3,
+        37304.2,
+        32412.6,
+        32326.9,
+        42144.9,
+        32566.5,
+        32908.1,
+        32548.8
+      ],
+      "summary": {
+        "median": 34499.6,
+        "mad": 1933.0999999999985
+      }
+    },
+    {
+      "name": "node_api/validate_module",
+      "unit": "ns/call",
+      "backend": "NAPI validateModule valid small source; see implementation for parser/cache policy",
+      "samples": [
+        6800.5,
+        5311.1,
+        5287.1,
+        5304.2,
+        5377.5,
+        5279,
+        5282.8,
+        6174.1,
+        5563.8,
+        5281.8,
+        5315.4,
+        5324.3,
+        5323.8,
+        5284.3,
+        5332.4
+      ],
+      "summary": {
+        "median": 5315.4,
+        "mad": 31.099999999999454
+      }
+    },
+    {
+      "name": "node_api/define_module",
+      "unit": "ns/call",
+      "backend": "NAPI deferred module source registration/replacement; import evaluation excluded",
+      "samples": [
+        1325.2,
+        1089,
+        1083.9,
+        1079.7,
+        1082,
+        1098,
+        1085.4,
+        1082.5,
+        1083.6,
+        1142,
+        1086.5,
+        1086.4,
+        1083.9,
+        1083.9,
+        1089.7
+      ],
+      "summary": {
+        "median": 1085.4,
+        "mad": 2.900000000000091
+      }
+    },
+    {
+      "name": "node_api/register_module",
+      "unit": "ns/call",
+      "backend": "NAPI eager module replacement, warmed identical source, export transaction and execution",
+      "samples": [
+        7886.2,
+        7236.5,
+        7185.2,
+        7626.5,
+        7570.1,
+        7108.2,
+        8862.5,
+        7624.7,
+        7149.5,
+        7111.4,
+        7871.8,
+        7415.5,
+        7189.9,
+        7084.1,
+        7289.5
+      ],
+      "summary": {
+        "median": 7289.5,
+        "mad": 181.30000000000018
+      }
+    },
+    {
+      "name": "node_api/has_module",
+      "unit": "ns/call",
+      "backend": "NAPI hasModule existing deferred module",
+      "samples": [
+        1255.5,
+        888.8,
+        871.3,
+        873.3,
+        878.2,
+        875.5,
+        878.7,
+        875.1,
+        878.5,
+        876.7,
+        879.7,
+        875,
+        874.4,
+        878.9,
+        874.3
+      ],
+      "summary": {
+        "median": 876.7,
+        "mad": 2.199999999999932
+      }
+    },
+    {
+      "name": "node_api/remove_module",
+      "unit": "ns/call",
+      "backend": "NAPI removeModule deferred source; reseeding excluded",
+      "samples": [
+        1338.5,
+        1213.4,
+        1204,
+        1198.5,
+        1203.3,
+        1201.1,
+        1205.9,
+        1202.4,
+        1203.2,
+        1206.9,
+        1203.8,
+        1214.3,
+        1204.1,
+        1197.1,
+        1201.4
+      ],
+      "summary": {
+        "median": 1203.8,
+        "mad": 2.3999999999998636
+      }
+    },
+    {
+      "name": "node_api/list_modules",
+      "unit": "ns/call",
+      "backend": "NAPI listModules existing small registry and outbound string array",
+      "samples": [
+        1528.1,
+        1317.4,
+        1311.2,
+        1309.5,
+        1311,
+        1386.1,
+        1492.2,
+        1309.8,
+        1312.2,
+        1313.8,
+        1313.9,
+        1317.6,
+        1313.7,
+        1315,
+        1315.2
+      ],
+      "summary": {
+        "median": 1313.9,
+        "mad": 2.900000000000091
+      }
+    },
+    {
+      "name": "node_api/collect_cycles_idle",
+      "unit": "ns/call",
+      "backend": "NAPI explicit cycle collection on retained owner without deliberately created garbage",
+      "samples": [
+        478899.4,
+        479082.1,
+        488420,
+        776582.4,
+        610601.6,
+        541560.4,
+        482220.6,
+        476244.2,
+        474052.8,
+        477128.9,
+        473276.4,
+        469563.7,
+        515968,
+        474935.4,
+        470089.8
+      ],
+      "summary": {
+        "median": 478899.4,
+        "mad": 5623
+      }
+    }
+  ]
+}

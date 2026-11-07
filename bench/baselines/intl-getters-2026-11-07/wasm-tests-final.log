@@ -1,0 +1,31 @@
+▶ browser build
+  ✔ mixed UTF-16 property updates and method calls preserve key identity (92.21213ms)
+  ✔ warm property access survives data and accessor descriptor transitions (19.367121ms)
+  ✔ own __proto__ data writes preserve the prototype and property attributes (22.443768ms)
+  ✔ persistent globals separate lexical bindings from object properties (8.757125ms)
+  ✔ UTF-16 host callbacks preserve surrogate strings and keys (10.781926ms)
+  ✔ await assimilates thenables and module namespaces reject mutation (17.60306ms)
+  ✔ numeric builtin regressions also work in the browser target (19.460182ms)
+  ✔ array callbacks and iterators read current elements (7.334404ms)
+  ✔ function constructors propagate guest exceptions (7.885368ms)
+  ✔ generators yield their values (6.293162ms)
+  ✔ a generator reports done and its return value (13.801281ms)
+  ✔ generators work in loops and comprehensions (6.688976ms)
+  ✔ yield* delegates (5.47131ms)
+  ✔ an unbounded generator is a catchable error, not a hang (464.460858ms)
+  ✔ the language features the native build has are present (20.851741ms)
+  ✔ indexed collections preserve mixed keys and live iteration on wasm32 (7.390211ms)
+  ✔ result records and logs have independent own data properties (7.459415ms)
+  ✔ promise reactions run as microtasks (12.27526ms)
+  ✔ virtual clock polling resumes checkpoints without blocking (6.792645ms)
+  ✔ real-time clock polling leaves future timers pending (30.556251ms)
+  ✔ Intl bound getters preserve receiver brands and legacy effects (27.849237ms)
+✔ browser build (862.102986ms)
+ℹ tests 21
+ℹ suites 1
+ℹ pass 21
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 973.171011

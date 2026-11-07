@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "purpose": "Diagnose and correct two pre-existing integration-test expectations; diagnostic requests intentionally throw to expose their values. No production class/typed-array change.",
+  "node": "v26.13.0",
+  "cases": {
+    "class_property_order": {
+      "worker_source": "class A{#value=this.#method();#method(){return 42;}read(){return this.#value;}method(){return this.#method;}write(){this.#method=1;}}throw Error(JSON.stringify(Object.getOwnPropertyNames(A.prototype)));",
+      "workers": {
+        "before": {
+          "binary_sha256": "b51b95d12d1c8a24ea828e2be862a90613b541651ef737b7dba06e03e74c7c05",
+          "response": {
+            "status": "error",
+            "phase": "runtime",
+            "error_type": "Error",
+            "message": "[\"constructor\",\"read\",\"method\",\"write\"]"
+          }
+        },
+        "after": {
+          "binary_sha256": "2e7c92633c70801693281f179e1372a5b9a51bbf74fff36b46bfe493a02ab603",
+          "response": {
+            "status": "error",
+            "phase": "runtime",
+            "error_type": "Error",
+            "message": "[\"constructor\",\"read\",\"method\",\"write\"]"
+          }
+        }
+      },
+      "node_script": "class A{#value=this.#method();#method(){return 42;}read(){return this.#value;}method(){return this.#method;}write(){this.#method=1;}}console.log(JSON.stringify(Object.getOwnPropertyNames(A.prototype)));",
+      "node_value": [
+        "constructor",
+        "read",
+        "method",
+        "write"
+      ]
+    },
+    "bound_typed_array_fallback": {
+      "worker_source": "var other=$262.createRealm().global;var target=other.Int8Array.bind(null);target.prototype=undefined;var value=Reflect.construct(Int8Array,[0],target);throw Error(JSON.stringify([Object.getPrototypeOf(value)===other.Int8Array.prototype,Object.getPrototypeOf(value)===Int8Array.prototype,Object.getPrototypeOf(value)===Object.getPrototypeOf(other.Int8Array.prototype)]));",
+      "workers": {
+        "before": {
+          "binary_sha256": "b51b95d12d1c8a24ea828e2be862a90613b541651ef737b7dba06e03e74c7c05",
+          "response": {
+            "status": "error",
+            "phase": "runtime",
+            "error_type": "Error",
+            "message": "[false,false,true]"
+          }
+        },
+        "after": {
+          "binary_sha256": "2e7c92633c70801693281f179e1372a5b9a51bbf74fff36b46bfe493a02ab603",
+          "response": {
+            "status": "error",
+            "phase": "runtime",
+            "error_type": "Error",
+            "message": "[false,false,true]"
+          }
+        }
+      },
+      "node_script": "var other=require('node:vm').runInNewContext('globalThis');var target=other.Int8Array.bind(null);target.prototype=undefined;var value=Reflect.construct(Int8Array,[0],target);console.log(JSON.stringify([Object.getPrototypeOf(value)===other.Int8Array.prototype,Object.getPrototypeOf(value)===Int8Array.prototype,Object.getPrototypeOf(value)===Object.getPrototypeOf(other.Int8Array.prototype)]));",
+      "node_value": [
+        false,
+        false,
+        true
+      ]
+    }
+  }
+}

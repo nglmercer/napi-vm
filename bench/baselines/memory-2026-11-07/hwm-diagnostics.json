@@ -1,0 +1,2082 @@
+[
+  {
+    "schema": 1,
+    "engine": "napi-vm",
+    "workload": "objects",
+    "objects_per_call": 2000,
+    "iterations": 8,
+    "source": "var generation=0;var retained=null;function bench(){generation++;let a=[];for(let i=0;i<2000;i++){a.push({x:i,y:i+1});}return a.length;}",
+    "source_sha256": "ec3ae0ba446b67031088fdc6edc882033f39c5cbf5e279e66e61e74f09540566",
+    "guest_function_tier": "bytecode",
+    "snapshots": [
+      {
+        "phase": "baseline",
+        "batch": 0,
+        "rss_bytes": 8196096,
+        "process_high_water_bytes": 8196096,
+        "gc_ns": null
+      },
+      {
+        "phase": "ready",
+        "batch": 0,
+        "rss_bytes": 14868480,
+        "process_high_water_bytes": 14868480,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 252
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 1,
+        "rss_bytes": 18563072,
+        "process_high_water_bytes": 18563072,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 3950,
+          "heap_collected_total": 1,
+          "shapes_created": 252
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 1,
+        "rss_bytes": 17526784,
+        "process_high_water_bytes": 18477056,
+        "gc_ns": 1225135,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 252
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 2,
+        "rss_bytes": 18866176,
+        "process_high_water_bytes": 18866176,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 3809,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 2,
+        "rss_bytes": 17526784,
+        "process_high_water_bytes": 18771968,
+        "gc_ns": 1115127,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 3,
+        "rss_bytes": 18939904,
+        "process_high_water_bytes": 18939904,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 3668,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 3,
+        "rss_bytes": 17526784,
+        "process_high_water_bytes": 18771968,
+        "gc_ns": 1125807,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 4,
+        "rss_bytes": 19025920,
+        "process_high_water_bytes": 19025920,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 3527,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 4,
+        "rss_bytes": 17661952,
+        "process_high_water_bytes": 18944000,
+        "gc_ns": 1137051,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 5,
+        "rss_bytes": 19103744,
+        "process_high_water_bytes": 19103744,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 3383,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 5,
+        "rss_bytes": 17809408,
+        "process_high_water_bytes": 18948096,
+        "gc_ns": 1101076,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 6,
+        "rss_bytes": 19185664,
+        "process_high_water_bytes": 19185664,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 3242,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 6,
+        "rss_bytes": 17952768,
+        "process_high_water_bytes": 19095552,
+        "gc_ns": 1287921,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 7,
+        "rss_bytes": 19243008,
+        "process_high_water_bytes": 19243008,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 6173,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 7,
+        "rss_bytes": 18092032,
+        "process_high_water_bytes": 19107840,
+        "gc_ns": 1237727,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 8,
+        "rss_bytes": 19202048,
+        "process_high_water_bytes": 19202048,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 6032,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 8,
+        "rss_bytes": 18223104,
+        "process_high_water_bytes": 19120128,
+        "gc_ns": 1216838,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "released",
+        "batch": 8,
+        "rss_bytes": 18223104,
+        "process_high_water_bytes": 19120128,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "dropped",
+        "batch": 8,
+        "rss_bytes": 18288640,
+        "process_high_water_bytes": 19120128,
+        "gc_ns": null
+      }
+    ]
+  },
+  {
+    "schema": 1,
+    "engine": "napi-vm",
+    "workload": "cycles",
+    "objects_per_call": 2000,
+    "iterations": 8,
+    "source": "var generation=0;var retained=null;function bench(){generation++;for(let i=0;i<2000;i++){let a={};let b={peer:a};a.peer=b;}return 2000;}",
+    "source_sha256": "111ec0fd2b37ec10e9c8c75d9793de7b72e887eea3c8901be2299e5c648ad98e",
+    "guest_function_tier": "bytecode",
+    "snapshots": [
+      {
+        "phase": "baseline",
+        "batch": 0,
+        "rss_bytes": 8019968,
+        "process_high_water_bytes": 8019968,
+        "gc_ns": null
+      },
+      {
+        "phase": "ready",
+        "batch": 0,
+        "rss_bytes": 15106048,
+        "process_high_water_bytes": 15106048,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 252
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 1,
+        "rss_bytes": 19828736,
+        "process_high_water_bytes": 19828736,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 6184,
+          "heap_collected_total": 1,
+          "shapes_created": 252
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 1,
+        "rss_bytes": 19955712,
+        "process_high_water_bytes": 19955712,
+        "gc_ns": 3114970,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 2001,
+          "shapes_created": 252
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 2,
+        "rss_bytes": 19955712,
+        "process_high_water_bytes": 19955712,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 5454,
+          "heap_collected_total": 2001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 2,
+        "rss_bytes": 19955712,
+        "process_high_water_bytes": 19955712,
+        "gc_ns": 2932488,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 4001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 3,
+        "rss_bytes": 19955712,
+        "process_high_water_bytes": 19955712,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 5976,
+          "heap_collected_total": 4001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 3,
+        "rss_bytes": 20037632,
+        "process_high_water_bytes": 20037632,
+        "gc_ns": 2996577,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 6001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 4,
+        "rss_bytes": 20037632,
+        "process_high_water_bytes": 20037632,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 5246,
+          "heap_collected_total": 6001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 4,
+        "rss_bytes": 20099072,
+        "process_high_water_bytes": 20099072,
+        "gc_ns": 2973875,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 8001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 5,
+        "rss_bytes": 20099072,
+        "process_high_water_bytes": 20099072,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 5630,
+          "heap_collected_total": 8001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 5,
+        "rss_bytes": 20099072,
+        "process_high_water_bytes": 20099072,
+        "gc_ns": 2895331,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 10001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 6,
+        "rss_bytes": 20152320,
+        "process_high_water_bytes": 20152320,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 6265,
+          "heap_collected_total": 10001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 6,
+        "rss_bytes": 20254720,
+        "process_high_water_bytes": 20254720,
+        "gc_ns": 3009705,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 12001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 7,
+        "rss_bytes": 20254720,
+        "process_high_water_bytes": 20254720,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 5535,
+          "heap_collected_total": 12001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 7,
+        "rss_bytes": 20254720,
+        "process_high_water_bytes": 20254720,
+        "gc_ns": 2814119,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 14001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 8,
+        "rss_bytes": 20254720,
+        "process_high_water_bytes": 20254720,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 6111,
+          "heap_collected_total": 14001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 8,
+        "rss_bytes": 20254720,
+        "process_high_water_bytes": 20254720,
+        "gc_ns": 2952596,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 16001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "released",
+        "batch": 8,
+        "rss_bytes": 20254720,
+        "process_high_water_bytes": 20254720,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 16001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "dropped",
+        "batch": 8,
+        "rss_bytes": 20254720,
+        "process_high_water_bytes": 20254720,
+        "gc_ns": null
+      }
+    ]
+  },
+  {
+    "schema": 1,
+    "engine": "napi-vm",
+    "workload": "unique_keys",
+    "objects_per_call": 2000,
+    "iterations": 8,
+    "source": "var generation=0;var retained=null;function bench(){generation++;let a=[];for(let i=0;i<2000;i++){let o={};o['key_'+generation+'_'+i]=i;a.push(o);}return a.length;}",
+    "source_sha256": "e14d1bd4e7c056571e537087800f2c65dad5f329736697f65c09cc3ac86322ff",
+    "guest_function_tier": "bytecode",
+    "snapshots": [
+      {
+        "phase": "baseline",
+        "batch": 0,
+        "rss_bytes": 8204288,
+        "process_high_water_bytes": 8204288,
+        "gc_ns": null
+      },
+      {
+        "phase": "ready",
+        "batch": 0,
+        "rss_bytes": 15048704,
+        "process_high_water_bytes": 15048704,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 252
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 1,
+        "rss_bytes": 19193856,
+        "process_high_water_bytes": 19193856,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 5607,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 1,
+        "rss_bytes": 19193856,
+        "process_high_water_bytes": 19193856,
+        "gc_ns": 1202744,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 2,
+        "rss_bytes": 19554304,
+        "process_high_water_bytes": 19554304,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 3779,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 2,
+        "rss_bytes": 19554304,
+        "process_high_water_bytes": 19554304,
+        "gc_ns": 1064235,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 3,
+        "rss_bytes": 19554304,
+        "process_high_water_bytes": 19554304,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 5227,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 3,
+        "rss_bytes": 19554304,
+        "process_high_water_bytes": 19554304,
+        "gc_ns": 1205635,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 4,
+        "rss_bytes": 19689472,
+        "process_high_water_bytes": 19689472,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 3399,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 4,
+        "rss_bytes": 19689472,
+        "process_high_water_bytes": 19689472,
+        "gc_ns": 1014533,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 5,
+        "rss_bytes": 19689472,
+        "process_high_water_bytes": 19689472,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 4848,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 5,
+        "rss_bytes": 19689472,
+        "process_high_water_bytes": 19689472,
+        "gc_ns": 1144203,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 6,
+        "rss_bytes": 19742720,
+        "process_high_water_bytes": 19742720,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 6296,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 6,
+        "rss_bytes": 19742720,
+        "process_high_water_bytes": 19742720,
+        "gc_ns": 1324267,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 7,
+        "rss_bytes": 19742720,
+        "process_high_water_bytes": 19742720,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 4468,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 7,
+        "rss_bytes": 19742720,
+        "process_high_water_bytes": 19742720,
+        "gc_ns": 1108015,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 8,
+        "rss_bytes": 19742720,
+        "process_high_water_bytes": 19742720,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 5919,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 8,
+        "rss_bytes": 19742720,
+        "process_high_water_bytes": 19742720,
+        "gc_ns": 1306658,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "released",
+        "batch": 8,
+        "rss_bytes": 19742720,
+        "process_high_water_bytes": 19742720,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "dropped",
+        "batch": 8,
+        "rss_bytes": 19742720,
+        "process_high_water_bytes": 19742720,
+        "gc_ns": null
+      }
+    ]
+  },
+  {
+    "schema": 1,
+    "engine": "napi-vm",
+    "workload": "live_cycles",
+    "objects_per_call": 2000,
+    "iterations": 8,
+    "source": "var generation=0;var retained=null;function bench(){generation++;retained=[];for(let i=0;i<2000;i++){let a={};let b={peer:a};a.peer=b;retained.push(a);}return retained.length;}",
+    "source_sha256": "b24834b3a2e8a05342941acf20d8dd2d4c936120700f6ee84466672505e6a788",
+    "guest_function_tier": "bytecode",
+    "snapshots": [
+      {
+        "phase": "baseline",
+        "batch": 0,
+        "rss_bytes": 8265728,
+        "process_high_water_bytes": 8265728,
+        "gc_ns": null
+      },
+      {
+        "phase": "ready",
+        "batch": 0,
+        "rss_bytes": 14864384,
+        "process_high_water_bytes": 14864384,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 1,
+          "shapes_created": 252
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 1,
+        "rss_bytes": 20561920,
+        "process_high_water_bytes": 20561920,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 5795,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 1,
+        "rss_bytes": 20692992,
+        "process_high_water_bytes": 20705280,
+        "gc_ns": 3655401,
+        "engine_stats": {
+          "heap_tracked": 5114,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 2,
+        "rss_bytes": 25325568,
+        "process_high_water_bytes": 25325568,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 10364,
+          "heap_collected_total": 1,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 2,
+        "rss_bytes": 25456640,
+        "process_high_water_bytes": 25456640,
+        "gc_ns": 6024325,
+        "engine_stats": {
+          "heap_tracked": 5114,
+          "heap_collected_total": 2001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 3,
+        "rss_bytes": 25616384,
+        "process_high_water_bytes": 25616384,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 12707,
+          "heap_collected_total": 2001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 3,
+        "rss_bytes": 25780224,
+        "process_high_water_bytes": 25817088,
+        "gc_ns": 6681042,
+        "engine_stats": {
+          "heap_tracked": 5114,
+          "heap_collected_total": 4001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 4,
+        "rss_bytes": 25780224,
+        "process_high_water_bytes": 25817088,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 11987,
+          "heap_collected_total": 4001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 4,
+        "rss_bytes": 25780224,
+        "process_high_water_bytes": 25817088,
+        "gc_ns": 6636786,
+        "engine_stats": {
+          "heap_tracked": 5114,
+          "heap_collected_total": 6001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 5,
+        "rss_bytes": 25780224,
+        "process_high_water_bytes": 25817088,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 10707,
+          "heap_collected_total": 6001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 5,
+        "rss_bytes": 25780224,
+        "process_high_water_bytes": 25817088,
+        "gc_ns": 6555890,
+        "engine_stats": {
+          "heap_tracked": 5114,
+          "heap_collected_total": 8001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 6,
+        "rss_bytes": 26103808,
+        "process_high_water_bytes": 26103808,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 13160,
+          "heap_collected_total": 8001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 6,
+        "rss_bytes": 26259456,
+        "process_high_water_bytes": 26341376,
+        "gc_ns": 6870299,
+        "engine_stats": {
+          "heap_tracked": 5114,
+          "heap_collected_total": 10001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 7,
+        "rss_bytes": 26263552,
+        "process_high_water_bytes": 26341376,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 12795,
+          "heap_collected_total": 10001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 7,
+        "rss_bytes": 26267648,
+        "process_high_water_bytes": 26341376,
+        "gc_ns": 7094302,
+        "engine_stats": {
+          "heap_tracked": 5114,
+          "heap_collected_total": 12001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 8,
+        "rss_bytes": 26267648,
+        "process_high_water_bytes": 26341376,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 12144,
+          "heap_collected_total": 12001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 8,
+        "rss_bytes": 26275840,
+        "process_high_water_bytes": 26341376,
+        "gc_ns": 8530842,
+        "engine_stats": {
+          "heap_tracked": 5114,
+          "heap_collected_total": 14001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "released",
+        "batch": 8,
+        "rss_bytes": 26275840,
+        "process_high_water_bytes": 26341376,
+        "gc_ns": null,
+        "engine_stats": {
+          "heap_tracked": 1113,
+          "heap_collected_total": 16001,
+          "shapes_created": 322
+        }
+      },
+      {
+        "phase": "dropped",
+        "batch": 8,
+        "rss_bytes": 26275840,
+        "process_high_water_bytes": 26341376,
+        "gc_ns": null
+      }
+    ]
+  },
+  {
+    "schema": 1,
+    "engine": "rquickjs",
+    "workload": "objects",
+    "objects_per_call": 2000,
+    "iterations": 8,
+    "source": "var generation=0;var retained=null;function bench(){generation++;let a=[];for(let i=0;i<2000;i++){a.push({x:i,y:i+1});}return a.length;}",
+    "source_sha256": "ec3ae0ba446b67031088fdc6edc882033f39c5cbf5e279e66e61e74f09540566",
+    "guest_function_tier": "engine bytecode",
+    "snapshots": [
+      {
+        "phase": "baseline",
+        "batch": 0,
+        "rss_bytes": 8138752,
+        "process_high_water_bytes": 8138752,
+        "gc_ns": null
+      },
+      {
+        "phase": "ready",
+        "batch": 0,
+        "rss_bytes": 9658368,
+        "process_high_water_bytes": 9658368,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 108024,
+          "memory_used_size": 96775,
+          "obj_count": 188,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 1,
+        "rss_bytes": 9773056,
+        "process_high_water_bytes": 9830400,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 108144,
+          "memory_used_size": 96879,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 1,
+        "rss_bytes": 9773056,
+        "process_high_water_bytes": 9830400,
+        "gc_ns": 15187,
+        "engine_stats": {
+          "malloc_size": 108144,
+          "memory_used_size": 96879,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 2,
+        "rss_bytes": 9777152,
+        "process_high_water_bytes": 9830400,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 108144,
+          "memory_used_size": 96879,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 2,
+        "rss_bytes": 9777152,
+        "process_high_water_bytes": 9830400,
+        "gc_ns": 16174,
+        "engine_stats": {
+          "malloc_size": 108144,
+          "memory_used_size": 96879,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 3,
+        "rss_bytes": 9781248,
+        "process_high_water_bytes": 9830400,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 108144,
+          "memory_used_size": 96879,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 3,
+        "rss_bytes": 9781248,
+        "process_high_water_bytes": 9830400,
+        "gc_ns": 14014,
+        "engine_stats": {
+          "malloc_size": 108144,
+          "memory_used_size": 96879,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 4,
+        "rss_bytes": 9785344,
+        "process_high_water_bytes": 9830400,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 108144,
+          "memory_used_size": 96879,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 4,
+        "rss_bytes": 9785344,
+        "process_high_water_bytes": 9830400,
+        "gc_ns": 13615,
+        "engine_stats": {
+          "malloc_size": 108144,
+          "memory_used_size": 96879,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 5,
+        "rss_bytes": 9789440,
+        "process_high_water_bytes": 9961472,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 108144,
+          "memory_used_size": 96879,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 5,
+        "rss_bytes": 9789440,
+        "process_high_water_bytes": 9961472,
+        "gc_ns": 13454,
+        "engine_stats": {
+          "malloc_size": 108144,
+          "memory_used_size": 96879,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 6,
+        "rss_bytes": 9793536,
+        "process_high_water_bytes": 9961472,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 108144,
+          "memory_used_size": 96879,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 6,
+        "rss_bytes": 9793536,
+        "process_high_water_bytes": 9961472,
+        "gc_ns": 12670,
+        "engine_stats": {
+          "malloc_size": 108144,
+          "memory_used_size": 96879,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 7,
+        "rss_bytes": 9797632,
+        "process_high_water_bytes": 9961472,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 108144,
+          "memory_used_size": 96879,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 7,
+        "rss_bytes": 9797632,
+        "process_high_water_bytes": 9961472,
+        "gc_ns": 12906,
+        "engine_stats": {
+          "malloc_size": 108144,
+          "memory_used_size": 96879,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 8,
+        "rss_bytes": 9801728,
+        "process_high_water_bytes": 9961472,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 108144,
+          "memory_used_size": 96879,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 8,
+        "rss_bytes": 9801728,
+        "process_high_water_bytes": 9961472,
+        "gc_ns": 12807,
+        "engine_stats": {
+          "malloc_size": 108144,
+          "memory_used_size": 96879,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "released",
+        "batch": 8,
+        "rss_bytes": 9801728,
+        "process_high_water_bytes": 9961472,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 108144,
+          "memory_used_size": 96879,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "dropped",
+        "batch": 8,
+        "rss_bytes": 9801728,
+        "process_high_water_bytes": 9961472,
+        "gc_ns": null
+      }
+    ]
+  },
+  {
+    "schema": 1,
+    "engine": "rquickjs",
+    "workload": "cycles",
+    "objects_per_call": 2000,
+    "iterations": 8,
+    "source": "var generation=0;var retained=null;function bench(){generation++;for(let i=0;i<2000;i++){let a={};let b={peer:a};a.peer=b;}return 2000;}",
+    "source_sha256": "111ec0fd2b37ec10e9c8c75d9793de7b72e887eea3c8901be2299e5c648ad98e",
+    "guest_function_tier": "engine bytecode",
+    "snapshots": [
+      {
+        "phase": "baseline",
+        "batch": 0,
+        "rss_bytes": 8003584,
+        "process_high_water_bytes": 8003584,
+        "gc_ns": null
+      },
+      {
+        "phase": "ready",
+        "batch": 0,
+        "rss_bytes": 9646080,
+        "process_high_water_bytes": 9646080,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 108048,
+          "memory_used_size": 96782,
+          "obj_count": 188,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 1,
+        "rss_bytes": 9768960,
+        "process_high_water_bytes": 9768960,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 110304,
+          "memory_used_size": 98742,
+          "obj_count": 206,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 1,
+        "rss_bytes": 9768960,
+        "process_high_water_bytes": 9768960,
+        "gc_ns": 12544,
+        "engine_stats": {
+          "malloc_size": 108048,
+          "memory_used_size": 96782,
+          "obj_count": 188,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 2,
+        "rss_bytes": 9768960,
+        "process_high_water_bytes": 9768960,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 156144,
+          "memory_used_size": 138470,
+          "obj_count": 588,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 2,
+        "rss_bytes": 9768960,
+        "process_high_water_bytes": 9768960,
+        "gc_ns": 23424,
+        "engine_stats": {
+          "malloc_size": 108048,
+          "memory_used_size": 96782,
+          "obj_count": 188,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 3,
+        "rss_bytes": 9768960,
+        "process_high_water_bytes": 9768960,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 156144,
+          "memory_used_size": 138470,
+          "obj_count": 588,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 3,
+        "rss_bytes": 9768960,
+        "process_high_water_bytes": 9768960,
+        "gc_ns": 24224,
+        "engine_stats": {
+          "malloc_size": 108048,
+          "memory_used_size": 96782,
+          "obj_count": 188,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 4,
+        "rss_bytes": 9768960,
+        "process_high_water_bytes": 9768960,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 156144,
+          "memory_used_size": 138470,
+          "obj_count": 588,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 4,
+        "rss_bytes": 9768960,
+        "process_high_water_bytes": 9768960,
+        "gc_ns": 22672,
+        "engine_stats": {
+          "malloc_size": 108048,
+          "memory_used_size": 96782,
+          "obj_count": 188,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 5,
+        "rss_bytes": 9768960,
+        "process_high_water_bytes": 9768960,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 156144,
+          "memory_used_size": 138470,
+          "obj_count": 588,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 5,
+        "rss_bytes": 9768960,
+        "process_high_water_bytes": 9768960,
+        "gc_ns": 23671,
+        "engine_stats": {
+          "malloc_size": 108048,
+          "memory_used_size": 96782,
+          "obj_count": 188,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 6,
+        "rss_bytes": 9768960,
+        "process_high_water_bytes": 9768960,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 156144,
+          "memory_used_size": 138470,
+          "obj_count": 588,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 6,
+        "rss_bytes": 9768960,
+        "process_high_water_bytes": 9768960,
+        "gc_ns": 23885,
+        "engine_stats": {
+          "malloc_size": 108048,
+          "memory_used_size": 96782,
+          "obj_count": 188,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 7,
+        "rss_bytes": 9768960,
+        "process_high_water_bytes": 9768960,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 156144,
+          "memory_used_size": 138470,
+          "obj_count": 588,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 7,
+        "rss_bytes": 9768960,
+        "process_high_water_bytes": 9768960,
+        "gc_ns": 23432,
+        "engine_stats": {
+          "malloc_size": 108048,
+          "memory_used_size": 96782,
+          "obj_count": 188,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 8,
+        "rss_bytes": 9768960,
+        "process_high_water_bytes": 9768960,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 156144,
+          "memory_used_size": 138470,
+          "obj_count": 588,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 8,
+        "rss_bytes": 9768960,
+        "process_high_water_bytes": 9768960,
+        "gc_ns": 23063,
+        "engine_stats": {
+          "malloc_size": 108048,
+          "memory_used_size": 96782,
+          "obj_count": 188,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "released",
+        "batch": 8,
+        "rss_bytes": 9768960,
+        "process_high_water_bytes": 9768960,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 108048,
+          "memory_used_size": 96782,
+          "obj_count": 188,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "dropped",
+        "batch": 8,
+        "rss_bytes": 9768960,
+        "process_high_water_bytes": 9768960,
+        "gc_ns": null
+      }
+    ]
+  },
+  {
+    "schema": 1,
+    "engine": "rquickjs",
+    "workload": "unique_keys",
+    "objects_per_call": 2000,
+    "iterations": 8,
+    "source": "var generation=0;var retained=null;function bench(){generation++;let a=[];for(let i=0;i<2000;i++){let o={};o['key_'+generation+'_'+i]=i;a.push(o);}return a.length;}",
+    "source_sha256": "e14d1bd4e7c056571e537087800f2c65dad5f329736697f65c09cc3ac86322ff",
+    "guest_function_tier": "engine bytecode",
+    "snapshots": [
+      {
+        "phase": "baseline",
+        "batch": 0,
+        "rss_bytes": 8089600,
+        "process_high_water_bytes": 8089600,
+        "gc_ns": null
+      },
+      {
+        "phase": "ready",
+        "batch": 0,
+        "rss_bytes": 9543680,
+        "process_high_water_bytes": 9543680,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 108240,
+          "memory_used_size": 96901,
+          "obj_count": 188,
+          "shape_count": 107,
+          "atom_count": 601
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 1,
+        "rss_bytes": 10289152,
+        "process_high_water_bytes": 10289152,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 169848,
+          "memory_used_size": 158493,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 601
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 1,
+        "rss_bytes": 10289152,
+        "process_high_water_bytes": 10289152,
+        "gc_ns": 15468,
+        "engine_stats": {
+          "malloc_size": 169848,
+          "memory_used_size": 158493,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 601
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 2,
+        "rss_bytes": 10289152,
+        "process_high_water_bytes": 10289152,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 169848,
+          "memory_used_size": 158493,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 601
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 2,
+        "rss_bytes": 10289152,
+        "process_high_water_bytes": 10289152,
+        "gc_ns": 14377,
+        "engine_stats": {
+          "malloc_size": 169848,
+          "memory_used_size": 158493,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 601
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 3,
+        "rss_bytes": 10301440,
+        "process_high_water_bytes": 10301440,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 169848,
+          "memory_used_size": 158493,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 601
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 3,
+        "rss_bytes": 10301440,
+        "process_high_water_bytes": 10301440,
+        "gc_ns": 13413,
+        "engine_stats": {
+          "malloc_size": 169848,
+          "memory_used_size": 158493,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 601
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 4,
+        "rss_bytes": 10305536,
+        "process_high_water_bytes": 10305536,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 169848,
+          "memory_used_size": 158493,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 601
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 4,
+        "rss_bytes": 10305536,
+        "process_high_water_bytes": 10305536,
+        "gc_ns": 13093,
+        "engine_stats": {
+          "malloc_size": 169848,
+          "memory_used_size": 158493,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 601
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 5,
+        "rss_bytes": 10309632,
+        "process_high_water_bytes": 10309632,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 169848,
+          "memory_used_size": 158493,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 601
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 5,
+        "rss_bytes": 10309632,
+        "process_high_water_bytes": 10309632,
+        "gc_ns": 13311,
+        "engine_stats": {
+          "malloc_size": 169848,
+          "memory_used_size": 158493,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 601
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 6,
+        "rss_bytes": 10309632,
+        "process_high_water_bytes": 10309632,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 169848,
+          "memory_used_size": 158493,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 601
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 6,
+        "rss_bytes": 10309632,
+        "process_high_water_bytes": 10309632,
+        "gc_ns": 12933,
+        "engine_stats": {
+          "malloc_size": 169848,
+          "memory_used_size": 158493,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 601
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 7,
+        "rss_bytes": 10313728,
+        "process_high_water_bytes": 10313728,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 169848,
+          "memory_used_size": 158493,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 601
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 7,
+        "rss_bytes": 10313728,
+        "process_high_water_bytes": 10313728,
+        "gc_ns": 12987,
+        "engine_stats": {
+          "malloc_size": 169848,
+          "memory_used_size": 158493,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 601
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 8,
+        "rss_bytes": 10317824,
+        "process_high_water_bytes": 10317824,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 169848,
+          "memory_used_size": 158493,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 601
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 8,
+        "rss_bytes": 10317824,
+        "process_high_water_bytes": 10317824,
+        "gc_ns": 12594,
+        "engine_stats": {
+          "malloc_size": 169848,
+          "memory_used_size": 158493,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 601
+        }
+      },
+      {
+        "phase": "released",
+        "batch": 8,
+        "rss_bytes": 10317824,
+        "process_high_water_bytes": 10317824,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 169848,
+          "memory_used_size": 158493,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 601
+        }
+      },
+      {
+        "phase": "dropped",
+        "batch": 8,
+        "rss_bytes": 10141696,
+        "process_high_water_bytes": 10305536,
+        "gc_ns": null
+      }
+    ]
+  },
+  {
+    "schema": 1,
+    "engine": "rquickjs",
+    "workload": "live_cycles",
+    "objects_per_call": 2000,
+    "iterations": 8,
+    "source": "var generation=0;var retained=null;function bench(){generation++;retained=[];for(let i=0;i<2000;i++){let a={};let b={peer:a};a.peer=b;retained.push(a);}return retained.length;}",
+    "source_sha256": "b24834b3a2e8a05342941acf20d8dd2d4c936120700f6ee84466672505e6a788",
+    "guest_function_tier": "engine bytecode",
+    "snapshots": [
+      {
+        "phase": "baseline",
+        "batch": 0,
+        "rss_bytes": 8175616,
+        "process_high_water_bytes": 8175616,
+        "gc_ns": null
+      },
+      {
+        "phase": "ready",
+        "batch": 0,
+        "rss_bytes": 9555968,
+        "process_high_water_bytes": 9555968,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 108136,
+          "memory_used_size": 96860,
+          "obj_count": 188,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 1,
+        "rss_bytes": 10153984,
+        "process_high_water_bytes": 10153984,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 626832,
+          "memory_used_size": 545140,
+          "obj_count": 4190,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 1,
+        "rss_bytes": 10153984,
+        "process_high_water_bytes": 10153984,
+        "gc_ns": 96371,
+        "engine_stats": {
+          "malloc_size": 626832,
+          "memory_used_size": 545140,
+          "obj_count": 4190,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 2,
+        "rss_bytes": 10440704,
+        "process_high_water_bytes": 10440704,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 626832,
+          "memory_used_size": 545140,
+          "obj_count": 4190,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 2,
+        "rss_bytes": 10440704,
+        "process_high_water_bytes": 10440704,
+        "gc_ns": 86711,
+        "engine_stats": {
+          "malloc_size": 626832,
+          "memory_used_size": 545140,
+          "obj_count": 4190,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 3,
+        "rss_bytes": 10465280,
+        "process_high_water_bytes": 10465280,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 626832,
+          "memory_used_size": 545140,
+          "obj_count": 4190,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 3,
+        "rss_bytes": 10465280,
+        "process_high_water_bytes": 10465280,
+        "gc_ns": 92865,
+        "engine_stats": {
+          "malloc_size": 626832,
+          "memory_used_size": 545140,
+          "obj_count": 4190,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 4,
+        "rss_bytes": 10465280,
+        "process_high_water_bytes": 10465280,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 626832,
+          "memory_used_size": 545140,
+          "obj_count": 4190,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 4,
+        "rss_bytes": 10465280,
+        "process_high_water_bytes": 10465280,
+        "gc_ns": 117231,
+        "engine_stats": {
+          "malloc_size": 626832,
+          "memory_used_size": 545140,
+          "obj_count": 4190,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 5,
+        "rss_bytes": 10465280,
+        "process_high_water_bytes": 10465280,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 626832,
+          "memory_used_size": 545140,
+          "obj_count": 4190,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 5,
+        "rss_bytes": 10465280,
+        "process_high_water_bytes": 10465280,
+        "gc_ns": 90688,
+        "engine_stats": {
+          "malloc_size": 626832,
+          "memory_used_size": 545140,
+          "obj_count": 4190,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 6,
+        "rss_bytes": 10465280,
+        "process_high_water_bytes": 10465280,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 626832,
+          "memory_used_size": 545140,
+          "obj_count": 4190,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 6,
+        "rss_bytes": 10465280,
+        "process_high_water_bytes": 10465280,
+        "gc_ns": 90811,
+        "engine_stats": {
+          "malloc_size": 626832,
+          "memory_used_size": 545140,
+          "obj_count": 4190,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 7,
+        "rss_bytes": 10465280,
+        "process_high_water_bytes": 10465280,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 626832,
+          "memory_used_size": 545140,
+          "obj_count": 4190,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 7,
+        "rss_bytes": 10465280,
+        "process_high_water_bytes": 10465280,
+        "gc_ns": 93361,
+        "engine_stats": {
+          "malloc_size": 626832,
+          "memory_used_size": 545140,
+          "obj_count": 4190,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "allocated",
+        "batch": 8,
+        "rss_bytes": 10481664,
+        "process_high_water_bytes": 10481664,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 626832,
+          "memory_used_size": 545140,
+          "obj_count": 4190,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "collected",
+        "batch": 8,
+        "rss_bytes": 10481664,
+        "process_high_water_bytes": 10481664,
+        "gc_ns": 91388,
+        "engine_stats": {
+          "malloc_size": 626832,
+          "memory_used_size": 545140,
+          "obj_count": 4190,
+          "shape_count": 108,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "released",
+        "batch": 8,
+        "rss_bytes": 10481664,
+        "process_high_water_bytes": 10481664,
+        "gc_ns": null,
+        "engine_stats": {
+          "malloc_size": 108256,
+          "memory_used_size": 96964,
+          "obj_count": 189,
+          "shape_count": 107,
+          "atom_count": 600
+        }
+      },
+      {
+        "phase": "dropped",
+        "batch": 8,
+        "rss_bytes": 10481664,
+        "process_high_water_bytes": 10481664,
+        "gc_ns": null
+      }
+    ]
+  }
+]

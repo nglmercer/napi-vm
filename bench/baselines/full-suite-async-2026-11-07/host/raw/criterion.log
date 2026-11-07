@@ -1,0 +1,171 @@
+    Finished `bench` profile [optimized] target(s) in 0.41s
+     Running benches/vm.rs (target/release/deps/vm-a6717a7d569e4d7b)
+Gnuplot not found, using plotters backend
+Benchmarking run/arithmetic_loop
+Benchmarking run/arithmetic_loop: Warming up for 200.00 ms
+Benchmarking run/arithmetic_loop: Collecting 10 samples in estimated 954.51 ms (110 iterations)
+Benchmarking run/arithmetic_loop: Analyzing
+run/arithmetic_loop     time:   [8.6549 ms 8.6928 ms 8.7409 ms]
+Found 3 outliers among 10 measurements (30.00%)
+  1 (10.00%) low mild
+  2 (20.00%) high severe
+Benchmarking run/recursion_fib
+Benchmarking run/recursion_fib: Warming up for 200.00 ms
+Benchmarking run/recursion_fib: Collecting 10 samples in estimated 630.20 ms (165 iterations)
+Benchmarking run/recursion_fib: Analyzing
+run/recursion_fib       time:   [3.7557 ms 3.8136 ms 3.8845 ms]
+Found 2 outliers among 10 measurements (20.00%)
+  1 (10.00%) low mild
+  1 (10.00%) high severe
+Benchmarking run/array_chain
+Benchmarking run/array_chain: Warming up for 200.00 ms
+
+Warning: Unable to complete 10 samples in 500.0ms. You may wish to increase target time to 591.4ms or enable flat sampling.
+Benchmarking run/array_chain: Collecting 10 samples in estimated 591.40 ms (55 iterations)
+Benchmarking run/array_chain: Analyzing
+run/array_chain         time:   [10.572 ms 10.608 ms 10.666 ms]
+Benchmarking run/string_ops
+Benchmarking run/string_ops: Warming up for 200.00 ms
+
+Warning: Unable to complete 10 samples in 500.0ms. You may wish to increase target time to 565.1ms or enable flat sampling.
+Benchmarking run/string_ops: Collecting 10 samples in estimated 565.09 ms (55 iterations)
+Benchmarking run/string_ops: Analyzing
+run/string_ops          time:   [10.095 ms 10.201 ms 10.271 ms]
+Benchmarking run/closures
+Benchmarking run/closures: Warming up for 200.00 ms
+
+Warning: Unable to complete 10 samples in 500.0ms. You may wish to increase target time to 662.2ms or enable flat sampling.
+Benchmarking run/closures: Collecting 10 samples in estimated 662.24 ms (55 iterations)
+Benchmarking run/closures: Analyzing
+run/closures            time:   [12.057 ms 12.126 ms 12.247 ms]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+Benchmarking run/json_roundtrip
+Benchmarking run/json_roundtrip: Warming up for 200.00 ms
+Benchmarking run/json_roundtrip: Collecting 10 samples in estimated 997.80 ms (110 iterations)
+Benchmarking run/json_roundtrip: Analyzing
+run/json_roundtrip      time:   [9.0263 ms 9.1186 ms 9.2762 ms]
+Found 2 outliers among 10 measurements (20.00%)
+  2 (20.00%) high mild
+Benchmarking run/property_updates
+Benchmarking run/property_updates: Warming up for 200.00 ms
+Benchmarking run/property_updates: Collecting 10 samples in estimated 947.18 ms (110 iterations)
+Benchmarking run/property_updates: Analyzing
+run/property_updates    time:   [8.4246 ms 8.4635 ms 8.5372 ms]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+
+Benchmarking frontend/lex_big_source
+Benchmarking frontend/lex_big_source: Warming up for 200.00 ms
+Benchmarking frontend/lex_big_source: Collecting 10 samples in estimated 552.04 ms (110 iterations)
+Benchmarking frontend/lex_big_source: Analyzing
+frontend/lex_big_source time:   [4.8377 ms 4.8450 ms 4.8586 ms]
+Benchmarking frontend/parse_big_source
+Benchmarking frontend/parse_big_source: Warming up for 200.00 ms
+
+Warning: Unable to complete 10 samples in 500.0ms. You may wish to increase target time to 583.9ms or enable flat sampling.
+Benchmarking frontend/parse_big_source: Collecting 10 samples in estimated 583.92 ms (55 iterations)
+Benchmarking frontend/parse_big_source: Analyzing
+frontend/parse_big_source
+                        time:   [10.508 ms 10.544 ms 10.591 ms]
+
+Benchmarking warm/class_methods_reused_vm
+Benchmarking warm/class_methods_reused_vm: Warming up for 200.00 ms
+
+Warning: Unable to complete 10 samples in 500.0ms. You may wish to increase target time to 620.5ms or enable flat sampling.
+Benchmarking warm/class_methods_reused_vm: Collecting 10 samples in estimated 620.52 ms (55 iterations)
+Benchmarking warm/class_methods_reused_vm: Analyzing
+warm/class_methods_reused_vm
+                        time:   [11.236 ms 11.335 ms 11.490 ms]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+
+Benchmarking warm/property_updates_ast
+Benchmarking warm/property_updates_ast: Warming up for 200.00 ms
+Benchmarking warm/property_updates_ast: Collecting 10 samples in estimated 725.10 ms (165 iterations)
+Benchmarking warm/property_updates_ast: Analyzing
+warm/property_updates_ast
+                        time:   [4.3599 ms 4.3674 ms 4.3758 ms]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+
+Benchmarking plugin_call/legacy_wrapper_eval
+Benchmarking plugin_call/legacy_wrapper_eval: Warming up for 200.00 ms
+Benchmarking plugin_call/legacy_wrapper_eval: Collecting 10 samples in estimated 574.23 ms (275 iterations)
+Benchmarking plugin_call/legacy_wrapper_eval: Analyzing
+plugin_call/legacy_wrapper_eval
+                        time:   [2.0518 ms 2.0666 ms 2.0834 ms]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+Benchmarking plugin_call/direct_call_json
+Benchmarking plugin_call/direct_call_json: Warming up for 200.00 ms
+Benchmarking plugin_call/direct_call_json: Collecting 10 samples in estimated 503.10 ms (3575 iterations)
+Benchmarking plugin_call/direct_call_json: Analyzing
+plugin_call/direct_call_json
+                        time:   [133.20 µs 135.29 µs 139.22 µs]
+
+Benchmarking tiers/prop_mono_hot
+Benchmarking tiers/prop_mono_hot: Warming up for 200.00 ms
+Benchmarking tiers/prop_mono_hot: Collecting 10 samples in estimated 518.26 ms (990 iterations)
+Benchmarking tiers/prop_mono_hot: Analyzing
+tiers/prop_mono_hot     time:   [518.96 µs 520.28 µs 522.72 µs]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+Benchmarking tiers/prop_mega_hot
+Benchmarking tiers/prop_mega_hot: Warming up for 200.00 ms
+Benchmarking tiers/prop_mega_hot: Collecting 10 samples in estimated 545.65 ms (330 iterations)
+Benchmarking tiers/prop_mega_hot: Analyzing
+tiers/prop_mega_hot     time:   [1.6513 ms 1.6554 ms 1.6578 ms]
+Benchmarking tiers/call_tiny_hot
+Benchmarking tiers/call_tiny_hot: Warming up for 200.00 ms
+Benchmarking tiers/call_tiny_hot: Collecting 10 samples in estimated 533.93 ms (385 iterations)
+Benchmarking tiers/call_tiny_hot: Analyzing
+tiers/call_tiny_hot     time:   [1.3859 ms 1.4051 ms 1.4255 ms]
+Found 2 outliers among 10 measurements (20.00%)
+  2 (20.00%) high mild
+Benchmarking tiers/shape_churn
+Benchmarking tiers/shape_churn: Warming up for 200.00 ms
+Benchmarking tiers/shape_churn: Collecting 10 samples in estimated 533.16 ms (385 iterations)
+Benchmarking tiers/shape_churn: Analyzing
+tiers/shape_churn       time:   [1.3818 ms 1.3876 ms 1.3922 ms]
+Benchmarking tiers/gc_collect
+Benchmarking tiers/gc_collect: Warming up for 200.00 ms
+Benchmarking tiers/gc_collect: Collecting 10 samples in estimated 600.65 ms (165 iterations)
+Benchmarking tiers/gc_collect: Analyzing
+tiers/gc_collect        time:   [3.4327 ms 3.4913 ms 3.6277 ms]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+
+Benchmarking language_metadata/1_documents_unchanged
+Benchmarking language_metadata/1_documents_unchanged: Warming up for 200.00 ms
+Benchmarking language_metadata/1_documents_unchanged: Collecting 10 samples in estimated 500.01 ms (2.2M iterations)
+Benchmarking language_metadata/1_documents_unchanged: Analyzing
+language_metadata/1_documents_unchanged
+                        time:   [231.39 ns 236.57 ns 243.09 ns]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+Benchmarking language_metadata/1_documents_changed
+Benchmarking language_metadata/1_documents_changed: Warming up for 200.00 ms
+Benchmarking language_metadata/1_documents_changed: Collecting 10 samples in estimated 503.74 ms (3740 iterations)
+Benchmarking language_metadata/1_documents_changed: Analyzing
+language_metadata/1_documents_changed
+                        time:   [133.39 µs 133.56 µs 133.85 µs]
+Found 2 outliers among 10 measurements (20.00%)
+  1 (10.00%) high mild
+  1 (10.00%) high severe
+Benchmarking language_metadata/20_documents_unchanged
+Benchmarking language_metadata/20_documents_unchanged: Warming up for 200.00 ms
+Benchmarking language_metadata/20_documents_unchanged: Collecting 10 samples in estimated 500.01 ms (2.2M iterations)
+Benchmarking language_metadata/20_documents_unchanged: Analyzing
+language_metadata/20_documents_unchanged
+                        time:   [229.85 ns 230.44 ns 231.54 ns]
+Benchmarking language_metadata/20_documents_changed
+Benchmarking language_metadata/20_documents_changed: Warming up for 200.00 ms
+Benchmarking language_metadata/20_documents_changed: Collecting 10 samples in estimated 619.59 ms (275 iterations)
+Benchmarking language_metadata/20_documents_changed: Analyzing
+language_metadata/20_documents_changed
+                        time:   [2.2412 ms 2.2966 ms 2.3356 ms]
+Found 3 outliers among 10 measurements (30.00%)
+  1 (10.00%) low mild
+  2 (20.00%) high severe
+

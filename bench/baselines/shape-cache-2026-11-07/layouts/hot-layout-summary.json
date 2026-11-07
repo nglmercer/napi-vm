@@ -1,0 +1,102 @@
+{
+  "schema": 1,
+  "runs": [
+    {
+      "file": "artifacts/performance/hot-layout-0-before-class_methods.json",
+      "variant": "before",
+      "warm_calls": {
+        "class_methods": 9444902.6
+      }
+    },
+    {
+      "file": "artifacts/performance/hot-layout-0-before-property.json",
+      "variant": "before",
+      "warm_calls": {
+        "property_reads": 1639511.3,
+        "property_updates": 2262073.5,
+        "property_key_churn": 2523056.5
+      }
+    },
+    {
+      "file": "artifacts/performance/hot-layout-1-id-first-class_methods.json",
+      "variant": "id-first",
+      "warm_calls": {
+        "class_methods": 9708176.4
+      }
+    },
+    {
+      "file": "artifacts/performance/hot-layout-1-id-first-property.json",
+      "variant": "id-first",
+      "warm_calls": {
+        "property_reads": 1716508.5,
+        "property_updates": 2265072.6,
+        "property_key_churn": 2547071.2
+      }
+    },
+    {
+      "file": "artifacts/performance/hot-layout-2-hot-index-class_methods.json",
+      "variant": "hot-index",
+      "warm_calls": {
+        "class_methods": 9754980.3
+      }
+    },
+    {
+      "file": "artifacts/performance/hot-layout-2-hot-index-property.json",
+      "variant": "hot-index",
+      "warm_calls": {
+        "property_reads": 1707394.3,
+        "property_updates": 2284500.5,
+        "property_key_churn": 2550697.1
+      }
+    },
+    {
+      "file": "artifacts/performance/hot-layout-3-hot-index-class_methods.json",
+      "variant": "hot-index",
+      "warm_calls": {
+        "class_methods": 9430698.9
+      }
+    },
+    {
+      "file": "artifacts/performance/hot-layout-3-hot-index-property.json",
+      "variant": "hot-index",
+      "warm_calls": {
+        "property_reads": 1706893.6,
+        "property_updates": 2284596.5,
+        "property_key_churn": 2539997.9
+      }
+    },
+    {
+      "file": "artifacts/performance/hot-layout-4-id-first-class_methods.json",
+      "variant": "id-first",
+      "warm_calls": {
+        "class_methods": 9805705.3
+      }
+    },
+    {
+      "file": "artifacts/performance/hot-layout-4-id-first-property.json",
+      "variant": "id-first",
+      "warm_calls": {
+        "property_reads": 1701121.6,
+        "property_updates": 2230218.0,
+        "property_key_churn": 2539365.0
+      }
+    },
+    {
+      "file": "artifacts/performance/hot-layout-5-before-class_methods.json",
+      "variant": "before",
+      "warm_calls": {
+        "class_methods": 9435837.2
+      }
+    },
+    {
+      "file": "artifacts/performance/hot-layout-5-before-property.json",
+      "variant": "before",
+      "warm_calls": {
+        "property_reads": 1704874.6,
+        "property_updates": 2352045.9,
+        "property_key_churn": 2555745.2
+      }
+    }
+  ],
+  "warning": "Counterbalanced process runs on an unisolated host; small changes are descriptive."
+}

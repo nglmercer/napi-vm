@@ -288,7 +288,10 @@ fn construct(i: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value
     Ok(object)
 }
 fn unwrap(i: &mut Interpreter, this: Value) -> Result<Value, VmErr> {
-    if slot(&this).is_ok() {
+    if this
+        .property_cell()
+        .is_some_and(|p| p.meta.borrow().intl_number.is_some())
+    {
         return Ok(this);
     }
     let ctor = i
@@ -308,10 +311,17 @@ fn unwrap(i: &mut Interpreter, this: Value) -> Result<Value, VmErr> {
 }
 fn get_format(i: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     let this = unwrap(i, this)?;
-    slot(&this)?;
-    let cell = this.property_cell().unwrap();
-    if let Some(value) = &cell.meta.borrow().intl_bound_format {
-        return Ok((**value).clone());
+    let cell = this.property_cell().ok_or_else(error)?;
+    {
+        // Validate the brand without cloning formatter options. The cached
+        // method is checked only after the receiver's brand is established.
+        let meta = cell.meta.borrow();
+        if meta.intl_number.is_none() {
+            return Err(error());
+        }
+        if let Some(value) = &meta.intl_bound_format {
+            return Ok((**value).clone());
+        }
     }
     let fp = i
         .persistent_global

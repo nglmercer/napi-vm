@@ -1,0 +1,5 @@
+{
+  "status": "passed",
+  "check": "Explicit missing WASM package fails instead of silently skipping",
+  "exit_code": 1
+}

@@ -1,0 +1,1998 @@
+{
+  "schema": 1,
+  "metadata": {
+    "utc": "2026-11-07T09:15:04.536732+00:00",
+    "git_head": "15f5b9de55b1820aa64cddc410334aab8e5e5c47",
+    "git_status_porcelain_start": "M Cargo.lock\n M bench/BASELINE.md\n M bench/performance.py\n M bench/rquickjs.py\n M bench/rquickjs/README.md\n M bench/rquickjs/src/main.rs\n M benches/vm.rs\n M crates/napi-vm-core/src/builtins/array.rs\n M crates/napi-vm-core/src/lang/service.rs\n M crates/napi-vm-core/src/shape.rs\n M crates/napi-vm-runtime/Cargo.toml\n M crates/napi-vm-runtime/src/runtime/network.rs\n M crates/napi-vm-runtime/tests/runtime_web.rs\n M docs/performance.md\n M src/bindings/marshal.rs\n?? bench/baselines/array-results-2026-11-07/after-tests.log\n?? bench/baselines/array-results-2026-11-07/array-changes-1.json\n?? bench/baselines/array-results-2026-11-07/array-changes-2.json\n?? bench/baselines/array-results-2026-11-07/array-full-after.json\n?? bench/baselines/array-results-2026-11-07/array-full-before.json\n?? bench/baselines/array-results-2026-11-07/array-full-changes.json\n?? bench/baselines/array-results-2026-11-07/array-paired-0-before.json\n?? bench/baselines/array-results-2026-11-07/array-paired-1-after.json\n?? bench/baselines/array-results-2026-11-07/array-paired-2-after.json\n?? bench/baselines/array-results-2026-11-07/array-paired-3-before.json\n?? bench/baselines/array-results-2026-11-07/before-tests.log\n?? bench/baselines/array-results-2026-11-07/test262-compare.log\n?? bench/baselines/array-results-2026-11-07/test262-comparison.json\n?? bench/baselines/array-results-2026-11-07/test262-full.log\n?? bench/baselines/array-results-2026-11-07/test262-report.json.gz\n?? bench/baselines/array-results-2026-11-07/test262-summary.json\n?? bench/baselines/array-results-2026-11-07/validation-build.json\n?? bench/baselines/array-results-2026-11-07/validation-status.json\n?? bench/baselines/collections-2026-11-07/after-1.json\n?? bench/baselines/collections-2026-11-07/after-2.json\n?? bench/baselines/collections-2026-11-07/after-3.json\n?? bench/baselines/collections-2026-11-07/before-1.json\n?? bench/baselines/collections-2026-11-07/before-2.json\n?? bench/baselines/collections-2026-11-07/before-3.json\n?? bench/baselines/collections-2026-11-07/benchmark-tests.log\n?? bench/baselines/collections-2026-11-07/build.log\n?? bench/baselines/collections-2026-11-07/clippy.log\n?? bench/baselines/collections-2026-11-07/comparison-1.json\n?? bench/baselines/collections-2026-11-07/comparison-2.json\n?? bench/baselines/collections-2026-11-07/comparison-3.json\n?? bench/baselines/collections-2026-11-07/guest-engine-audit.json\n?? bench/baselines/collections-2026-11-07/identity-tests.log\n?? bench/baselines/collections-2026-11-07/node-tests.log\n?? bench/baselines/collections-2026-11-07/validation.json\n?? bench/baselines/full-suite-2026-11-07/engine-build.log\n?? bench/baselines/full-suite-2026-11-07/engine-ratios.log\n?? bench/baselines/full-suite-2026-11-07/engines.json\n?? bench/baselines/full-suite-2026-11-07/engines.log\n?? bench/baselines/full-suite-2026-11-07/host.log\n?? bench/baselines/full-suite-2026-11-07/host/baseline.json\n?? bench/baselines/full-suite-2026-11-07/http-build.log\n?? bench/baselines/full-suite-2026-11-07/http-validate.log\n?? bench/baselines/full-suite-2026-11-07/http.json\n?? bench/baselines/full-suite-2026-11-07/http.log\n?? bench/baselines/full-suite-2026-11-07/memory-validate.log\n?? bench/baselines/full-suite-2026-11-07/memory.json\n?? bench/baselines/full-suite-2026-11-07/memory.log\n?? bench/baselines/full-suite-2026-11-07/suite.json\n?? bench/baselines/full-suite-2026-11-07/validator-tests.log\n?? bench/baselines/http-2026-11-07/http-clippy.log\n?? bench/baselines/http-2026-11-07/http-final-changes-1.json\n?? bench/baselines/http-2026-11-07/http-final-changes-2.json\n?? bench/baselines/http-2026-11-07/http-final-changes-3.json\n?? bench/baselines/http-2026-11-07/http-final-changes-4.json\n?? bench/baselines/http-2026-11-07/http-final-paired-0-before.json\n?? bench/baselines/http-2026-11-07/http-final-paired-1-after.json\n?? bench/baselines/http-2026-11-07/http-final-paired-2-after.json\n?? bench/baselines/http-2026-11-07/http-final-paired-3-before.json\n?? bench/baselines/http-2026-11-07/http-final-paired-4-after.json\n?? bench/baselines/http-2026-11-07/http-final-paired-5-before.json\n?? bench/baselines/http-2026-11-07/http-final-paired-6-before.json\n?? bench/baselines/http-2026-11-07/http-final-paired-7-after.json\n?? bench/baselines/http-2026-11-07/http-tests-expanded.log\n?? bench/baselines/http-2026-11-07/validation.json\n?? bench/baselines/memory-2026-11-07/baseline.json\n?? bench/baselines/memory-2026-11-07/clippy.log\n?? bench/baselines/memory-2026-11-07/hwm-diagnostics.json\n?? bench/baselines/memory-2026-11-07/stress.json\n?? bench/baselines/memory-2026-11-07/timing-smoke-ratios.json\n?? bench/baselines/memory-2026-11-07/timing-smoke.json\n?? bench/baselines/memory-2026-11-07/validation.json\n?? bench/baselines/memory-2026-11-07/validator-tests.log\n?? bench/baselines/operations-2026-11-07/engine-ratios.json\n?? bench/baselines/operations-2026-11-07/language-tests.log\n?? bench/baselines/operations-2026-11-07/metadata-paired-0-before.log\n?? bench/baselines/operations-2026-11-07/metadata-paired-1-after.log\n?? bench/baselines/operations-2026-11-07/metadata-paired-2-after.log\n?? bench/baselines/operations-2026-11-07/metadata-paired-3-before.log\n?? bench/baselines/operations-2026-11-07/metadata-paired.json\n?? bench/baselines/operations-2026-11-07/metadata-provenance.json\n?? bench/baselines/operations-2026-11-07/rquickjs-expanded-smoke.json\n?? bench/baselines/shape-cache-2026-11-07/benchmark-validator-tests.log\n?? bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-compare.log\n?? bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-comparison.json\n?? bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-full.log\n?? bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-report.json.gz\n?? bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-summary.json\n?? bench/baselines/shape-cache-2026-11-07/clippy.log\n?? bench/baselines/shape-cache-2026-11-07/core-tests.log\n?? bench/baselines/shape-cache-2026-11-07/layouts/build.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-0-before.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-1-bounded.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-2-header.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-3-bounded.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-4-header.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-5-before.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-6-header.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-7-before.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-8-bounded.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-0-before-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-0-before-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-1-id-first-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-1-id-first-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-2-hot-index-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-2-hot-index-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-3-hot-index-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-3-hot-index-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-4-id-first-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-4-id-first-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-5-before-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-5-before-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-summary.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/node-tests.log\n?? bench/baselines/shape-cache-2026-11-07/layouts/selected-memory-comparison.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/selected-memory-stress.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/selection.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-hot-header-clippy.log\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-hot-header-core-tests.log\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-id-after.asm\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-id-before.asm\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-id-header.asm\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-id-hot-index.asm\n?? bench/baselines/shape-cache-2026-11-07/layouts/suite-validator-tests.log\n?? bench/baselines/shape-cache-2026-11-07/memory-baseline-after.json\n?? bench/baselines/shape-cache-2026-11-07/memory-baseline-comparison.json\n?? bench/baselines/shape-cache-2026-11-07/memory-stress-after.json\n?? bench/baselines/shape-cache-2026-11-07/memory-stress-comparison.json\n?? bench/baselines/shape-cache-2026-11-07/node-default-tests.log\n?? bench/baselines/shape-cache-2026-11-07/node-runtime-tests.log\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-0-before.json\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-1-after.json\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-2-after.json\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-3-before.json\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-changes-1.json\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-changes-2.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-0-before.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-1-after.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-2-after.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-3-before.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-changes-1.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-changes-2.json\n?? bench/baselines/shape-cache-2026-11-07/validation-build.json\n?? bench/baselines/shape-cache-2026-11-07/validation.json\n?? bench/collection_report.py\n?? bench/http.py\n?? bench/memory_report.py\n?? bench/performance/collections.cjs\n?? bench/performance/public-api.cjs\n?? bench/public_api_report.py\n?? bench/rquickjs/src/bin/memory.rs\n?? bench/suite.py\n?? bench/tests/test_collection_report.py\n?? bench/tests/test_http.py\n?? bench/tests/test_memory_report.py\n?? bench/tests/test_public_api_report.py\n?? bench/tests/test_suite.py\n?? crates/napi-vm-runtime/examples/http_bench.rs\n?? crates/napi-vm-runtime/examples/http_bench/native.rs\n?? tests/array_result_fast_path.rs\n?? tests/node/collection-identity.test.js\n?? tests/node/shape-cache.test.js",
+    "git_status_porcelain_end": "M Cargo.lock\n M bench/BASELINE.md\n M bench/performance.py\n M bench/rquickjs.py\n M bench/rquickjs/README.md\n M bench/rquickjs/src/main.rs\n M benches/vm.rs\n M crates/napi-vm-core/src/builtins/array.rs\n M crates/napi-vm-core/src/lang/service.rs\n M crates/napi-vm-core/src/shape.rs\n M crates/napi-vm-runtime/Cargo.toml\n M crates/napi-vm-runtime/src/runtime/network.rs\n M crates/napi-vm-runtime/tests/runtime_web.rs\n M docs/performance.md\n M src/bindings/marshal.rs\n?? bench/baselines/array-results-2026-11-07/after-tests.log\n?? bench/baselines/array-results-2026-11-07/array-changes-1.json\n?? bench/baselines/array-results-2026-11-07/array-changes-2.json\n?? bench/baselines/array-results-2026-11-07/array-full-after.json\n?? bench/baselines/array-results-2026-11-07/array-full-before.json\n?? bench/baselines/array-results-2026-11-07/array-full-changes.json\n?? bench/baselines/array-results-2026-11-07/array-paired-0-before.json\n?? bench/baselines/array-results-2026-11-07/array-paired-1-after.json\n?? bench/baselines/array-results-2026-11-07/array-paired-2-after.json\n?? bench/baselines/array-results-2026-11-07/array-paired-3-before.json\n?? bench/baselines/array-results-2026-11-07/before-tests.log\n?? bench/baselines/array-results-2026-11-07/test262-compare.log\n?? bench/baselines/array-results-2026-11-07/test262-comparison.json\n?? bench/baselines/array-results-2026-11-07/test262-full.log\n?? bench/baselines/array-results-2026-11-07/test262-report.json.gz\n?? bench/baselines/array-results-2026-11-07/test262-summary.json\n?? bench/baselines/array-results-2026-11-07/validation-build.json\n?? bench/baselines/array-results-2026-11-07/validation-status.json\n?? bench/baselines/collections-2026-11-07/after-1.json\n?? bench/baselines/collections-2026-11-07/after-2.json\n?? bench/baselines/collections-2026-11-07/after-3.json\n?? bench/baselines/collections-2026-11-07/before-1.json\n?? bench/baselines/collections-2026-11-07/before-2.json\n?? bench/baselines/collections-2026-11-07/before-3.json\n?? bench/baselines/collections-2026-11-07/benchmark-tests-expanded.log\n?? bench/baselines/collections-2026-11-07/benchmark-tests.log\n?? bench/baselines/collections-2026-11-07/build.log\n?? bench/baselines/collections-2026-11-07/clippy.log\n?? bench/baselines/collections-2026-11-07/comparison-1.json\n?? bench/baselines/collections-2026-11-07/comparison-2.json\n?? bench/baselines/collections-2026-11-07/comparison-3.json\n?? bench/baselines/collections-2026-11-07/guest-engine-audit.json\n?? bench/baselines/collections-2026-11-07/identity-tests.log\n?? bench/baselines/collections-2026-11-07/node-tests.log\n?? bench/baselines/collections-2026-11-07/validation.json\n?? bench/baselines/full-suite-2026-11-07/engine-build.log\n?? bench/baselines/full-suite-2026-11-07/engine-ratios.log\n?? bench/baselines/full-suite-2026-11-07/engines.json\n?? bench/baselines/full-suite-2026-11-07/engines.log\n?? bench/baselines/full-suite-2026-11-07/host.log\n?? bench/baselines/full-suite-2026-11-07/host/baseline.json\n?? bench/baselines/full-suite-2026-11-07/http-build.log\n?? bench/baselines/full-suite-2026-11-07/http-validate.log\n?? bench/baselines/full-suite-2026-11-07/http.json\n?? bench/baselines/full-suite-2026-11-07/http.log\n?? bench/baselines/full-suite-2026-11-07/memory-validate.log\n?? bench/baselines/full-suite-2026-11-07/memory.json\n?? bench/baselines/full-suite-2026-11-07/memory.log\n?? bench/baselines/full-suite-2026-11-07/suite.json\n?? bench/baselines/full-suite-2026-11-07/validator-tests.log\n?? bench/baselines/http-2026-11-07/http-clippy.log\n?? bench/baselines/http-2026-11-07/http-final-changes-1.json\n?? bench/baselines/http-2026-11-07/http-final-changes-2.json\n?? bench/baselines/http-2026-11-07/http-final-changes-3.json\n?? bench/baselines/http-2026-11-07/http-final-changes-4.json\n?? bench/baselines/http-2026-11-07/http-final-paired-0-before.json\n?? bench/baselines/http-2026-11-07/http-final-paired-1-after.json\n?? bench/baselines/http-2026-11-07/http-final-paired-2-after.json\n?? bench/baselines/http-2026-11-07/http-final-paired-3-before.json\n?? bench/baselines/http-2026-11-07/http-final-paired-4-after.json\n?? bench/baselines/http-2026-11-07/http-final-paired-5-before.json\n?? bench/baselines/http-2026-11-07/http-final-paired-6-before.json\n?? bench/baselines/http-2026-11-07/http-final-paired-7-after.json\n?? bench/baselines/http-2026-11-07/http-tests-expanded.log\n?? bench/baselines/http-2026-11-07/validation.json\n?? bench/baselines/memory-2026-11-07/baseline.json\n?? bench/baselines/memory-2026-11-07/clippy.log\n?? bench/baselines/memory-2026-11-07/hwm-diagnostics.json\n?? bench/baselines/memory-2026-11-07/stress.json\n?? bench/baselines/memory-2026-11-07/timing-smoke-ratios.json\n?? bench/baselines/memory-2026-11-07/timing-smoke.json\n?? bench/baselines/memory-2026-11-07/validation.json\n?? bench/baselines/memory-2026-11-07/validator-tests.log\n?? bench/baselines/operations-2026-11-07/engine-ratios.json\n?? bench/baselines/operations-2026-11-07/language-tests.log\n?? bench/baselines/operations-2026-11-07/metadata-paired-0-before.log\n?? bench/baselines/operations-2026-11-07/metadata-paired-1-after.log\n?? bench/baselines/operations-2026-11-07/metadata-paired-2-after.log\n?? bench/baselines/operations-2026-11-07/metadata-paired-3-before.log\n?? bench/baselines/operations-2026-11-07/metadata-paired.json\n?? bench/baselines/operations-2026-11-07/metadata-provenance.json\n?? bench/baselines/operations-2026-11-07/rquickjs-expanded-smoke.json\n?? bench/baselines/shape-cache-2026-11-07/benchmark-validator-tests.log\n?? bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-compare.log\n?? bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-comparison.json\n?? bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-full.log\n?? bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-report.json.gz\n?? bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-summary.json\n?? bench/baselines/shape-cache-2026-11-07/clippy.log\n?? bench/baselines/shape-cache-2026-11-07/core-tests.log\n?? bench/baselines/shape-cache-2026-11-07/layouts/build.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-0-before.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-1-bounded.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-2-header.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-3-bounded.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-4-header.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-5-before.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-6-header.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-7-before.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/header-property-8-bounded.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-0-before-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-0-before-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-1-id-first-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-1-id-first-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-2-hot-index-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-2-hot-index-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-3-hot-index-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-3-hot-index-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-4-id-first-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-4-id-first-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-5-before-class_methods.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-5-before-property.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/hot-layout-summary.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/node-tests.log\n?? bench/baselines/shape-cache-2026-11-07/layouts/selected-memory-comparison.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/selected-memory-stress.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/selection.json\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-hot-header-clippy.log\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-hot-header-core-tests.log\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-id-after.asm\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-id-before.asm\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-id-header.asm\n?? bench/baselines/shape-cache-2026-11-07/layouts/shape-id-hot-index.asm\n?? bench/baselines/shape-cache-2026-11-07/layouts/suite-validator-tests.log\n?? bench/baselines/shape-cache-2026-11-07/memory-baseline-after.json\n?? bench/baselines/shape-cache-2026-11-07/memory-baseline-comparison.json\n?? bench/baselines/shape-cache-2026-11-07/memory-stress-after.json\n?? bench/baselines/shape-cache-2026-11-07/memory-stress-comparison.json\n?? bench/baselines/shape-cache-2026-11-07/node-default-tests.log\n?? bench/baselines/shape-cache-2026-11-07/node-runtime-tests.log\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-0-before.json\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-1-after.json\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-2-after.json\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-3-before.json\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-changes-1.json\n?? bench/baselines/shape-cache-2026-11-07/shape-final-timing-changes-2.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-0-before.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-1-after.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-2-after.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-3-before.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-changes-1.json\n?? bench/baselines/shape-cache-2026-11-07/shape-property-changes-2.json\n?? bench/baselines/shape-cache-2026-11-07/validation-build.json\n?? bench/baselines/shape-cache-2026-11-07/validation.json\n?? bench/collection_report.py\n?? bench/http.py\n?? bench/memory_report.py\n?? bench/performance/collections.cjs\n?? bench/performance/public-api.cjs\n?? bench/public_api_report.py\n?? bench/rquickjs/src/bin/memory.rs\n?? bench/suite.py\n?? bench/tests/test_collection_report.py\n?? bench/tests/test_http.py\n?? bench/tests/test_memory_report.py\n?? bench/tests/test_public_api_report.py\n?? bench/tests/test_suite.py\n?? crates/napi-vm-runtime/examples/http_bench.rs\n?? crates/napi-vm-runtime/examples/http_bench/native.rs\n?? tests/array_result_fast_path.rs\n?? tests/node/collection-identity.test.js\n?? tests/node/shape-cache.test.js",
+    "source_sha256_start": "aa5ce30f93e874243eeefdafc9e19ed9daa93e23b80ab88dc7e7643199228eb5",
+    "source_sha256_end": "aa5ce30f93e874243eeefdafc9e19ed9daa93e23b80ab88dc7e7643199228eb5",
+    "build_inputs_sha256_start": "07cff373d957dc6bf5508f30cddf3b8aae08769058cdffb25b2c6de4ee7bf7e3",
+    "build_inputs_sha256_end": "07cff373d957dc6bf5508f30cddf3b8aae08769058cdffb25b2c6de4ee7bf7e3",
+    "platform": "Linux-7.3.0-4-cachyos-x86_64-with-glibc2.44",
+    "machine": "x86_64",
+    "cpu": "AMD BC-250",
+    "cpu_count": 12,
+    "load_average_at_end": [
+      9.53955078125,
+      9.0126953125,
+      7.07958984375
+    ],
+    "build_environment": {},
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)\nbinary: rustc\ncommit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4\ncommit-date: 2026-09-28\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.0\nLLVM version: 23.1.1",
+    "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+    "node": "v26.13.0",
+    "features": {
+      "library": "default (napi)",
+      "criterion": "default (napi), plus core test-hooks dev feature",
+      "scheduler_rust": "default plus runtime",
+      "trusted_process": "emitted TypeScript on Node"
+    },
+    "profile": "release / Cargo bench profile",
+    "criterion": {
+      "samples": 10,
+      "warmup_seconds": 0.2,
+      "measurement_seconds": 0.5
+    },
+    "backend_artifacts": {
+      "criterion_sha256": "ec042e140264e7adfa63a9901c64d52c0672f869d2a50ec172f4756f91874894",
+      "trusted_emitted_js_sha256": "0cbefdb6dad884bd961dfad56ffa43fb30a61383cd02e1c668376b333853cfd4",
+      "addon_path": "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/expanded-suite/host/raw/napi-vm.node",
+      "addon_sha256": "bbd55b58eef51e2af812b406654e5689c9370d30e438b9491b675741726cae1d",
+      "built_library_sha256_at_build": "bbd55b58eef51e2af812b406654e5689c9370d30e438b9491b675741726cae1d",
+      "scheduler_sha256": "1ec4c9ec15a57d69cfaa5f583945ce3b8789059184cd1ce133a3e877836f138f",
+      "lsp_sha256": "43ede8fa13d3bd885be6bc583ea9523feb9786c6c52dae12c83a85fafbcdea3e"
+    },
+    "limitations": [
+      "Finite representative workloads, not full code coverage.",
+      "No CPU affinity or isolation; compare on the same quiet machine.",
+      "Criterion samples are per-iteration batch averages. Scheduler and trusted samples are independent whole-run summary medians, not per-call samples.",
+      "Trusted process measurement uses the current emitted TypeScript sources, including any dirty edits.",
+      "LanguageService cases use the NAPI binding; LSP transport is built and fingerprinted but not measured.",
+      "No filesystem/network runtime, wasm, Bun, or native trusted-process workload measured."
+    ]
+  },
+  "results": [
+    {
+      "name": "node_binding/arithmetic",
+      "unit": "ns/call",
+      "samples": [
+        10170318,
+        9850983,
+        9879548,
+        10357719,
+        9963393,
+        13110864,
+        9684359,
+        10221243,
+        11299871,
+        9949313,
+        9494703,
+        10755966,
+        11171450,
+        9737606,
+        10322419,
+        10312926,
+        10351228,
+        11518263,
+        10522886,
+        9573224
+      ],
+      "backend": "runCode: fresh VM with warmed source-template cache via explicitly loaded NAPI addon",
+      "summary": {
+        "median": 10267084.5,
+        "mad": 401819.0,
+        "min": 9494703,
+        "max": 13110864,
+        "count": 20
+      }
+    },
+    {
+      "name": "node_binding/fibonacci",
+      "unit": "ns/call",
+      "samples": [
+        4965878,
+        5615089,
+        6709191,
+        5249918,
+        5671096,
+        6028961,
+        5590341,
+        5738070,
+        5069572,
+        5702043,
+        5960201,
+        5932815,
+        5910396,
+        5790319,
+        5397569,
+        5320237,
+        6039526,
+        5560648,
+        4626669,
+        4367627
+      ],
+      "backend": "runCode: fresh VM with warmed source-template cache via explicitly loaded NAPI addon",
+      "summary": {
+        "median": 5643092.5,
+        "mad": 303415.5,
+        "min": 4367627,
+        "max": 6709191,
+        "count": 20
+      }
+    },
+    {
+      "name": "node_binding/array",
+      "unit": "ns/call",
+      "samples": [
+        12256757,
+        11793042,
+        11901378,
+        11697543,
+        12201643,
+        13556961,
+        11664939,
+        11601960,
+        11393147,
+        11632875,
+        11582311,
+        12125190,
+        14222548,
+        14157275,
+        13003995,
+        15217654,
+        14632858,
+        14072903,
+        12644175,
+        14156879
+      ],
+      "backend": "runCode: fresh VM with warmed source-template cache via explicitly loaded NAPI addon",
+      "summary": {
+        "median": 12229200.0,
+        "mad": 637064.5,
+        "min": 11393147,
+        "max": 15217654,
+        "count": 20
+      }
+    },
+    {
+      "name": "node_binding/json",
+      "unit": "ns/call",
+      "samples": [
+        9892719,
+        11830942,
+        9862162,
+        9818869,
+        10351245,
+        10024981,
+        10410735,
+        10530690,
+        10000952,
+        10088403,
+        10355855,
+        10128184,
+        10387715,
+        9909424,
+        10533076,
+        10494355,
+        9513359,
+        10099932,
+        10094591,
+        9597826
+      ],
+      "backend": "runCode: fresh VM with warmed source-template cache via explicitly loaded NAPI addon",
+      "summary": {
+        "median": 10097261.5,
+        "mad": 256288.5,
+        "min": 9513359,
+        "max": 11830942,
+        "count": 20
+      }
+    },
+    {
+      "name": "language_service/completion",
+      "unit": "ns/call",
+      "samples": [
+        623881,
+        700566,
+        673824,
+        815116,
+        812724,
+        771726,
+        623309,
+        688488,
+        623396,
+        603478,
+        564157,
+        573970,
+        626270,
+        625088,
+        586387,
+        565148,
+        555732,
+        549937,
+        563779,
+        564597
+      ],
+      "backend": "NAPI LanguageService; cached document completion",
+      "summary": {
+        "median": 623352.5,
+        "mad": 58480.0,
+        "min": 549937,
+        "max": 815116,
+        "count": 20
+      }
+    },
+    {
+      "name": "language_service/diagnostics_update",
+      "unit": "ns/call",
+      "samples": [
+        10251,
+        10910,
+        10830,
+        16383,
+        16161,
+        10200,
+        9470,
+        9103,
+        8697,
+        8547,
+        9129,
+        8640,
+        11701,
+        9104,
+        8510,
+        8930,
+        8954,
+        8778,
+        8977,
+        9840
+      ],
+      "backend": "NAPI LanguageService; update plus diagnostics",
+      "summary": {
+        "median": 9116.5,
+        "mad": 523.0,
+        "min": 8510,
+        "max": 16383,
+        "count": 20
+      }
+    },
+    {
+      "name": "node/collections/map_1_references",
+      "unit": "ns/call",
+      "source": "var collection=new Map();for(var i=0;i<256;i++)collection.set(i,i);var output=[];for(var i=0;i<1;i++)output.push(collection);function get(){return output;}",
+      "expectedEntries": 256,
+      "references": 1,
+      "sharedIdentityPreserved": true,
+      "samples": [
+        88627.9,
+        126035.5,
+        66426.1,
+        64914.7,
+        64900.8,
+        64215.6,
+        105378.6,
+        57778.3,
+        57946.3,
+        61296.1,
+        57308.9,
+        57825.3,
+        92186.9,
+        58952.7,
+        58220.8
+      ],
+      "summary": {
+        "median": 64215.6,
+        "mad": 6269.299999999996,
+        "min": 57308.9,
+        "max": 126035.5,
+        "count": 15
+      },
+      "backend": "NAPI retained call and outbound collection conversion"
+    },
+    {
+      "name": "node/collections/map_64_references",
+      "unit": "ns/call",
+      "source": "var collection=new Map();for(var i=0;i<256;i++)collection.set(i,i);var output=[];for(var i=0;i<64;i++)output.push(collection);function get(){return output;}",
+      "expectedEntries": 256,
+      "references": 64,
+      "sharedIdentityPreserved": true,
+      "samples": [
+        103596.3,
+        137528,
+        90007,
+        73539.8,
+        69287.9,
+        76300.3,
+        65964.3,
+        67967.9,
+        67535,
+        67266.1,
+        72709.2,
+        69240.2,
+        87533.7,
+        71888.1,
+        65487.8
+      ],
+      "summary": {
+        "median": 71888.1,
+        "mad": 4412.199999999997,
+        "min": 65487.8,
+        "max": 137528,
+        "count": 15
+      },
+      "backend": "NAPI retained call and outbound collection conversion"
+    },
+    {
+      "name": "node/collections/set_1_references",
+      "unit": "ns/call",
+      "source": "var collection=new Set();for(var i=0;i<256;i++)collection.add(i);var output=[];for(var i=0;i<1;i++)output.push(collection);function get(){return output;}",
+      "expectedEntries": 256,
+      "references": 1,
+      "sharedIdentityPreserved": true,
+      "samples": [
+        59695.7,
+        54618.8,
+        55160.1,
+        54774,
+        72341.1,
+        55212.7,
+        55460.4,
+        53192.1,
+        53764.3,
+        53902.6,
+        52913.1,
+        55999.9,
+        69590.7,
+        415080.1,
+        52504
+      ],
+      "summary": {
+        "median": 55160.1,
+        "mad": 1395.7999999999956,
+        "min": 52504,
+        "max": 415080.1,
+        "count": 15
+      },
+      "backend": "NAPI retained call and outbound collection conversion"
+    },
+    {
+      "name": "node/collections/set_64_references",
+      "unit": "ns/call",
+      "source": "var collection=new Set();for(var i=0;i<256;i++)collection.add(i);var output=[];for(var i=0;i<64;i++)output.push(collection);function get(){return output;}",
+      "expectedEntries": 256,
+      "references": 64,
+      "sharedIdentityPreserved": true,
+      "samples": [
+        69654.2,
+        74015.9,
+        79300.8,
+        67449.7,
+        66112.5,
+        66962.4,
+        67885.6,
+        65706.7,
+        83666.2,
+        67297.5,
+        69317.1,
+        68622.4,
+        65388.1,
+        63524.3,
+        64726.1
+      ],
+      "summary": {
+        "median": 67449.7,
+        "mad": 1867.4000000000087,
+        "min": 63524.3,
+        "max": 83666.2,
+        "count": 15
+      },
+      "backend": "NAPI retained call and outbound collection conversion"
+    },
+    {
+      "name": "node_api/construct_dispose",
+      "unit": "ns/call",
+      "backend": "NAPI Vm construction and explicit disposal, including builtin setup/cleanup",
+      "samples": [
+        3682191.9,
+        4407654.2,
+        4282644.9,
+        3785805.6,
+        3635424.6,
+        3627691.4,
+        3619578.9,
+        3857086.3,
+        3906970.4,
+        3802531.9,
+        3746134,
+        3712993,
+        3665630.2,
+        3880640,
+        3634935.9
+      ],
+      "summary": {
+        "median": 3746134,
+        "mad": 110952.29999999981,
+        "min": 3619578.9,
+        "max": 4407654.2,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/run_cached_source",
+      "unit": "ns/call",
+      "backend": "NAPI persistent run with warmed identical source and scalar string result",
+      "samples": [
+        3575.9,
+        2924.8,
+        2346.6,
+        2447.9,
+        2411.3,
+        2869.4,
+        2413.5,
+        2289.9,
+        2242.7,
+        4279.8,
+        2409.3,
+        2338,
+        2275.5,
+        2161.5,
+        3582.5
+      ],
+      "summary": {
+        "median": 2411.3,
+        "mad": 135.80000000000018,
+        "min": 2161.5,
+        "max": 4279.8,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/get_global_scalar",
+      "unit": "ns/call",
+      "backend": "NAPI getGlobal with existing scalar and string result",
+      "samples": [
+        1631.4,
+        1231.9,
+        1153.3,
+        1185.8,
+        1165,
+        1193.7,
+        1159.2,
+        1191.9,
+        1159,
+        1461.4,
+        1621.1,
+        1843.2,
+        2736.4,
+        1278.6,
+        1173.9
+      ],
+      "summary": {
+        "median": 1193.7,
+        "mad": 38.200000000000045,
+        "min": 1153.3,
+        "max": 2736.4,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/has_global",
+      "unit": "ns/call",
+      "backend": "NAPI hasGlobal existing name",
+      "samples": [
+        1340.2,
+        1006.6,
+        1024.4,
+        1000.6,
+        1002.6,
+        1000.5,
+        999.7,
+        1059,
+        1003.2,
+        1281.7,
+        1742,
+        1447.1,
+        1434.2,
+        1636.7,
+        1467.3
+      ],
+      "summary": {
+        "median": 1059,
+        "mad": 59.299999999999955,
+        "min": 999.7,
+        "max": 1742,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/set_global_scalar",
+      "unit": "ns/call",
+      "backend": "NAPI setGlobal existing scalar; verification read excluded",
+      "samples": [
+        11103.1,
+        10740.7,
+        11095.8,
+        10186.7,
+        10350.8,
+        11172.4,
+        10394.3,
+        10084.4,
+        10050.7,
+        10147.4,
+        10469.6,
+        9840.9,
+        11066.8,
+        10159,
+        10802.1
+      ],
+      "summary": {
+        "median": 10394.3,
+        "mad": 343.59999999999854,
+        "min": 9840.9,
+        "max": 11172.4,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/remove_global",
+      "unit": "ns/call",
+      "backend": "NAPI removeGlobal existing scalar; reseeding excluded",
+      "samples": [
+        4357.5,
+        2980.3,
+        3011.8,
+        2864.5,
+        2856.6,
+        2823.2,
+        2792.4,
+        3036.9,
+        2804.7,
+        2950.4,
+        2916.3,
+        4264.3,
+        2831.6,
+        3162.3,
+        2854.8
+      ],
+      "summary": {
+        "median": 2916.3,
+        "mad": 93.10000000000036,
+        "min": 2792.4,
+        "max": 4357.5,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/call_no_arguments",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call, no arguments, scalar outbound result",
+      "samples": [
+        3377.6,
+        2080.8,
+        2087.7,
+        2102.9,
+        4047.2,
+        3160.3,
+        3299.4,
+        3137.5,
+        4798.1,
+        2907.3,
+        2831.8,
+        3567.5,
+        2068.4,
+        2038.3,
+        2170.6
+      ],
+      "summary": {
+        "median": 2907.3,
+        "mad": 736.7000000000003,
+        "min": 2038.3,
+        "max": 4798.1,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/call_eight_numbers",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call, eight scalar incoming arguments, scalar result",
+      "samples": [
+        4432.4,
+        3387.8,
+        3336.9,
+        3556.2,
+        3462.8,
+        3438.8,
+        3401.8,
+        3365.2,
+        3480.4,
+        3409.4,
+        3681.9,
+        3348.7,
+        3355.4,
+        5709.1,
+        3380
+      ],
+      "summary": {
+        "median": 3409.4,
+        "mad": 54.0,
+        "min": 3336.9,
+        "max": 5709.1,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/call_plain_control",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call with scalar guest addition",
+      "samples": [
+        3175.3,
+        2150.8,
+        2145.4,
+        2222.7,
+        3267.6,
+        2286.6,
+        2182.6,
+        2142.7,
+        2205.8,
+        3137.7,
+        2862.2,
+        2845.5,
+        2866.5,
+        397802.7,
+        2246.3
+      ],
+      "summary": {
+        "median": 2286.6,
+        "mad": 143.9000000000001,
+        "min": 2142.7,
+        "max": 397802.7,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/call_host_callback",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call, synchronous Node callback and scalar result",
+      "samples": [
+        4091.8,
+        5107.7,
+        2937.2,
+        3055.6,
+        2859.2,
+        2936,
+        2832,
+        2884.2,
+        2946.6,
+        3014.3,
+        2853.3,
+        3182.7,
+        2940,
+        2832.3,
+        2838.5
+      ],
+      "summary": {
+        "median": 2937.2,
+        "mad": 83.89999999999964,
+        "min": 2832,
+        "max": 5107.7,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/replace_host_function",
+      "unit": "ns/call",
+      "backend": "NAPI exposeFunction replacement including callback registration/revocation; invocation check excluded",
+      "samples": [
+        16439.3,
+        13742.3,
+        12683.2,
+        12519.5,
+        12493.5,
+        13753.1,
+        12583.2,
+        12229.8,
+        12368.4,
+        13073.1,
+        12643.3,
+        12474.8,
+        12416.8,
+        12863.4,
+        12222.6
+      ],
+      "summary": {
+        "median": 12583.2,
+        "mad": 214.8000000000011,
+        "min": 12222.6,
+        "max": 16439.3,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/set_object_1",
+      "unit": "ns/call",
+      "backend": "NAPI setGlobal plain incoming object with 1 numeric own properties; guest sum check excluded",
+      "samples": [
+        14970,
+        15024.8,
+        14220,
+        14124.6,
+        21032.8,
+        14227.1,
+        13750.2,
+        32621.3,
+        13027.4,
+        13721.4,
+        12563.7,
+        12999,
+        12334.4,
+        11753.9,
+        12223
+      ],
+      "summary": {
+        "median": 13750.2,
+        "mad": 1186.5,
+        "min": 11753.9,
+        "max": 32621.3,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/return_object_1",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call and outgoing plain object with 1 numeric own properties",
+      "samples": [
+        5456.4,
+        4187.8,
+        4239.1,
+        3986.6,
+        5847.2,
+        5029.5,
+        4892.5,
+        3525.3,
+        3436,
+        4847,
+        4162,
+        4042.1,
+        4643.9,
+        5027.3,
+        5925.5
+      ],
+      "summary": {
+        "median": 4643.9,
+        "mad": 481.89999999999964,
+        "min": 3436,
+        "max": 5925.5,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/set_object_128",
+      "unit": "ns/call",
+      "backend": "NAPI setGlobal plain incoming object with 128 numeric own properties; guest sum check excluded",
+      "samples": [
+        123957.4,
+        131818.7,
+        127472,
+        112003.8,
+        88945.3,
+        153308.7,
+        160907.7,
+        101898.4,
+        142404.3,
+        148734.6,
+        110411.2,
+        95832.5,
+        105969.1,
+        91199.4,
+        89028.7
+      ],
+      "summary": {
+        "median": 112003.8,
+        "mad": 19814.90000000001,
+        "min": 88945.3,
+        "max": 160907.7,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/return_object_128",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call and outgoing plain object with 128 numeric own properties",
+      "samples": [
+        88259.5,
+        103721.8,
+        60265.3,
+        54317.1,
+        71695,
+        56773.6,
+        53181.8,
+        55816.3,
+        69305.8,
+        56203.5,
+        55145,
+        64036.9,
+        68688.9,
+        55480.8,
+        53776.4
+      ],
+      "summary": {
+        "median": 56773.6,
+        "mad": 3491.7000000000044,
+        "min": 53181.8,
+        "max": 103721.8,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/set_bytes_1024",
+      "unit": "ns/call",
+      "backend": "NAPI setGlobal full Uint8Array copy of 1024 bytes; guest endpoint check excluded",
+      "samples": [
+        12716.3,
+        11107.7,
+        10645.6,
+        10330.9,
+        10699.7,
+        11115.2,
+        10071.7,
+        10841.4,
+        9781.1,
+        9290.7,
+        9416,
+        12424.4,
+        9533.1,
+        9255.1,
+        9388.3
+      ],
+      "summary": {
+        "median": 10330.9,
+        "mad": 784.3000000000011,
+        "min": 9255.1,
+        "max": 12716.3,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/return_bytes_1024",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call and outgoing Uint8Array copy of 1024 bytes",
+      "samples": [
+        4359.8,
+        3852.6,
+        3750.4,
+        3914.7,
+        3737.6,
+        3617.2,
+        3476.1,
+        3524.5,
+        3343.4,
+        3506.1,
+        3406.2,
+        4393.7,
+        3870.6,
+        3381.5,
+        3299.1
+      ],
+      "summary": {
+        "median": 3617.2,
+        "mad": 235.4000000000001,
+        "min": 3299.1,
+        "max": 4393.7,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/set_bytes_65536",
+      "unit": "ns/call",
+      "backend": "NAPI setGlobal full Uint8Array copy of 65536 bytes; guest endpoint check excluded",
+      "samples": [
+        14998.1,
+        13426.4,
+        15809.9,
+        12358.8,
+        10979.4,
+        11344.9,
+        13326.8,
+        11193.5,
+        11315,
+        11087.2,
+        11358.4,
+        11242.3,
+        11741.6,
+        11097,
+        11086.1
+      ],
+      "summary": {
+        "median": 11344.9,
+        "mad": 258.7999999999993,
+        "min": 10979.4,
+        "max": 15809.9,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/return_bytes_65536",
+      "unit": "ns/call",
+      "backend": "NAPI named guest call and outgoing Uint8Array copy of 65536 bytes",
+      "samples": [
+        31629.7,
+        49319.3,
+        15435.5,
+        12084.6,
+        18798.7,
+        35062.8,
+        34656.7,
+        33181.2,
+        36782.6,
+        32397.2,
+        36668.6,
+        34377.4,
+        35120.1,
+        38284.8,
+        41350.7
+      ],
+      "summary": {
+        "median": 34656.7,
+        "mad": 2259.4999999999964,
+        "min": 12084.6,
+        "max": 49319.3,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/validate_module",
+      "unit": "ns/call",
+      "backend": "NAPI validateModule valid small source; see implementation for parser/cache policy",
+      "samples": [
+        8396.7,
+        5462.9,
+        5276.1,
+        5281.4,
+        5276.2,
+        5268.6,
+        5264,
+        5327.6,
+        5256.9,
+        5298.1,
+        5227.6,
+        5831,
+        5301.9,
+        5259.8,
+        5310.6
+      ],
+      "summary": {
+        "median": 5281.4,
+        "mad": 21.599999999999454,
+        "min": 5227.6,
+        "max": 8396.7,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/define_module",
+      "unit": "ns/call",
+      "backend": "NAPI deferred module source registration/replacement; import evaluation excluded",
+      "samples": [
+        1379.4,
+        1079,
+        1062.6,
+        1058.9,
+        1188.7,
+        1087.3,
+        1060.3,
+        1075.6,
+        1056.7,
+        1351.5,
+        1078.3,
+        1057.3,
+        1086.5,
+        1061,
+        1066.7
+      ],
+      "summary": {
+        "median": 1075.6,
+        "mad": 14.599999999999909,
+        "min": 1056.7,
+        "max": 1379.4,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/register_module",
+      "unit": "ns/call",
+      "backend": "NAPI eager module replacement, warmed identical source, export transaction and execution",
+      "samples": [
+        9090.6,
+        7344.8,
+        7662,
+        7882.2,
+        9061.4,
+        8836.6,
+        7632.1,
+        7590.4,
+        7361.8,
+        7788.8,
+        7763.8,
+        7590.4,
+        7970.5,
+        7720.9,
+        7368.6
+      ],
+      "summary": {
+        "median": 7720.9,
+        "mad": 161.30000000000018,
+        "min": 7344.8,
+        "max": 9090.6,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/has_module",
+      "unit": "ns/call",
+      "backend": "NAPI hasModule existing deferred module",
+      "samples": [
+        1910.9,
+        856.5,
+        860.4,
+        869,
+        875.4,
+        860.4,
+        858.8,
+        854.4,
+        873.7,
+        857.6,
+        858.1,
+        862.7,
+        858.8,
+        867.7,
+        855.9
+      ],
+      "summary": {
+        "median": 860.4,
+        "mad": 3.8999999999999773,
+        "min": 854.4,
+        "max": 1910.9,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/remove_module",
+      "unit": "ns/call",
+      "backend": "NAPI removeModule deferred source; reseeding excluded",
+      "samples": [
+        1365.7,
+        1213.6,
+        1195.8,
+        1206.7,
+        1209.1,
+        1198.6,
+        1194.5,
+        1209.1,
+        1200.1,
+        1214.3,
+        1204.4,
+        1199.8,
+        1229.8,
+        1220.8,
+        1196.6
+      ],
+      "summary": {
+        "median": 1206.7,
+        "mad": 7.599999999999909,
+        "min": 1194.5,
+        "max": 1365.7,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/list_modules",
+      "unit": "ns/call",
+      "backend": "NAPI listModules existing small registry and outbound string array",
+      "samples": [
+        1610.2,
+        1387.3,
+        1410.1,
+        1344.2,
+        1331.5,
+        1307,
+        1320.2,
+        1326.5,
+        1332.3,
+        1326.1,
+        1332.7,
+        1335.3,
+        1314.8,
+        1304.9,
+        1311.1
+      ],
+      "summary": {
+        "median": 1331.5,
+        "mad": 12.700000000000045,
+        "min": 1304.9,
+        "max": 1610.2,
+        "count": 15
+      }
+    },
+    {
+      "name": "node_api/collect_cycles_idle",
+      "unit": "ns/call",
+      "backend": "NAPI explicit cycle collection on retained owner without deliberately created garbage",
+      "samples": [
+        1156114.7,
+        961016.5,
+        1021794.8,
+        892842.1,
+        1135738.6,
+        747223.9,
+        906792.5,
+        801156.6,
+        813659.1,
+        654415.3,
+        989196.6,
+        909851.9,
+        914573.1,
+        828741.4,
+        980609.2
+      ],
+      "summary": {
+        "median": 909851.9,
+        "mad": 81110.5,
+        "min": 654415.3,
+        "max": 1156114.7,
+        "count": 15
+      }
+    },
+    {
+      "name": "criterion/frontend/lex_big_source",
+      "unit": "ns/iteration",
+      "samples": [
+        4779839.0,
+        4855500.25,
+        4872556.166666667,
+        4850538.5,
+        4891261.4,
+        4921450.083333333,
+        5042130.071428572,
+        5304684.3125,
+        5399550.5,
+        5371968.75
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 4906355.741666667,
+        "mad": 91166.99166666716,
+        "min": 4779839.0,
+        "max": 5399550.5,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/frontend/parse_big_source",
+      "unit": "ns/iteration",
+      "samples": [
+        11238940.0,
+        11430496.0,
+        11160433.0,
+        11320854.5,
+        11297346.6,
+        10556413.666666666,
+        10473120.42857143,
+        11536793.625,
+        12479434.444444444,
+        12021038.8
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 11309100.55,
+        "mad": 188180.3125,
+        "min": 10473120.42857143,
+        "max": 12479434.444444444,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/language_metadata/1_documents_changed",
+      "unit": "ns/iteration",
+      "samples": [
+        155469.2105263158,
+        146384.76315789475,
+        143426.22222222222,
+        150721.81578947368,
+        154576.1157894737,
+        152056.70467836258,
+        161655.5037593985,
+        143050.05263157896,
+        149275.9044834308,
+        145952.71929824562
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 149998.86013645225,
+        "mad": 4311.6982456140395,
+        "min": 143050.05263157896,
+        "max": 161655.5037593985,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/language_metadata/1_documents_unchanged",
+      "unit": "ns/iteration",
+      "samples": [
+        314.12999286733236,
+        294.4773983594865,
+        241.93868877793628,
+        245.01361150737043,
+        251.61001545411318,
+        240.19865469963545,
+        255.35778394810134,
+        268.1689327746077,
+        289.24630818407564,
+        256.3179178554446
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 255.83785090177298,
+        "mad": 13.11512199833571,
+        "min": 240.19865469963545,
+        "max": 314.12999286733236,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/language_metadata/20_documents_changed",
+      "unit": "ns/iteration",
+      "samples": [
+        2709088.75,
+        3043136.0,
+        2755593.3333333335,
+        3011472.75,
+        2684868.85,
+        2642120.9583333335,
+        3146190.5,
+        2646994.28125,
+        2718439.027777778,
+        2716230.675
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 2717334.851388889,
+        "mad": 54299.526041666744,
+        "min": 2642120.9583333335,
+        "max": 3146190.5,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/language_metadata/20_documents_unchanged",
+      "unit": "ns/iteration",
+      "samples": [
+        236.458989320709,
+        247.3787570186062,
+        242.16224448603617,
+        238.58237228889135,
+        245.58059561818783,
+        241.75641766670336,
+        239.93589673015524,
+        248.01125729384566,
+        240.5878380858013,
+        256.1709154464384
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 241.95933107636978,
+        "mad": 3.4991116646482396,
+        "min": 236.458989320709,
+        "max": 256.1709154464384,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/plugin_call/direct_call_json",
+      "unit": "ns/iteration",
+      "samples": [
+        176167.5576923077,
+        195914.89423076922,
+        181504.37179487178,
+        197781.63942307694,
+        193413.9076923077,
+        166955.8205128205,
+        209967.24725274724,
+        168458.10576923078,
+        166666.51923076922,
+        208059.37692307692
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 187459.13974358974,
+        "mad": 15146.308012820504,
+        "min": 166666.51923076922,
+        "max": 209967.24725274724,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/plugin_call/legacy_wrapper_eval",
+      "unit": "ns/iteration",
+      "samples": [
+        2697057.4,
+        2453709.7,
+        2428796.8,
+        2362209.9,
+        2506723.56,
+        2490037.3333333335,
+        2218193.285714286,
+        2189963.05,
+        2213243.066666667,
+        2358983.6
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 2395503.3499999996,
+        "mad": 102877.09666666714,
+        "min": 2189963.05,
+        "max": 2697057.4,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/run/arithmetic_loop",
+      "unit": "ns/iteration",
+      "samples": [
+        8969281.0,
+        9329067.0,
+        9193816.666666666,
+        9145170.75,
+        10862328.6,
+        9386165.5,
+        9746275.714285715,
+        9782313.875,
+        9290699.0,
+        9279133.1
+      ],
+      "backend": "AST fresh",
+      "summary": {
+        "median": 9309883.0,
+        "mad": 140389.29166666698,
+        "min": 8969281.0,
+        "max": 10862328.6,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/run/array_chain",
+      "unit": "ns/iteration",
+      "samples": [
+        15800708.0,
+        13662016.0,
+        13415096.666666666,
+        11827760.0,
+        12652392.2,
+        13704744.166666666,
+        14476300.0,
+        13562839.25,
+        13557824.444444444,
+        12649391.2
+      ],
+      "backend": "AST fresh",
+      "summary": {
+        "median": 13560331.847222222,
+        "mad": 526587.4138888894,
+        "min": 11827760.0,
+        "max": 15800708.0,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/run/closures",
+      "unit": "ns/iteration",
+      "samples": [
+        12525213.0,
+        12611005.5,
+        12559679.333333334,
+        12592818.5,
+        12599177.6,
+        13032718.833333334,
+        12632924.714285715,
+        13168990.75,
+        13804559.777777778,
+        14202318.7
+      ],
+      "backend": "AST fresh",
+      "summary": {
+        "median": 12621965.107142858,
+        "mad": 79518.94047619123,
+        "min": 12525213.0,
+        "max": 14202318.7,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/run/json_roundtrip",
+      "unit": "ns/iteration",
+      "samples": [
+        9428297.0,
+        9756999.0,
+        9683452.0,
+        9825846.75,
+        9618310.4,
+        9505306.0,
+        10424761.285714285,
+        9547484.375,
+        9872647.333333334,
+        9503837.3
+      ],
+      "backend": "AST fresh",
+      "summary": {
+        "median": 9650881.2,
+        "mad": 146309.54999999888,
+        "min": 9428297.0,
+        "max": 10424761.285714285,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/run/property_updates",
+      "unit": "ns/iteration",
+      "samples": [
+        9115348.0,
+        9222506.0,
+        9577742.0,
+        9480976.25,
+        9303285.6,
+        8893070.0,
+        8782632.714285715,
+        8863300.75,
+        8997414.777777778,
+        9645488.9
+      ],
+      "backend": "AST fresh",
+      "summary": {
+        "median": 9168927.0,
+        "mad": 290741.625,
+        "min": 8782632.714285715,
+        "max": 9645488.9,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/run/recursion_fib",
+      "unit": "ns/iteration",
+      "samples": [
+        4605384.5,
+        4476791.0,
+        4544577.333333333,
+        4465348.125,
+        4555238.4,
+        5054024.5,
+        4915882.214285715,
+        4726460.9375,
+        4608330.555555556,
+        4489949.65
+      ],
+      "backend": "AST fresh",
+      "summary": {
+        "median": 4580311.45,
+        "mad": 96941.125,
+        "min": 4465348.125,
+        "max": 5054024.5,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/run/string_ops",
+      "unit": "ns/iteration",
+      "samples": [
+        12185272.0,
+        11256163.0,
+        11173580.333333334,
+        11711971.75,
+        11553298.2,
+        10859577.166666666,
+        13021464.857142856,
+        12291521.625,
+        10825609.0,
+        10500390.5
+      ],
+      "backend": "AST fresh",
+      "summary": {
+        "median": 11404730.6,
+        "mad": 562137.5166666666,
+        "min": 10500390.5,
+        "max": 13021464.857142856,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/tiers/call_tiny_hot",
+      "unit": "ns/iteration",
+      "samples": [
+        1534050.8333333333,
+        1835510.6666666667,
+        1418223.6666666667,
+        1454682.2916666667,
+        1440029.9,
+        1575477.0833333333,
+        1706051.0238095238,
+        1560925.2916666667,
+        1445592.0555555555,
+        1422679.8833333333
+      ],
+      "backend": "bytecode asserted",
+      "summary": {
+        "median": 1494366.5625,
+        "mad": 69122.70416666672,
+        "min": 1418223.6666666667,
+        "max": 1835510.6666666667,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/tiers/gc_collect",
+      "unit": "ns/iteration",
+      "samples": [
+        4777690.5,
+        5499447.5,
+        5239110.333333333,
+        5516801.0,
+        5349039.9,
+        5071386.666666667,
+        4482583.5,
+        4313189.25,
+        4679692.5,
+        4776515.1
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 4924538.583333334,
+        "mad": 369536.53333333274,
+        "min": 4313189.25,
+        "max": 5516801.0,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/tiers/prop_mega_hot",
+      "unit": "ns/iteration",
+      "samples": [
+        1862012.3333333333,
+        2181596.6666666665,
+        1859598.888888889,
+        1791423.9583333333,
+        1995331.1666666667,
+        1845814.6666666667,
+        1916256.5714285714,
+        1811473.375,
+        1969977.9074074074,
+        1827156.7833333334
+      ],
+      "backend": "bytecode asserted",
+      "summary": {
+        "median": 1860805.611111111,
+        "mad": 52391.59821428568,
+        "min": 1791423.9583333333,
+        "max": 2181596.6666666665,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/tiers/prop_mono_hot",
+      "unit": "ns/iteration",
+      "samples": [
+        740310.2857142857,
+        647421.3571428572,
+        648908.8333333334,
+        553985.5535714285,
+        560114.2,
+        563565.5119047619,
+        561254.9285714285,
+        574324.6964285715,
+        605562.3253968254,
+        587937.9714285714
+      ],
+      "backend": "bytecode asserted",
+      "summary": {
+        "median": 581131.3339285714,
+        "mad": 22724.062698412745,
+        "min": 553985.5535714285,
+        "max": 740310.2857142857,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/tiers/shape_churn",
+      "unit": "ns/iteration",
+      "samples": [
+        1581341.1666666667,
+        1592861.25,
+        1594237.0,
+        1587136.9166666667,
+        1618715.4666666666,
+        1523102.5555555555,
+        1494068.738095238,
+        1534611.3125,
+        1513911.111111111,
+        1557029.1166666667
+      ],
+      "backend": "bytecode asserted",
+      "summary": {
+        "median": 1569185.1416666666,
+        "mad": 29812.84375,
+        "min": 1494068.738095238,
+        "max": 1618715.4666666666,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/warm/class_methods_reused_vm",
+      "unit": "ns/iteration",
+      "samples": [
+        12099804.0,
+        12598856.5,
+        13380498.333333334,
+        13152998.5,
+        12816184.0,
+        12200602.5,
+        12354504.857142856,
+        11879366.125,
+        12750818.666666666,
+        11989627.8
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 12476680.67857143,
+        "mad": 358190.0,
+        "min": 11879366.125,
+        "max": 13380498.333333334,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/warm/property_updates_ast",
+      "unit": "ns/iteration",
+      "samples": [
+        5002794.0,
+        4756131.75,
+        4840016.0,
+        4818332.25,
+        4797078.5,
+        4753173.666666667,
+        4792973.285714285,
+        4673809.5625,
+        5310864.166666667,
+        5126423.75
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 4807705.375,
+        "mad": 53052.66666666651,
+        "min": 4673809.5625,
+        "max": 5310864.166666667,
+        "count": 10
+      }
+    },
+    {
+      "name": "scheduler-rust/timers/100",
+      "unit": "ns/batch",
+      "samples": [
+        18947.0,
+        18947.0,
+        18737.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 18947.0,
+        "mad": 0.0,
+        "min": 18737.0,
+        "max": 18947.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/cancel/100",
+      "unit": "ns/batch",
+      "samples": [
+        21474.0,
+        15599.0,
+        15389.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 15599.0,
+        "mad": 210.0,
+        "min": 15389.0,
+        "max": 21474.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/timers/1000",
+      "unit": "ns/batch",
+      "samples": [
+        378218.0,
+        380398.0,
+        368340.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 378218.0,
+        "mad": 2180.0,
+        "min": 368340.0,
+        "max": 380398.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/cancel/1000",
+      "unit": "ns/batch",
+      "samples": [
+        391784.0,
+        376244.0,
+        379593.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 379593.0,
+        "mad": 3349.0,
+        "min": 376244.0,
+        "max": 391784.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/timers/10000",
+      "unit": "ns/batch",
+      "samples": [
+        6393817.0,
+        5999182.0,
+        6339897.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 6339897.0,
+        "mad": 53920.0,
+        "min": 5999182.0,
+        "max": 6393817.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/cancel/10000",
+      "unit": "ns/batch",
+      "samples": [
+        7063194.0,
+        5860140.0,
+        6056606.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 6056606.0,
+        "mad": 196466.0,
+        "min": 5860140.0,
+        "max": 7063194.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/vm/timers",
+      "unit": "ns/batch",
+      "samples": [
+        8502290.0,
+        7186035.0,
+        6802004.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 7186035.0,
+        "mad": 384031.0,
+        "min": 6802004.0,
+        "max": 8502290.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/vm/cancel",
+      "unit": "ns/batch",
+      "samples": [
+        5773918.0,
+        5475052.0,
+        5431330.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 5475052.0,
+        "mad": 43722.0,
+        "min": 5431330.0,
+        "max": 5773918.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/vm/promises",
+      "unit": "ns/batch",
+      "samples": [
+        32735114.0,
+        31841202.0,
+        32355969.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 32355969.0,
+        "mad": 379145.0,
+        "min": 31841202.0,
+        "max": 32735114.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/vm/mixed",
+      "unit": "ns/batch",
+      "samples": [
+        11307420.0,
+        10617876.0,
+        10418633.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 10617876.0,
+        "mad": 199243.0,
+        "min": 10418633.0,
+        "max": 11307420.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-node-legacy/trivial-async",
+      "unit": "ns/call",
+      "samples": [
+        13002.00000000018,
+        10299.000000003389,
+        10607.000000000255
+      ],
+      "backend": "scheduler-node-legacy; individual samples are per-run p50",
+      "summary": {
+        "median": 10607.000000000255,
+        "mad": 307.9999999968659,
+        "min": 10299.000000003389,
+        "max": 13002.00000000018,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-node-legacy/awaited-host-async",
+      "unit": "ns/call",
+      "samples": [
+        31638.999999984208,
+        25558.99999998701,
+        30970.999999965443
+      ],
+      "backend": "scheduler-node-legacy; individual samples are per-run p50",
+      "summary": {
+        "median": 30970.999999965443,
+        "mad": 668.0000000187647,
+        "min": 25558.99999998701,
+        "max": 31638.999999984208,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-node-persistent/trivial-async",
+      "unit": "ns/call",
+      "samples": [
+        11411.999999999978,
+        11693.000000001064,
+        10798.000000001195
+      ],
+      "backend": "scheduler-node-persistent; individual samples are per-run p50",
+      "summary": {
+        "median": 11411.999999999978,
+        "mad": 281.00000000108594,
+        "min": 10798.000000001195,
+        "max": 11693.000000001064,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-node-persistent/awaited-host-async",
+      "unit": "ns/call",
+      "samples": [
+        26451.000000008662,
+        26273.00000000332,
+        29101.99999996621
+      ],
+      "backend": "scheduler-node-persistent; individual samples are per-run p50",
+      "summary": {
+        "median": 26451.000000008662,
+        "mad": 178.00000000534055,
+        "min": 26273.00000000332,
+        "max": 29101.99999996621,
+        "count": 3
+      }
+    },
+    {
+      "name": "trusted-node/payload_64_p50",
+      "unit": "ns",
+      "samples": [
+        873003.0000000113,
+        690808.0000000041,
+        450895.00000000274
+      ],
+      "backend": "trusted-node; individual samples are per-run p50",
+      "summary": {
+        "median": 690808.0000000041,
+        "mad": 182195.00000000722,
+        "min": 450895.00000000274,
+        "max": 873003.0000000113,
+        "count": 3
+      }
+    },
+    {
+      "name": "trusted-node/payload_4096_p50",
+      "unit": "ns",
+      "samples": [
+        1048959.000000025,
+        1237149.9999999856,
+        997735.0000000342
+      ],
+      "backend": "trusted-node; individual samples are per-run p50",
+      "summary": {
+        "median": 1048959.000000025,
+        "mad": 51223.99999999069,
+        "min": 997735.0000000342,
+        "max": 1237149.9999999856,
+        "count": 3
+      }
+    },
+    {
+      "name": "trusted-node/payload_262144_p50",
+      "unit": "ns",
+      "samples": [
+        8541414.000000032,
+        9311117.000000024,
+        8903039.999999976
+      ],
+      "backend": "trusted-node; individual samples are per-run p50",
+      "summary": {
+        "median": 8903039.999999976,
+        "mad": 361625.9999999441,
+        "min": 8541414.000000032,
+        "max": 9311117.000000024,
+        "count": 3
+      }
+    },
+    {
+      "name": "trusted-node/payload_1048576_p50",
+      "unit": "ns",
+      "samples": [
+        31812088.00000002,
+        35825198.0,
+        29477886.00000001
+      ],
+      "backend": "trusted-node; individual samples are per-run p50",
+      "summary": {
+        "median": 31812088.00000002,
+        "mad": 2334202.0000000075,
+        "min": 29477886.00000001,
+        "max": 35825198.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "trusted-node/startup",
+      "unit": "ns",
+      "samples": [
+        144259982.99999997,
+        146721226.0,
+        145199787.0
+      ],
+      "backend": "trusted-node; individual samples are per-run p50",
+      "summary": {
+        "median": 145199787.0,
+        "mad": 939804.0000000298,
+        "min": 144259982.99999997,
+        "max": 146721226.0,
+        "count": 3
+      }
+    }
+  ]
+}

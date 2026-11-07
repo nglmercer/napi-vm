@@ -1,0 +1,115 @@
+{
+  "before": {
+    "artifact_hashes": {
+      "napi-vm.node": "1a83ac5144b1812860cb9098fca6e5467f1593f80c5d3991f27bc3ff216702fe",
+      "workloads.json": "e46a8ca7b23838af65ce70c5149d62d4dac071cddfb1b3b5b34ef5bec988f22c",
+      "wasm/.gitignore": "684888c0ebb17f374298b65ee2807526c066094c701bcc7ebbe1c1095f494fc1",
+      "wasm/README.md": "743a2ece7252a92719e247d9400d519c1377fcab8f9731f9be9f108ce642c9a2",
+      "wasm/napi_vm.d.ts": "de1b6f4ff305fb2bd04c40a1b812952bfbbaa2fb7e3bc019880736ee338638de",
+      "wasm/napi_vm.js": "10dda60572ad51da70df029dfd1bd248cf4d941ae4f9e542e9d77948abde3395",
+      "wasm/napi_vm_bg.wasm": "42d03ead31eee9096870ed9b6530f36983e1b268b2190f5eb6966cbdb5c13811",
+      "wasm/napi_vm_bg.wasm.d.ts": "9c64cabad3c36b2bfa4dc13d01ee1a88f20923830bb96ed989c2d18aa65e7ba1",
+      "wasm/package.json": "333a0e50850eb4e643089ae63d48b774e30e7bc5b3b8a0df189bd2417aa27f7f"
+    },
+    "build_record_sha256": "4afffa90eaf679ee5ff2e423b8b217b6b4d678c86f6346309a6740108e6905ce"
+  },
+  "after": {
+    "artifact_hashes": {
+      "napi-vm.node": "1a83ac5144b1812860cb9098fca6e5467f1593f80c5d3991f27bc3ff216702fe",
+      "workloads.json": "e46a8ca7b23838af65ce70c5149d62d4dac071cddfb1b3b5b34ef5bec988f22c",
+      "wasm/.gitignore": "684888c0ebb17f374298b65ee2807526c066094c701bcc7ebbe1c1095f494fc1",
+      "wasm/README.md": "743a2ece7252a92719e247d9400d519c1377fcab8f9731f9be9f108ce642c9a2",
+      "wasm/napi_vm.d.ts": "de1b6f4ff305fb2bd04c40a1b812952bfbbaa2fb7e3bc019880736ee338638de",
+      "wasm/napi_vm.js": "23fab92475db28ee9fe1305268e7087e59cee5be6bc229765192a0cf4160056e",
+      "wasm/napi_vm_bg.wasm": "db534fe0a8efbac1bcef6c277afff0e2a1866ae09802b9387991cddd1c9db14f",
+      "wasm/napi_vm_bg.wasm.d.ts": "9c64cabad3c36b2bfa4dc13d01ee1a88f20923830bb96ed989c2d18aa65e7ba1",
+      "wasm/package.json": "dafb501250183769eba3bbcfe1196974e21f9818c2eda1587e9a4c8c8729763f",
+      "wasm/snippets/napi-vm-a8025882a4035791/inline0.js": "9f17702b18a5ac244fcf5a5cfb16e8b240dccf7864e8e43107f58d3687bd02a4"
+    },
+    "build_record_sha256": "c2d4dd95a95ccd8247b94aa0f700641e0ffd776980a0d0401fac130780f8036e"
+  },
+  "packed_archive": {
+    "path": "artifacts/performance/platform-pack-check/napi-vm-0.1.5.tgz",
+    "sha256": "560de1e3d6d7abeae743522b59d541e4a7a37cc82fad2aaa102cc863338a6240",
+    "compiled_wasm_matches_after": true
+  },
+  "core_gate": {
+    "unchanged_inputs": 166,
+    "worker_sha256": "2e7c92633c70801693281f179e1372a5b9a51bbf74fff36b46bfe493a02ab603",
+    "gate": "../collection-index-2026-11-07/source-checks.json",
+    "variants": 102992,
+    "note": "No core-worker inputs changed. This is source-equivalence evidence for the previous core gate, not a WASM binding gate."
+  },
+  "full_suite": {
+    "manifest_sha256": "23f958896e04c2dd43fa56bec2c0ee5b1e5694b4af7e74aa8c7216b88bb34e0d",
+    "reports": [
+      {
+        "group": "host",
+        "path": "host/baseline.json",
+        "sha256": "de9422360c0f832d3c50a161cb96eac5f55780e670f01cd137c79fe574302ea5",
+        "result_rows": 81
+      },
+      {
+        "group": "engines",
+        "path": "engines.json",
+        "sha256": "4c7ced0bdd83db017c385f9b812ac4c310ff221c989a258e56907d123dac8efe",
+        "result_rows": 390
+      },
+      {
+        "group": "memory",
+        "path": "memory.json",
+        "sha256": "c5af5921833493080f63670225aa4bc59befea7397d89805d4cb8f67960c06fa",
+        "result_rows": 8
+      },
+      {
+        "group": "http",
+        "path": "http.json",
+        "sha256": "af45e1e88af91a2af0760570563dcbf199eaa1f0b297cd5e9b1ad0bf44c065a9",
+        "result_rows": 4
+      },
+      {
+        "group": "platforms",
+        "path": "platforms.json",
+        "sha256": "102d101ffb9853ee4e87bb9893cd30679b95f254c33a00f40eea6492777bd152",
+        "result_rows": 398
+      }
+    ]
+  },
+  "source_snapshots": {
+    "bench/platforms.py": "6d17dd6009a22dc42700f1125891b28dc830b24d6a6a7e247e49b0bbbaf6ef83",
+    "bench/performance/platforms.cjs": "a438e3b262099bb61f019d4527cd109978551ff584de3496e12e5a5c3791e9b3",
+    "bench/platform_ratios.py": "5c1ef270366f6ff12a64fa2efe0de485e5025e9890dc6ba4e21f6b2baeb288e1",
+    "bench/performance/wasm-imports.mjs": "f65959e15f9b09eadf97fc0db09610a1a14a946ad97f5724a26bd3bdb7cacd4e",
+    "bench/suite.py": "f89174c692dcbcf94bcb1e3a1443a03c74dd825934164230469bff309a7892ed",
+    "bench/rquickjs.py": "2c32173e684e80189e3a6cad4258ce6a84d3491e4c12ff000facecc570abe892",
+    "bench/rquickjs/src/main.rs": "a2c8bdefa2228e0530cb30a67e20c1c9fac830092729ff560ed2c3eaf59405b7",
+    "tools/ci/wasm-package.mjs": "b62258606ae23e23a251c2dbc622816407a9ef726437b66449924eaf1801b1f1",
+    "tests/wasm/browser-build.test.mjs": "29ba81b2da35e35dbf9ec845e76d55e257d88f9398c4f93a6b14603773803c9c",
+    "tests/node/wasm-package.test.js": "34fad1f083b53aeebe70eadc6cac86064b6d534ea69f7f0aebf3d963b45ce50b"
+  },
+  "schema": 1,
+  "status": "passed",
+  "utc": "2026-11-07T11:21:45.530987+00:00",
+  "pair_order": [
+    "after-1",
+    "before-1",
+    "before-2",
+    "after-2"
+  ],
+  "correctness": {
+    "wasm_tests": 20,
+    "wasm_skips": 0,
+    "package_tests": 2,
+    "benchmark_validator_tests": 21,
+    "wasm_clippy": "passed",
+    "packed_archive_wasm_tests": 20,
+    "vite_build": "passed"
+  },
+  "limitations": [
+    "No CPU isolation; unrelated browser/e2e activity observed during after-1. Keep both pairs and controls; no significance or latency-neutrality claim.",
+    "Paired optimization captures use fixed 49 fixtures; the new full suite uses 65. These are different fixture matrices and must not be compared as one pair.",
+    "Tiny-call WASM after/before ratios are 0.739 and 0.928; the second reduction is close to observed process scatter. No stable percentage latency gain is established.",
+    "Heavy-program movement is not attributed to result-construction overhead; changed WASM code/layout and host variation are not isolated.",
+    "Import wrappers are diagnostics, not latency samples. Node-hosted WASM is not browser UI performance."
+  ]
+}

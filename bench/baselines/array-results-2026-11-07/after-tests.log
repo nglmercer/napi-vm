@@ -1,0 +1,74 @@
+   Compiling napi-vm-core v0.1.5 (/home/meme/Documentos/Default Project/node-vm/crates/napi-vm-core)
+   Compiling napi-vm v0.1.5 (/home/meme/Documentos/Default Project/node-vm)
+    Finished `ci` profile [unoptimized] target(s) in 20.38s
+     Running tests/array_elisions.rs (target/ci/deps/array_elisions-d7d1672ce86e1b90)
+
+running 7 tests
+test elided_destructuring_skips_iterator_values ... ok
+test spreads_materialize_holes_but_preserve_surrounding_elisions ... ok
+test elisions_observe_inherited_elements_without_owning_them ... ok
+test searches_visit_inherited_accessors_and_read_elements_live ... ok
+test searches_coerce_indices_and_support_array_like_receivers ... ok
+test elisions_contribute_length_without_creating_properties ... ok
+test indexed_writes_preserve_inherited_setters_and_receiver_descriptors ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests/array_generic_quick_wins.rs (target/ci/deps/array_generic_quick_wins-ddd9ca79de436581)
+
+running 7 tests
+test reverse_handles_generic_holes_inheritance_and_partial_failure ... ok
+test reverse_observes_has_get_delete_and_set_order ... ok
+test fill_coerces_before_writing_and_throws_on_rejected_writes ... ok
+test callbacks_use_logical_lengths_and_inherited_elements ... ok
+test callbacks_box_receivers_and_snapshot_length ... ok
+test to_sorted_is_dense_stable_and_does_not_use_species ... ok
+test generic_callback_iteration_respects_execution_limits ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+     Running tests/array_growth_audit.rs (target/ci/deps/array_growth_audit-2669dc630ca2643e)
+
+running 6 tests
+test indexed_append_preserves_dense_and_holey_arrays ... ok
+test filling_holes_preserves_presence_through_later_mutations ... ok
+test dense_iterator_drain_keeps_budget_and_partial_cursor ... ok
+test fill_checks_descriptors_after_coercion_and_preserves_partial_writes ... ok
+test dense_iterator_drain_preserves_cursor_overrides_and_live_getters ... ok
+test object_assign_rejects_a_new_key_at_the_distinct_property_limit ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+
+     Running tests/array_milestone.rs (target/ci/deps/array_milestone-701ad46151bad7d7)
+
+running 4 tests
+test array_join_observes_getters_and_string_conversion ... ok
+test array_sort_is_generic_and_uses_throwing_writes ... ok
+test array_locale_string_passes_arguments_and_validates_methods ... ok
+test typed_array_join_uses_observable_separator_conversion ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/array_mutation_quick_wins.rs (target/ci/deps/array_mutation_quick_wins-94aa68cde45a2eea)
+
+running 8 tests
+test native_arrays_observe_descriptors_and_partial_mutation ... ok
+test bounded_searches_preserve_the_existing_execution_policy ... ok
+test searches_use_logical_indexes_and_skip_holes ... ok
+test mutations_observe_proxy_operation_order ... ok
+test push_and_pop_use_logical_lengths_and_throwing_writes ... ok
+test map_and_filter_preserve_species_and_callback_order ... ok
+test shift_and_unshift_preserve_holes_and_inherited_elements ... ok
+test new_generic_loops_obey_execution_budgets ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+     Running tests/array_result_fast_path.rs (target/ci/deps/array_result_fast_path-1ec268eb7921ef6b)
+
+running 3 tests
+test holes_and_function_values_remain_data_properties ... ok
+test proxies_and_protected_properties_keep_define_semantics ... ok
+test species_result_rechecked_after_each_callback ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+

@@ -1,0 +1,3598 @@
+{
+  "schema": 1,
+  "results": [
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "startup_dominated",
+      "unit": "ns/call",
+      "before_median": 3547538,
+      "after_median": 3547538,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "startup_dominated",
+      "unit": "ns/call",
+      "before_median": 21485,
+      "after_median": 21485,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "startup_dominated",
+      "unit": "ns/call",
+      "before_median": 4233908.666666667,
+      "after_median": 4233908.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "startup_dominated",
+      "unit": "ns/call",
+      "before_median": 36917.666666666664,
+      "after_median": 36917.666666666664,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "startup_dominated",
+      "unit": "ns/call",
+      "before_median": 539936.3333333334,
+      "after_median": 539936.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "startup_dominated",
+      "unit": "ns/call",
+      "before_median": 41034,
+      "after_median": 41034,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "arithmetic_loop",
+      "unit": "ns/call",
+      "before_median": 5587222.666666667,
+      "after_median": 5587222.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "arithmetic_loop",
+      "unit": "ns/call",
+      "before_median": 2010483,
+      "after_median": 2010483,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "arithmetic_loop",
+      "unit": "ns/call",
+      "before_median": 7097059.333333333,
+      "after_median": 7097059.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "arithmetic_loop",
+      "unit": "ns/call",
+      "before_median": 2798887,
+      "after_median": 2798887,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "arithmetic_loop",
+      "unit": "ns/call",
+      "before_median": 819855.6666666666,
+      "after_median": 819855.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "arithmetic_loop",
+      "unit": "ns/call",
+      "before_median": 46313.333333333336,
+      "after_median": 46313.333333333336,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "recursion_fib",
+      "unit": "ns/call",
+      "before_median": 3759010.3333333335,
+      "after_median": 3759010.3333333335,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "recursion_fib",
+      "unit": "ns/call",
+      "before_median": 136548,
+      "after_median": 136548,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "recursion_fib",
+      "unit": "ns/call",
+      "before_median": 4567143.666666667,
+      "after_median": 4567143.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "recursion_fib",
+      "unit": "ns/call",
+      "before_median": 183009.66666666666,
+      "after_median": 183009.66666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "recursion_fib",
+      "unit": "ns/call",
+      "before_median": 598023.6666666666,
+      "after_median": 598023.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "recursion_fib",
+      "unit": "ns/call",
+      "before_median": 51870.666666666664,
+      "after_median": 51870.666666666664,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "array_chain",
+      "unit": "ns/call",
+      "before_median": 11373290.666666666,
+      "after_median": 11373290.666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "array_chain",
+      "unit": "ns/call",
+      "before_median": 7170751,
+      "after_median": 7170751,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "array_chain",
+      "unit": "ns/call",
+      "before_median": 12968249.333333334,
+      "after_median": 12968249.333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "array_chain",
+      "unit": "ns/call",
+      "before_median": 8600182,
+      "after_median": 8600182,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "array_chain",
+      "unit": "ns/call",
+      "before_median": 772984.6666666666,
+      "after_median": 772984.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "array_chain",
+      "unit": "ns/call",
+      "before_median": 97048.66666666667,
+      "after_median": 97048.66666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "string_ops",
+      "unit": "ns/call",
+      "before_median": 10468193.666666666,
+      "after_median": 10468193.666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "string_ops",
+      "unit": "ns/call",
+      "before_median": 6233574.666666667,
+      "after_median": 6233574.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "string_ops",
+      "unit": "ns/call",
+      "before_median": 11773276.666666666,
+      "after_median": 11773276.666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "string_ops",
+      "unit": "ns/call",
+      "before_median": 7710828,
+      "after_median": 7710828,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "string_ops",
+      "unit": "ns/call",
+      "before_median": 735919,
+      "after_median": 735919,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "string_ops",
+      "unit": "ns/call",
+      "before_median": 117413.66666666667,
+      "after_median": 117413.66666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "closures",
+      "unit": "ns/call",
+      "before_median": 4031661,
+      "after_median": 4031661,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "closures",
+      "unit": "ns/call",
+      "before_median": 497718.6666666667,
+      "after_median": 497718.6666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "closures",
+      "unit": "ns/call",
+      "before_median": 4915458,
+      "after_median": 4915458,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "closures",
+      "unit": "ns/call",
+      "before_median": 587243.6666666666,
+      "after_median": 587243.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "closures",
+      "unit": "ns/call",
+      "before_median": 714360.6666666666,
+      "after_median": 714360.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "closures",
+      "unit": "ns/call",
+      "before_median": 44650,
+      "after_median": 44650,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "json_roundtrip",
+      "unit": "ns/call",
+      "before_median": 9062885.666666666,
+      "after_median": 9062885.666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "json_roundtrip",
+      "unit": "ns/call",
+      "before_median": 5417284,
+      "after_median": 5417284,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "json_roundtrip",
+      "unit": "ns/call",
+      "before_median": 10964702.333333334,
+      "after_median": 10964702.333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "json_roundtrip",
+      "unit": "ns/call",
+      "before_median": 6627546,
+      "after_median": 6627546,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "json_roundtrip",
+      "unit": "ns/call",
+      "before_median": 896255.6666666666,
+      "after_median": 896255.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "json_roundtrip",
+      "unit": "ns/call",
+      "before_median": 294861.6666666667,
+      "after_median": 294861.6666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "property_reads",
+      "unit": "ns/call",
+      "before_median": 5236570.333333333,
+      "after_median": 5236570.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "property_reads",
+      "unit": "ns/call",
+      "before_median": 1765380.6666666667,
+      "after_median": 1765380.6666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "property_reads",
+      "unit": "ns/call",
+      "before_median": 6825054.666666667,
+      "after_median": 6825054.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "property_reads",
+      "unit": "ns/call",
+      "before_median": 2414541.3333333335,
+      "after_median": 2414541.3333333335,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "property_reads",
+      "unit": "ns/call",
+      "before_median": 762558,
+      "after_median": 762558,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "property_reads",
+      "unit": "ns/call",
+      "before_median": 47015,
+      "after_median": 47015,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "property_updates",
+      "unit": "ns/call",
+      "before_median": 5954272.666666667,
+      "after_median": 5954272.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "property_updates",
+      "unit": "ns/call",
+      "before_median": 2450317.6666666665,
+      "after_median": 2450317.6666666665,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "property_updates",
+      "unit": "ns/call",
+      "before_median": 7691192.666666667,
+      "after_median": 7691192.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "property_updates",
+      "unit": "ns/call",
+      "before_median": 3213279,
+      "after_median": 3213279,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "property_updates",
+      "unit": "ns/call",
+      "before_median": 785476.3333333334,
+      "after_median": 785476.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "property_updates",
+      "unit": "ns/call",
+      "before_median": 45020,
+      "after_median": 45020,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "class_methods",
+      "unit": "ns/call",
+      "before_median": 15284807,
+      "after_median": 15284807,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "class_methods",
+      "unit": "ns/call",
+      "before_median": 11081813,
+      "after_median": 11081813,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "class_methods",
+      "unit": "ns/call",
+      "before_median": 18047864.333333332,
+      "after_median": 18047864.333333332,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "class_methods",
+      "unit": "ns/call",
+      "before_median": 12816372,
+      "after_median": 12816372,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "class_methods",
+      "unit": "ns/call",
+      "before_median": 826712.6666666666,
+      "after_median": 826712.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "class_methods",
+      "unit": "ns/call",
+      "before_median": 121487.33333333333,
+      "after_median": 121487.33333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "bitwise_loop",
+      "unit": "ns/call",
+      "before_median": 4483966.333333333,
+      "after_median": 4483966.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "bitwise_loop",
+      "unit": "ns/call",
+      "before_median": 966500.3333333334,
+      "after_median": 966500.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "bitwise_loop",
+      "unit": "ns/call",
+      "before_median": 5759146,
+      "after_median": 5759146,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "bitwise_loop",
+      "unit": "ns/call",
+      "before_median": 1212168.3333333333,
+      "after_median": 1212168.3333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "bitwise_loop",
+      "unit": "ns/call",
+      "before_median": 731618.3333333334,
+      "after_median": 731618.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "bitwise_loop",
+      "unit": "ns/call",
+      "before_median": 49845.666666666664,
+      "after_median": 49845.666666666664,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "array_index_updates",
+      "unit": "ns/call",
+      "before_median": 9432402,
+      "after_median": 9432402,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "array_index_updates",
+      "unit": "ns/call",
+      "before_median": 5939395,
+      "after_median": 5939395,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "array_index_updates",
+      "unit": "ns/call",
+      "before_median": 12218743,
+      "after_median": 12218743,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "array_index_updates",
+      "unit": "ns/call",
+      "before_median": 7676550.333333333,
+      "after_median": 7676550.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "array_index_updates",
+      "unit": "ns/call",
+      "before_median": 947681.6666666666,
+      "after_median": 947681.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "array_index_updates",
+      "unit": "ns/call",
+      "before_median": 57677.333333333336,
+      "after_median": 57677.333333333336,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "array_sort_numeric",
+      "unit": "ns/call",
+      "before_median": 12792921.666666666,
+      "after_median": 12792921.666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "array_sort_numeric",
+      "unit": "ns/call",
+      "before_median": 8700604,
+      "after_median": 8700604,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "array_sort_numeric",
+      "unit": "ns/call",
+      "before_median": 15070826.666666666,
+      "after_median": 15070826.666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "array_sort_numeric",
+      "unit": "ns/call",
+      "before_median": 10313771.666666666,
+      "after_median": 10313771.666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "array_sort_numeric",
+      "unit": "ns/call",
+      "before_median": 711768.3333333334,
+      "after_median": 711768.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "array_sort_numeric",
+      "unit": "ns/call",
+      "before_median": 85027.66666666667,
+      "after_median": 85027.66666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "map_set_get",
+      "unit": "ns/call",
+      "before_median": 7242190,
+      "after_median": 7242190,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "map_set_get",
+      "unit": "ns/call",
+      "before_median": 3795737,
+      "after_median": 3795737,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "map_set_get",
+      "unit": "ns/call",
+      "before_median": 8403850,
+      "after_median": 8403850,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "map_set_get",
+      "unit": "ns/call",
+      "before_median": 4582961.666666667,
+      "after_median": 4582961.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "map_set_get",
+      "unit": "ns/call",
+      "before_median": 723631.3333333334,
+      "after_median": 723631.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "map_set_get",
+      "unit": "ns/call",
+      "before_median": 102042.66666666667,
+      "after_median": 102042.66666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "set_add_has_delete",
+      "unit": "ns/call",
+      "before_median": 7905779.333333333,
+      "after_median": 7905779.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "set_add_has_delete",
+      "unit": "ns/call",
+      "before_median": 4440599.333333333,
+      "after_median": 4440599.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "set_add_has_delete",
+      "unit": "ns/call",
+      "before_median": 10161642.333333334,
+      "after_median": 10161642.333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "set_add_has_delete",
+      "unit": "ns/call",
+      "before_median": 5336791,
+      "after_median": 5336791,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "set_add_has_delete",
+      "unit": "ns/call",
+      "before_median": 748297,
+      "after_median": 748297,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "set_add_has_delete",
+      "unit": "ns/call",
+      "before_median": 101933,
+      "after_median": 101933,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "typed_array_index",
+      "unit": "ns/call",
+      "before_median": 3783838,
+      "after_median": 3783838,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "typed_array_index",
+      "unit": "ns/call",
+      "before_median": 455459,
+      "after_median": 455459,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "typed_array_index",
+      "unit": "ns/call",
+      "before_median": 5240662.333333333,
+      "after_median": 5240662.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "typed_array_index",
+      "unit": "ns/call",
+      "before_median": 637699.6666666666,
+      "after_median": 637699.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "typed_array_index",
+      "unit": "ns/call",
+      "before_median": 700934.3333333334,
+      "after_median": 700934.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "typed_array_index",
+      "unit": "ns/call",
+      "before_median": 47332,
+      "after_median": 47332,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "regexp_exec",
+      "unit": "ns/call",
+      "before_median": 6198737.333333333,
+      "after_median": 6198737.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "regexp_exec",
+      "unit": "ns/call",
+      "before_median": 2842381.3333333335,
+      "after_median": 2842381.3333333335,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "regexp_exec",
+      "unit": "ns/call",
+      "before_median": 7745894,
+      "after_median": 7745894,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "regexp_exec",
+      "unit": "ns/call",
+      "before_median": 3205485,
+      "after_median": 3205485,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "regexp_exec",
+      "unit": "ns/call",
+      "before_median": 797524.3333333334,
+      "after_median": 797524.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "regexp_exec",
+      "unit": "ns/call",
+      "before_median": 202222,
+      "after_median": 202222,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "unicode_strings",
+      "unit": "ns/call",
+      "before_median": 4149556.3333333335,
+      "after_median": 4149556.3333333335,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "unicode_strings",
+      "unit": "ns/call",
+      "before_median": 805630.3333333334,
+      "after_median": 805630.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "unicode_strings",
+      "unit": "ns/call",
+      "before_median": 5769235,
+      "after_median": 5769235,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "unicode_strings",
+      "unit": "ns/call",
+      "before_median": 1065668.3333333333,
+      "after_median": 1065668.3333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "unicode_strings",
+      "unit": "ns/call",
+      "before_median": 709503,
+      "after_median": 709503,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "unicode_strings",
+      "unit": "ns/call",
+      "before_median": 41867.333333333336,
+      "after_median": 41867.333333333336,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "prototype_getter",
+      "unit": "ns/call",
+      "before_median": 5121046.333333333,
+      "after_median": 5121046.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "prototype_getter",
+      "unit": "ns/call",
+      "before_median": 1764623.6666666667,
+      "after_median": 1764623.6666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "prototype_getter",
+      "unit": "ns/call",
+      "before_median": 6836142,
+      "after_median": 6836142,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "prototype_getter",
+      "unit": "ns/call",
+      "before_median": 2078291.6666666667,
+      "after_median": 2078291.6666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "prototype_getter",
+      "unit": "ns/call",
+      "before_median": 709064.6666666666,
+      "after_median": 709064.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "prototype_getter",
+      "unit": "ns/call",
+      "before_median": 85953,
+      "after_median": 85953,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "property_key_churn",
+      "unit": "ns/call",
+      "before_median": 6736180.666666667,
+      "after_median": 6736180.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "property_key_churn",
+      "unit": "ns/call",
+      "before_median": 3168546.6666666665,
+      "after_median": 3168546.6666666665,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "property_key_churn",
+      "unit": "ns/call",
+      "before_median": 7883538.333333333,
+      "after_median": 7883538.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "property_key_churn",
+      "unit": "ns/call",
+      "before_median": 3881170,
+      "after_median": 3881170,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "property_key_churn",
+      "unit": "ns/call",
+      "before_median": 1341768,
+      "after_median": 1341768,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "property_key_churn",
+      "unit": "ns/call",
+      "before_median": 451593.3333333333,
+      "after_median": 451593.3333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "exception_catch",
+      "unit": "ns/call",
+      "before_median": 3468143.3333333335,
+      "after_median": 3468143.3333333335,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "exception_catch",
+      "unit": "ns/call",
+      "before_median": 141684,
+      "after_median": 141684,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "exception_catch",
+      "unit": "ns/call",
+      "before_median": 4955037.333333333,
+      "after_median": 4955037.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "exception_catch",
+      "unit": "ns/call",
+      "before_median": 192891,
+      "after_median": 192891,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "exception_catch",
+      "unit": "ns/call",
+      "before_median": 873361,
+      "after_median": 873361,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "exception_catch",
+      "unit": "ns/call",
+      "before_median": 336895,
+      "after_median": 336895,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "spread_destructure",
+      "unit": "ns/call",
+      "before_median": 13998368.333333334,
+      "after_median": 13998368.333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "spread_destructure",
+      "unit": "ns/call",
+      "before_median": 10506897,
+      "after_median": 10506897,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "spread_destructure",
+      "unit": "ns/call",
+      "before_median": 17452623.666666668,
+      "after_median": 17452623.666666668,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "spread_destructure",
+      "unit": "ns/call",
+      "before_median": 12574578.333333334,
+      "after_median": 12574578.333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "spread_destructure",
+      "unit": "ns/call",
+      "before_median": 898082,
+      "after_median": 898082,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "spread_destructure",
+      "unit": "ns/call",
+      "before_median": 75795.33333333333,
+      "after_median": 75795.33333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "math_builtins",
+      "unit": "ns/call",
+      "before_median": 4651602.333333333,
+      "after_median": 4651602.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "math_builtins",
+      "unit": "ns/call",
+      "before_median": 1264027.6666666667,
+      "after_median": 1264027.6666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "math_builtins",
+      "unit": "ns/call",
+      "before_median": 6485980,
+      "after_median": 6485980,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "math_builtins",
+      "unit": "ns/call",
+      "before_median": 1604819,
+      "after_median": 1604819,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "math_builtins",
+      "unit": "ns/call",
+      "before_median": 1357461.3333333333,
+      "after_median": 1357461.3333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "math_builtins",
+      "unit": "ns/call",
+      "before_median": 592987.6666666666,
+      "after_median": 592987.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "bigint_arithmetic",
+      "unit": "ns/call",
+      "before_median": 3716341,
+      "after_median": 3716341,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "bigint_arithmetic",
+      "unit": "ns/call",
+      "before_median": 424844.3333333333,
+      "after_median": 424844.3333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "bigint_arithmetic",
+      "unit": "ns/call",
+      "before_median": 5345150.333333333,
+      "after_median": 5345150.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "bigint_arithmetic",
+      "unit": "ns/call",
+      "before_median": 568637.6666666666,
+      "after_median": 568637.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "bigint_arithmetic",
+      "unit": "ns/call",
+      "before_median": 614018.6666666666,
+      "after_median": 614018.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "bigint_arithmetic",
+      "unit": "ns/call",
+      "before_median": 84432.66666666667,
+      "after_median": 84432.66666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "cyclic_allocations",
+      "unit": "ns/call",
+      "before_median": 5205041,
+      "after_median": 5205041,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "cyclic_allocations",
+      "unit": "ns/call",
+      "before_median": 2533136,
+      "after_median": 2533136,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "cyclic_allocations",
+      "unit": "ns/call",
+      "before_median": 6786699.666666667,
+      "after_median": 6786699.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "cyclic_allocations",
+      "unit": "ns/call",
+      "before_median": 2990536,
+      "after_median": 2990536,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "cyclic_allocations",
+      "unit": "ns/call",
+      "before_median": 609478.3333333334,
+      "after_median": 609478.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "cyclic_allocations",
+      "unit": "ns/call",
+      "before_median": 73629,
+      "after_median": 73629,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "generator_iteration",
+      "unit": "ns/call",
+      "before_median": 4124661.6666666665,
+      "after_median": 4124661.6666666665,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "generator_iteration",
+      "unit": "ns/call",
+      "before_median": 696666.6666666666,
+      "after_median": 696666.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "generator_iteration",
+      "unit": "ns/call",
+      "before_median": 5224170,
+      "after_median": 5224170,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "generator_iteration",
+      "unit": "ns/call",
+      "before_median": 549372.6666666666,
+      "after_median": 549372.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "generator_iteration",
+      "unit": "ns/call",
+      "before_median": 644980.6666666666,
+      "after_median": 644980.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "generator_iteration",
+      "unit": "ns/call",
+      "before_median": 60469,
+      "after_median": 60469,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "custom_iterator",
+      "unit": "ns/call",
+      "before_median": 4181869.3333333335,
+      "after_median": 4181869.3333333335,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "custom_iterator",
+      "unit": "ns/call",
+      "before_median": 769806.3333333334,
+      "after_median": 769806.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "custom_iterator",
+      "unit": "ns/call",
+      "before_median": 5843342.666666667,
+      "after_median": 5843342.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "custom_iterator",
+      "unit": "ns/call",
+      "before_median": 956811.6666666666,
+      "after_median": 956811.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "custom_iterator",
+      "unit": "ns/call",
+      "before_median": 660727,
+      "after_median": 660727,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "custom_iterator",
+      "unit": "ns/call",
+      "before_median": 68424.33333333333,
+      "after_median": 68424.33333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "proxy_reflect_get",
+      "unit": "ns/call",
+      "before_median": 7090941.333333333,
+      "after_median": 7090941.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "proxy_reflect_get",
+      "unit": "ns/call",
+      "before_median": 3926057,
+      "after_median": 3926057,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "proxy_reflect_get",
+      "unit": "ns/call",
+      "before_median": 8729538.333333334,
+      "after_median": 8729538.333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "proxy_reflect_get",
+      "unit": "ns/call",
+      "before_median": 4613287.666666667,
+      "after_median": 4613287.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "proxy_reflect_get",
+      "unit": "ns/call",
+      "before_median": 980933.6666666666,
+      "after_median": 980933.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "proxy_reflect_get",
+      "unit": "ns/call",
+      "before_median": 336833.3333333333,
+      "after_median": 336833.3333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "reflect_define_property",
+      "unit": "ns/call",
+      "before_median": 9774999,
+      "after_median": 9774999,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "reflect_define_property",
+      "unit": "ns/call",
+      "before_median": 6025643.333333333,
+      "after_median": 6025643.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "reflect_define_property",
+      "unit": "ns/call",
+      "before_median": 13148052,
+      "after_median": 13148052,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "reflect_define_property",
+      "unit": "ns/call",
+      "before_median": 7937286.333333333,
+      "after_median": 7937286.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "reflect_define_property",
+      "unit": "ns/call",
+      "before_median": 2992471.6666666665,
+      "after_median": 2992471.6666666665,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "reflect_define_property",
+      "unit": "ns/call",
+      "before_median": 1123361.6666666667,
+      "after_median": 1123361.6666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "reflect_own_keys",
+      "unit": "ns/call",
+      "before_median": 17696196.333333332,
+      "after_median": 17696196.333333332,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "reflect_own_keys",
+      "unit": "ns/call",
+      "before_median": 14246247.666666666,
+      "after_median": 14246247.666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "reflect_own_keys",
+      "unit": "ns/call",
+      "before_median": 20933965.666666668,
+      "after_median": 20933965.666666668,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "reflect_own_keys",
+      "unit": "ns/call",
+      "before_median": 15099891.666666666,
+      "after_median": 15099891.666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "reflect_own_keys",
+      "unit": "ns/call",
+      "before_median": 1600490.6666666667,
+      "after_median": 1600490.6666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "reflect_own_keys",
+      "unit": "ns/call",
+      "before_median": 982832,
+      "after_median": 982832,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "date_utc_fields",
+      "unit": "ns/call",
+      "before_median": 4293234.333333333,
+      "after_median": 4293234.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "date_utc_fields",
+      "unit": "ns/call",
+      "before_median": 910214.3333333334,
+      "after_median": 910214.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "date_utc_fields",
+      "unit": "ns/call",
+      "before_median": 6026910,
+      "after_median": 6026910,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "date_utc_fields",
+      "unit": "ns/call",
+      "before_median": 1128786.6666666667,
+      "after_median": 1128786.6666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "date_utc_fields",
+      "unit": "ns/call",
+      "before_median": 722698.6666666666,
+      "after_median": 722698.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "date_utc_fields",
+      "unit": "ns/call",
+      "before_median": 97647,
+      "after_median": 97647,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "date_iso_parse",
+      "unit": "ns/call",
+      "before_median": 3634088.6666666665,
+      "after_median": 3634088.6666666665,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "date_iso_parse",
+      "unit": "ns/call",
+      "before_median": 265643.3333333333,
+      "after_median": 265643.3333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "date_iso_parse",
+      "unit": "ns/call",
+      "before_median": 5466305.333333333,
+      "after_median": 5466305.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "date_iso_parse",
+      "unit": "ns/call",
+      "before_median": 390899,
+      "after_median": 390899,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "date_iso_parse",
+      "unit": "ns/call",
+      "before_median": 718371,
+      "after_median": 718371,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "date_iso_parse",
+      "unit": "ns/call",
+      "before_median": 150986.33333333334,
+      "after_median": 150986.33333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "bigint_division_modulo",
+      "unit": "ns/call",
+      "before_median": 3977534,
+      "after_median": 3977534,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "bigint_division_modulo",
+      "unit": "ns/call",
+      "before_median": 627996.3333333334,
+      "after_median": 627996.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "bigint_division_modulo",
+      "unit": "ns/call",
+      "before_median": 5882969.333333333,
+      "after_median": 5882969.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "bigint_division_modulo",
+      "unit": "ns/call",
+      "before_median": 825852,
+      "after_median": 825852,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "bigint_division_modulo",
+      "unit": "ns/call",
+      "before_median": 605114.6666666666,
+      "after_median": 605114.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "bigint_division_modulo",
+      "unit": "ns/call",
+      "before_median": 69392.66666666667,
+      "after_median": 69392.66666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "string_replace_callback",
+      "unit": "ns/call",
+      "before_median": 26907334.666666668,
+      "after_median": 26907334.666666668,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "string_replace_callback",
+      "unit": "ns/call",
+      "before_median": 22298115.666666668,
+      "after_median": 22298115.666666668,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "string_replace_callback",
+      "unit": "ns/call",
+      "before_median": 34209976,
+      "after_median": 34209976,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "string_replace_callback",
+      "unit": "ns/call",
+      "before_median": 27387251,
+      "after_median": 27387251,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "string_replace_callback",
+      "unit": "ns/call",
+      "before_median": 1832745.6666666667,
+      "after_median": 1832745.6666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "string_replace_callback",
+      "unit": "ns/call",
+      "before_median": 1105840,
+      "after_median": 1105840,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "data_view_read_write",
+      "unit": "ns/call",
+      "before_median": 8564523.666666666,
+      "after_median": 8564523.666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "data_view_read_write",
+      "unit": "ns/call",
+      "before_median": 5188513.666666667,
+      "after_median": 5188513.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "data_view_read_write",
+      "unit": "ns/call",
+      "before_median": 11504836,
+      "after_median": 11504836,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "data_view_read_write",
+      "unit": "ns/call",
+      "before_median": 6502709.333333333,
+      "after_median": 6502709.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "data_view_read_write",
+      "unit": "ns/call",
+      "before_median": 760991,
+      "after_median": 760991,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "data_view_read_write",
+      "unit": "ns/call",
+      "before_median": 58459,
+      "after_median": 58459,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "typed_array_bulk_set",
+      "unit": "ns/call",
+      "before_median": 3676912,
+      "after_median": 3676912,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "typed_array_bulk_set",
+      "unit": "ns/call",
+      "before_median": 382671.6666666667,
+      "after_median": 382671.6666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "typed_array_bulk_set",
+      "unit": "ns/call",
+      "before_median": 5217388.666666667,
+      "after_median": 5217388.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "typed_array_bulk_set",
+      "unit": "ns/call",
+      "before_median": 500008,
+      "after_median": 500008,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "typed_array_bulk_set",
+      "unit": "ns/call",
+      "before_median": 601714.6666666666,
+      "after_median": 601714.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "typed_array_bulk_set",
+      "unit": "ns/call",
+      "before_median": 60520,
+      "after_median": 60520,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "weak_map_objects",
+      "unit": "ns/call",
+      "before_median": 5800951.666666667,
+      "after_median": 5800951.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "weak_map_objects",
+      "unit": "ns/call",
+      "before_median": 2657912.6666666665,
+      "after_median": 2657912.6666666665,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "weak_map_objects",
+      "unit": "ns/call",
+      "before_median": 8577453,
+      "after_median": 8577453,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "weak_map_objects",
+      "unit": "ns/call",
+      "before_median": 3266749.3333333335,
+      "after_median": 3266749.3333333335,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "weak_map_objects",
+      "unit": "ns/call",
+      "before_median": 674620,
+      "after_median": 674620,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "weak_map_objects",
+      "unit": "ns/call",
+      "before_median": 74299,
+      "after_median": 74299,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "weak_set_objects",
+      "unit": "ns/call",
+      "before_median": 6387603.666666667,
+      "after_median": 6387603.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "weak_set_objects",
+      "unit": "ns/call",
+      "before_median": 3161054.3333333335,
+      "after_median": 3161054.3333333335,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "weak_set_objects",
+      "unit": "ns/call",
+      "before_median": 8543745.333333334,
+      "after_median": 8543745.333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "weak_set_objects",
+      "unit": "ns/call",
+      "before_median": 3832312,
+      "after_median": 3832312,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "weak_set_objects",
+      "unit": "ns/call",
+      "before_median": 725283.3333333334,
+      "after_median": 725283.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "weak_set_objects",
+      "unit": "ns/call",
+      "before_median": 86897.33333333333,
+      "after_median": 86897.33333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "array_buffer_slice",
+      "unit": "ns/call",
+      "before_median": 4098855,
+      "after_median": 4098855,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "array_buffer_slice",
+      "unit": "ns/call",
+      "before_median": 771634,
+      "after_median": 771634,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "array_buffer_slice",
+      "unit": "ns/call",
+      "before_median": 5895837.666666667,
+      "after_median": 5895837.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "array_buffer_slice",
+      "unit": "ns/call",
+      "before_median": 935175.3333333334,
+      "after_median": 935175.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "array_buffer_slice",
+      "unit": "ns/call",
+      "before_median": 730549,
+      "after_median": 730549,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "array_buffer_slice",
+      "unit": "ns/call",
+      "before_median": 160367.33333333334,
+      "after_median": 160367.33333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "string_normalization",
+      "unit": "ns/call",
+      "before_median": 3793766,
+      "after_median": 3793766,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "string_normalization",
+      "unit": "ns/call",
+      "before_median": 566300.3333333334,
+      "after_median": 566300.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "string_normalization",
+      "unit": "ns/call",
+      "before_median": 5955947.333333333,
+      "after_median": 5955947.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "string_normalization",
+      "unit": "ns/call",
+      "before_median": 749303.6666666666,
+      "after_median": 749303.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "string_normalization",
+      "unit": "ns/call",
+      "before_median": 718524,
+      "after_median": 718524,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "string_normalization",
+      "unit": "ns/call",
+      "before_median": 153597.33333333334,
+      "after_median": 153597.33333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "sparse_array_map",
+      "unit": "ns/call",
+      "before_median": 6878607.666666667,
+      "after_median": 6878607.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "sparse_array_map",
+      "unit": "ns/call",
+      "before_median": 3699465,
+      "after_median": 3699465,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "sparse_array_map",
+      "unit": "ns/call",
+      "before_median": 9292962.666666666,
+      "after_median": 9292962.666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "sparse_array_map",
+      "unit": "ns/call",
+      "before_median": 4287154.333333333,
+      "after_median": 4287154.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "sparse_array_map",
+      "unit": "ns/call",
+      "before_median": 718739.6666666666,
+      "after_median": 718739.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "sparse_array_map",
+      "unit": "ns/call",
+      "before_median": 68137.66666666667,
+      "after_median": 68137.66666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_map_construct_16",
+      "unit": "ns/call",
+      "before_median": 3314929.6666666665,
+      "after_median": 3314929.6666666665,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_map_construct_16",
+      "unit": "ns/call",
+      "before_median": 76749,
+      "after_median": 76749,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_map_construct_16",
+      "unit": "ns/call",
+      "before_median": 4968396.666666667,
+      "after_median": 4968396.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_map_construct_16",
+      "unit": "ns/call",
+      "before_median": 97644.33333333333,
+      "after_median": 97644.33333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_map_construct_16",
+      "unit": "ns/call",
+      "before_median": 588348.6666666666,
+      "after_median": 588348.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_map_construct_16",
+      "unit": "ns/call",
+      "before_median": 46014.333333333336,
+      "after_median": 46014.333333333336,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_set_construct_16",
+      "unit": "ns/call",
+      "before_median": 3326263,
+      "after_median": 3326263,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_set_construct_16",
+      "unit": "ns/call",
+      "before_median": 77613.66666666667,
+      "after_median": 77613.66666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_set_construct_16",
+      "unit": "ns/call",
+      "before_median": 5002608,
+      "after_median": 5002608,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_set_construct_16",
+      "unit": "ns/call",
+      "before_median": 92293.66666666667,
+      "after_median": 92293.66666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_set_construct_16",
+      "unit": "ns/call",
+      "before_median": 584893.6666666666,
+      "after_median": 584893.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_set_construct_16",
+      "unit": "ns/call",
+      "before_median": 47402,
+      "after_median": 47402,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_numbers_16",
+      "unit": "ns/call",
+      "before_median": 3339695,
+      "after_median": 3339695,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_numbers_16",
+      "unit": "ns/call",
+      "before_median": 51517,
+      "after_median": 51517,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_numbers_16",
+      "unit": "ns/call",
+      "before_median": 5104346,
+      "after_median": 5104346,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_numbers_16",
+      "unit": "ns/call",
+      "before_median": 70129,
+      "after_median": 70129,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_numbers_16",
+      "unit": "ns/call",
+      "before_median": 652862.6666666666,
+      "after_median": 652862.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_numbers_16",
+      "unit": "ns/call",
+      "before_median": 46751.333333333336,
+      "after_median": 46751.333333333336,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_strings_16",
+      "unit": "ns/call",
+      "before_median": 3378355.3333333335,
+      "after_median": 3378355.3333333335,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_strings_16",
+      "unit": "ns/call",
+      "before_median": 61544.333333333336,
+      "after_median": 61544.333333333336,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_strings_16",
+      "unit": "ns/call",
+      "before_median": 5079833.666666667,
+      "after_median": 5079833.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_strings_16",
+      "unit": "ns/call",
+      "before_median": 78685,
+      "after_median": 78685,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_strings_16",
+      "unit": "ns/call",
+      "before_median": 667240.6666666666,
+      "after_median": 667240.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_strings_16",
+      "unit": "ns/call",
+      "before_median": 49437,
+      "after_median": 49437,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_objects_16",
+      "unit": "ns/call",
+      "before_median": 3523298.3333333335,
+      "after_median": 3523298.3333333335,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_objects_16",
+      "unit": "ns/call",
+      "before_median": 55724.666666666664,
+      "after_median": 55724.666666666664,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_objects_16",
+      "unit": "ns/call",
+      "before_median": 5320765,
+      "after_median": 5320765,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_objects_16",
+      "unit": "ns/call",
+      "before_median": 68234.66666666667,
+      "after_median": 68234.66666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_objects_16",
+      "unit": "ns/call",
+      "before_median": 716949,
+      "after_median": 716949,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_objects_16",
+      "unit": "ns/call",
+      "before_median": 49378.333333333336,
+      "after_median": 49378.333333333336,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_set_has_16",
+      "unit": "ns/call",
+      "before_median": 3366718,
+      "after_median": 3366718,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_set_has_16",
+      "unit": "ns/call",
+      "before_median": 69886,
+      "after_median": 69886,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_set_has_16",
+      "unit": "ns/call",
+      "before_median": 5571855.333333333,
+      "after_median": 5571855.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_set_has_16",
+      "unit": "ns/call",
+      "before_median": 89330,
+      "after_median": 89330,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_set_has_16",
+      "unit": "ns/call",
+      "before_median": 656200.3333333334,
+      "after_median": 656200.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_set_has_16",
+      "unit": "ns/call",
+      "before_median": 47652,
+      "after_median": 47652,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_map_construct_64",
+      "unit": "ns/call",
+      "before_median": 3412433,
+      "after_median": 3412433,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_map_construct_64",
+      "unit": "ns/call",
+      "before_median": 200898,
+      "after_median": 200898,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_map_construct_64",
+      "unit": "ns/call",
+      "before_median": 5295824.666666667,
+      "after_median": 5295824.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_map_construct_64",
+      "unit": "ns/call",
+      "before_median": 221137.66666666666,
+      "after_median": 221137.66666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_map_construct_64",
+      "unit": "ns/call",
+      "before_median": 586958.6666666666,
+      "after_median": 586958.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_map_construct_64",
+      "unit": "ns/call",
+      "before_median": 48931.333333333336,
+      "after_median": 48931.333333333336,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_set_construct_64",
+      "unit": "ns/call",
+      "before_median": 3461010,
+      "after_median": 3461010,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_set_construct_64",
+      "unit": "ns/call",
+      "before_median": 207238.66666666666,
+      "after_median": 207238.66666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_set_construct_64",
+      "unit": "ns/call",
+      "before_median": 5193579,
+      "after_median": 5193579,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_set_construct_64",
+      "unit": "ns/call",
+      "before_median": 219317.33333333334,
+      "after_median": 219317.33333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_set_construct_64",
+      "unit": "ns/call",
+      "before_median": 581171,
+      "after_median": 581171,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_set_construct_64",
+      "unit": "ns/call",
+      "before_median": 49146,
+      "after_median": 49146,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_numbers_64",
+      "unit": "ns/call",
+      "before_median": 3593350,
+      "after_median": 3593350,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_numbers_64",
+      "unit": "ns/call",
+      "before_median": 124323.33333333333,
+      "after_median": 124323.33333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_numbers_64",
+      "unit": "ns/call",
+      "before_median": 5420167.333333333,
+      "after_median": 5420167.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_numbers_64",
+      "unit": "ns/call",
+      "before_median": 157235.33333333334,
+      "after_median": 157235.33333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_numbers_64",
+      "unit": "ns/call",
+      "before_median": 743543,
+      "after_median": 743543,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_numbers_64",
+      "unit": "ns/call",
+      "before_median": 53095,
+      "after_median": 53095,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_strings_64",
+      "unit": "ns/call",
+      "before_median": 3623858.3333333335,
+      "after_median": 3623858.3333333335,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_strings_64",
+      "unit": "ns/call",
+      "before_median": 155651.33333333334,
+      "after_median": 155651.33333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_strings_64",
+      "unit": "ns/call",
+      "before_median": 5620470.333333333,
+      "after_median": 5620470.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_strings_64",
+      "unit": "ns/call",
+      "before_median": 196906,
+      "after_median": 196906,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_strings_64",
+      "unit": "ns/call",
+      "before_median": 777368,
+      "after_median": 777368,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_strings_64",
+      "unit": "ns/call",
+      "before_median": 62501.333333333336,
+      "after_median": 62501.333333333336,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_objects_64",
+      "unit": "ns/call",
+      "before_median": 4121618.3333333335,
+      "after_median": 4121618.3333333335,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_objects_64",
+      "unit": "ns/call",
+      "before_median": 139354.66666666666,
+      "after_median": 139354.66666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_objects_64",
+      "unit": "ns/call",
+      "before_median": 6169450.666666667,
+      "after_median": 6169450.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_objects_64",
+      "unit": "ns/call",
+      "before_median": 180602,
+      "after_median": 180602,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_objects_64",
+      "unit": "ns/call",
+      "before_median": 905555.3333333334,
+      "after_median": 905555.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_objects_64",
+      "unit": "ns/call",
+      "before_median": 60192,
+      "after_median": 60192,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_set_has_64",
+      "unit": "ns/call",
+      "before_median": 3874359.6666666665,
+      "after_median": 3874359.6666666665,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_set_has_64",
+      "unit": "ns/call",
+      "before_median": 200212.66666666666,
+      "after_median": 200212.66666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_set_has_64",
+      "unit": "ns/call",
+      "before_median": 5548687.666666667,
+      "after_median": 5548687.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_set_has_64",
+      "unit": "ns/call",
+      "before_median": 262964.6666666667,
+      "after_median": 262964.6666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_set_has_64",
+      "unit": "ns/call",
+      "before_median": 741956.3333333334,
+      "after_median": 741956.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_set_has_64",
+      "unit": "ns/call",
+      "before_median": 61684.666666666664,
+      "after_median": 61684.666666666664,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_map_construct_256",
+      "unit": "ns/call",
+      "before_median": 4098873,
+      "after_median": 4098873,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_map_construct_256",
+      "unit": "ns/call",
+      "before_median": 682851,
+      "after_median": 682851,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_map_construct_256",
+      "unit": "ns/call",
+      "before_median": 5753682,
+      "after_median": 5753682,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_map_construct_256",
+      "unit": "ns/call",
+      "before_median": 719712,
+      "after_median": 719712,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_map_construct_256",
+      "unit": "ns/call",
+      "before_median": 609923.6666666666,
+      "after_median": 609923.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_map_construct_256",
+      "unit": "ns/call",
+      "before_median": 56714.666666666664,
+      "after_median": 56714.666666666664,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_set_construct_256",
+      "unit": "ns/call",
+      "before_median": 4138413.3333333335,
+      "after_median": 4138413.3333333335,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_set_construct_256",
+      "unit": "ns/call",
+      "before_median": 668356.3333333334,
+      "after_median": 668356.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_set_construct_256",
+      "unit": "ns/call",
+      "before_median": 5733723.666666667,
+      "after_median": 5733723.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_set_construct_256",
+      "unit": "ns/call",
+      "before_median": 705869.6666666666,
+      "after_median": 705869.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_set_construct_256",
+      "unit": "ns/call",
+      "before_median": 601379.3333333334,
+      "after_median": 601379.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_set_construct_256",
+      "unit": "ns/call",
+      "before_median": 55976,
+      "after_median": 55976,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_numbers_256",
+      "unit": "ns/call",
+      "before_median": 4469348.666666667,
+      "after_median": 4469348.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_numbers_256",
+      "unit": "ns/call",
+      "before_median": 392068.6666666667,
+      "after_median": 392068.6666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_numbers_256",
+      "unit": "ns/call",
+      "before_median": 6582203.333333333,
+      "after_median": 6582203.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_numbers_256",
+      "unit": "ns/call",
+      "before_median": 492519.6666666667,
+      "after_median": 492519.6666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_numbers_256",
+      "unit": "ns/call",
+      "before_median": 1090884.3333333333,
+      "after_median": 1090884.3333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_numbers_256",
+      "unit": "ns/call",
+      "before_median": 79621.66666666667,
+      "after_median": 79621.66666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_strings_256",
+      "unit": "ns/call",
+      "before_median": 4715273,
+      "after_median": 4715273,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_strings_256",
+      "unit": "ns/call",
+      "before_median": 510045.3333333333,
+      "after_median": 510045.3333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_strings_256",
+      "unit": "ns/call",
+      "before_median": 6902374.333333333,
+      "after_median": 6902374.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_strings_256",
+      "unit": "ns/call",
+      "before_median": 651741,
+      "after_median": 651741,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_strings_256",
+      "unit": "ns/call",
+      "before_median": 1186185.3333333333,
+      "after_median": 1186185.3333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_strings_256",
+      "unit": "ns/call",
+      "before_median": 120499.66666666667,
+      "after_median": 120499.66666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_objects_256",
+      "unit": "ns/call",
+      "before_median": 6445684.666666667,
+      "after_median": 6445684.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_objects_256",
+      "unit": "ns/call",
+      "before_median": 459139.6666666667,
+      "after_median": 459139.6666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_objects_256",
+      "unit": "ns/call",
+      "before_median": 9137214,
+      "after_median": 9137214,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_objects_256",
+      "unit": "ns/call",
+      "before_median": 601682,
+      "after_median": 601682,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_objects_256",
+      "unit": "ns/call",
+      "before_median": 1564123.3333333333,
+      "after_median": 1564123.3333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_objects_256",
+      "unit": "ns/call",
+      "before_median": 108006,
+      "after_median": 108006,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_set_has_256",
+      "unit": "ns/call",
+      "before_median": 4653207.333333333,
+      "after_median": 4653207.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_set_has_256",
+      "unit": "ns/call",
+      "before_median": 687418.6666666666,
+      "after_median": 687418.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_set_has_256",
+      "unit": "ns/call",
+      "before_median": 6899823,
+      "after_median": 6899823,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_set_has_256",
+      "unit": "ns/call",
+      "before_median": 921746,
+      "after_median": 921746,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_set_has_256",
+      "unit": "ns/call",
+      "before_median": 1095492.3333333333,
+      "after_median": 1095492.3333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_set_has_256",
+      "unit": "ns/call",
+      "before_median": 112629.66666666667,
+      "after_median": 112629.66666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_map_construct_1024",
+      "unit": "ns/call",
+      "before_median": 5826910,
+      "after_median": 5826910,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_map_construct_1024",
+      "unit": "ns/call",
+      "before_median": 2569070.6666666665,
+      "after_median": 2569070.6666666665,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_map_construct_1024",
+      "unit": "ns/call",
+      "before_median": 8723463.333333334,
+      "after_median": 8723463.333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_map_construct_1024",
+      "unit": "ns/call",
+      "before_median": 3094478,
+      "after_median": 3094478,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_map_construct_1024",
+      "unit": "ns/call",
+      "before_median": 714060.6666666666,
+      "after_median": 714060.6666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_map_construct_1024",
+      "unit": "ns/call",
+      "before_median": 84532,
+      "after_median": 84532,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_set_construct_1024",
+      "unit": "ns/call",
+      "before_median": 5776008.333333333,
+      "after_median": 5776008.333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_set_construct_1024",
+      "unit": "ns/call",
+      "before_median": 2543354,
+      "after_median": 2543354,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_set_construct_1024",
+      "unit": "ns/call",
+      "before_median": 7944100.666666667,
+      "after_median": 7944100.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_set_construct_1024",
+      "unit": "ns/call",
+      "before_median": 3117743.6666666665,
+      "after_median": 3117743.6666666665,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_set_construct_1024",
+      "unit": "ns/call",
+      "before_median": 722425.3333333334,
+      "after_median": 722425.3333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_set_construct_1024",
+      "unit": "ns/call",
+      "before_median": 80988.66666666667,
+      "after_median": 80988.66666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_numbers_1024",
+      "unit": "ns/call",
+      "before_median": 7440677,
+      "after_median": 7440677,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_numbers_1024",
+      "unit": "ns/call",
+      "before_median": 1474244.3333333333,
+      "after_median": 1474244.3333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_numbers_1024",
+      "unit": "ns/call",
+      "before_median": 11864460,
+      "after_median": 11864460,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_numbers_1024",
+      "unit": "ns/call",
+      "before_median": 1830326,
+      "after_median": 1830326,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_numbers_1024",
+      "unit": "ns/call",
+      "before_median": 2503180.6666666665,
+      "after_median": 2503180.6666666665,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_numbers_1024",
+      "unit": "ns/call",
+      "before_median": 177893.33333333334,
+      "after_median": 177893.33333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_strings_1024",
+      "unit": "ns/call",
+      "before_median": 8419013.666666666,
+      "after_median": 8419013.666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_strings_1024",
+      "unit": "ns/call",
+      "before_median": 1934845,
+      "after_median": 1934845,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_strings_1024",
+      "unit": "ns/call",
+      "before_median": 11865921.666666666,
+      "after_median": 11865921.666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_strings_1024",
+      "unit": "ns/call",
+      "before_median": 2517882.3333333335,
+      "after_median": 2517882.3333333335,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_strings_1024",
+      "unit": "ns/call",
+      "before_median": 3005101,
+      "after_median": 3005101,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_strings_1024",
+      "unit": "ns/call",
+      "before_median": 341853.3333333333,
+      "after_median": 341853.3333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_objects_1024",
+      "unit": "ns/call",
+      "before_median": 17223834,
+      "after_median": 17223834,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_objects_1024",
+      "unit": "ns/call",
+      "before_median": 1884373.6666666667,
+      "after_median": 1884373.6666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_objects_1024",
+      "unit": "ns/call",
+      "before_median": 22538402,
+      "after_median": 22538402,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_objects_1024",
+      "unit": "ns/call",
+      "before_median": 2315709.3333333335,
+      "after_median": 2315709.3333333335,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_map_lookup_objects_1024",
+      "unit": "ns/call",
+      "before_median": 4344958.666666667,
+      "after_median": 4344958.666666667,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_map_lookup_objects_1024",
+      "unit": "ns/call",
+      "before_median": 297321,
+      "after_median": 297321,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "fresh_source",
+      "workload": "collection_set_has_1024",
+      "unit": "ns/call",
+      "before_median": 8727423.666666666,
+      "after_median": 8727423.666666666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "warm_source",
+      "workload": "collection_set_has_1024",
+      "unit": "ns/call",
+      "before_median": 2623443,
+      "after_median": 2623443,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "fresh_source",
+      "workload": "collection_set_has_1024",
+      "unit": "ns/call",
+      "before_median": 13368511.333333334,
+      "after_median": 13368511.333333334,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "warm_source",
+      "workload": "collection_set_has_1024",
+      "unit": "ns/call",
+      "before_median": 3388002,
+      "after_median": 3388002,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "fresh_source",
+      "workload": "collection_set_has_1024",
+      "unit": "ns/call",
+      "before_median": 2568395.6666666665,
+      "after_median": 2568395.6666666665,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "warm_source",
+      "workload": "collection_set_has_1024",
+      "unit": "ns/call",
+      "before_median": 314531.3333333333,
+      "after_median": 314531.3333333333,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "construct_dispose",
+      "workload": "vm_lifecycle",
+      "unit": "ns/instance",
+      "before_median": 3588666,
+      "after_median": 3588666,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "construct_dispose",
+      "workload": "vm_lifecycle",
+      "unit": "ns/instance",
+      "before_median": 3050331.3333333335,
+      "after_median": 3050331.3333333335,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "construct_dispose",
+      "workload": "vm_lifecycle",
+      "unit": "ns/instance",
+      "before_median": 465026,
+      "after_median": 465026,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-native",
+      "mode": "module_load",
+      "workload": "startup",
+      "unit": "ns/component",
+      "before_median": 2873428,
+      "after_median": 2873428,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "node-v8",
+      "mode": "module_load",
+      "workload": "startup",
+      "unit": "ns/component",
+      "before_median": 463449,
+      "after_median": 463449,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "module_load",
+      "workload": "startup",
+      "unit": "ns/component",
+      "before_median": 1637360,
+      "after_median": 1637360,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "compile_module",
+      "workload": "startup",
+      "unit": "ns/component",
+      "before_median": 16622512,
+      "after_median": 16622512,
+      "after_over_before": 1.0
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "instantiate_init",
+      "workload": "startup",
+      "unit": "ns/component",
+      "before_median": 5814039,
+      "after_median": 5814039,
+      "after_over_before": 1.0
+    }
+  ],
+  "changed_inputs": [],
+  "limitations": [
+    "Public source APIs, not bare engines or retained guest-function calls.",
+    "Native returns a string; WASM returns an ok/value/error/logs object; Node returns a number. API serialization stays timed; assertions and fresh-comment preparation do not.",
+    "Fresh includes creation/evaluation/disposal. Node context references are released without synchronous guest-heap disposal; V8 host GC runs between batches.",
+    "Native/WASM automatic guest cycle collection remains in their public APIs. No extra native-only explicit guest GC is imposed.",
+    "WASM compile/init and module loads are one first-use observation per fresh process, after hashing/reading files; process startup and disk-cold I/O are excluded.",
+    "Five warmup calls do not guarantee identical JIT/tiering states. Backend order rotates per sample; no CPU or host isolation.",
+    "Native/WASM builtin/console setup and bridge result formats differ. No aggregate runtime score is computed.",
+    "Aggregate timings are medians of independent process medians; full child batch samples are retained."
+  ]
+}

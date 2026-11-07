@@ -1,0 +1,447 @@
+{
+  "schema": 1,
+  "source_sha256": "98452c8ebd72dd28d30dc9f30ec0324fa5c29e78cb6329f14e027ac61d2b9719",
+  "results": [
+    {
+      "workload": "resolved",
+      "mode": "enqueue",
+      "napi_vm": 49496.0,
+      "rquickjs": 10768.666666666666,
+      "napi_vm_over_rquickjs": 4.596297901318641
+    },
+    {
+      "workload": "resolved",
+      "mode": "checkpoint",
+      "napi_vm": 6392.333333333333,
+      "rquickjs": 607.0,
+      "napi_vm_over_rquickjs": 10.531026908292146
+    },
+    {
+      "workload": "resolved",
+      "mode": "source_completed",
+      "napi_vm": 39142.666666666664,
+      "rquickjs": 8348.0,
+      "napi_vm_over_rquickjs": 4.688867593036256
+    },
+    {
+      "workload": "resolved",
+      "mode": "call_completed",
+      "napi_vm": 34461.0,
+      "rquickjs": 3989.0,
+      "napi_vm_over_rquickjs": 8.63900726999248
+    },
+    {
+      "workload": "chain_128",
+      "mode": "enqueue",
+      "napi_vm": 1548875.0,
+      "rquickjs": 105435.0,
+      "napi_vm_over_rquickjs": 14.690330535400959
+    },
+    {
+      "workload": "chain_128",
+      "mode": "checkpoint",
+      "napi_vm": 791924.3333333334,
+      "rquickjs": 33449.333333333336,
+      "napi_vm_over_rquickjs": 23.675339817435326
+    },
+    {
+      "workload": "chain_128",
+      "mode": "source_completed",
+      "napi_vm": 2230742.3333333335,
+      "rquickjs": 139920.33333333334,
+      "napi_vm_over_rquickjs": 15.94294610504549
+    },
+    {
+      "workload": "chain_128",
+      "mode": "call_completed",
+      "napi_vm": 2430896.6666666665,
+      "rquickjs": 130505.66666666667,
+      "napi_vm_over_rquickjs": 18.626751839639144
+    },
+    {
+      "workload": "fanout_128",
+      "mode": "enqueue",
+      "napi_vm": 5350330.0,
+      "rquickjs": 232785.0,
+      "napi_vm_over_rquickjs": 22.983998109843846
+    },
+    {
+      "workload": "fanout_128",
+      "mode": "checkpoint",
+      "napi_vm": 2627065.0,
+      "rquickjs": 81171.66666666667,
+      "napi_vm_over_rquickjs": 32.36431020676344
+    },
+    {
+      "workload": "fanout_128",
+      "mode": "source_completed",
+      "napi_vm": 7535865.0,
+      "rquickjs": 307477.6666666667,
+      "napi_vm_over_rquickjs": 24.508658081399947
+    },
+    {
+      "workload": "fanout_128",
+      "mode": "call_completed",
+      "napi_vm": 7901046.0,
+      "rquickjs": 303188.6666666667,
+      "napi_vm_over_rquickjs": 26.059832931310094
+    },
+    {
+      "workload": "all_values_128",
+      "mode": "enqueue",
+      "napi_vm": 3950199.6666666665,
+      "rquickjs": 195682.0,
+      "napi_vm_over_rquickjs": 20.18683203701243
+    },
+    {
+      "workload": "all_values_128",
+      "mode": "checkpoint",
+      "napi_vm": 1396316.0,
+      "rquickjs": 45450.333333333336,
+      "napi_vm_over_rquickjs": 30.72179888669683
+    },
+    {
+      "workload": "all_values_128",
+      "mode": "source_completed",
+      "napi_vm": 5313860.666666667,
+      "rquickjs": 242080.0,
+      "napi_vm_over_rquickjs": 21.950845450539767
+    },
+    {
+      "workload": "all_values_128",
+      "mode": "call_completed",
+      "napi_vm": 5320136.666666667,
+      "rquickjs": 232415.0,
+      "napi_vm_over_rquickjs": 22.89067687828525
+    },
+    {
+      "workload": "all_promises_128",
+      "mode": "enqueue",
+      "napi_vm": 4065119.6666666665,
+      "rquickjs": 220408.33333333334,
+      "napi_vm_over_rquickjs": 18.44358425649363
+    },
+    {
+      "workload": "all_promises_128",
+      "mode": "checkpoint",
+      "napi_vm": 1312653.0,
+      "rquickjs": 45254.0,
+      "napi_vm_over_rquickjs": 29.006341980819375
+    },
+    {
+      "workload": "all_promises_128",
+      "mode": "source_completed",
+      "napi_vm": 5384493.666666667,
+      "rquickjs": 268773.0,
+      "napi_vm_over_rquickjs": 20.03361076695452
+    },
+    {
+      "workload": "all_promises_128",
+      "mode": "call_completed",
+      "napi_vm": 5435505.666666667,
+      "rquickjs": 261398.66666666666,
+      "napi_vm_over_rquickjs": 20.793930343944627
+    },
+    {
+      "workload": "all_settled_128",
+      "mode": "enqueue",
+      "napi_vm": 4422555.666666667,
+      "rquickjs": 255457.0,
+      "napi_vm_over_rquickjs": 17.312329146066332
+    },
+    {
+      "workload": "all_settled_128",
+      "mode": "checkpoint",
+      "napi_vm": 1852480.6666666667,
+      "rquickjs": 74964.0,
+      "napi_vm_over_rquickjs": 24.711603792042403
+    },
+    {
+      "workload": "all_settled_128",
+      "mode": "source_completed",
+      "napi_vm": 6272983.333333333,
+      "rquickjs": 330382.6666666667,
+      "napi_vm_over_rquickjs": 18.987023128735565
+    },
+    {
+      "workload": "all_settled_128",
+      "mode": "call_completed",
+      "napi_vm": 6257617.333333333,
+      "rquickjs": 319662.6666666667,
+      "napi_vm_over_rquickjs": 19.575690206759624
+    },
+    {
+      "workload": "race_128",
+      "mode": "enqueue",
+      "napi_vm": 4136393.6666666665,
+      "rquickjs": 200355.0,
+      "napi_vm_over_rquickjs": 20.64532288521208
+    },
+    {
+      "workload": "race_128",
+      "mode": "checkpoint",
+      "napi_vm": 672271.3333333334,
+      "rquickjs": 20398.0,
+      "napi_vm_over_rquickjs": 32.95770827205282
+    },
+    {
+      "workload": "race_128",
+      "mode": "source_completed",
+      "napi_vm": 4882059.666666667,
+      "rquickjs": 217437.0,
+      "napi_vm_over_rquickjs": 22.452754897587194
+    },
+    {
+      "workload": "race_128",
+      "mode": "call_completed",
+      "napi_vm": 4931509.0,
+      "rquickjs": 207788.66666666666,
+      "napi_vm_over_rquickjs": 23.73329151734294
+    },
+    {
+      "workload": "any_reject_127",
+      "mode": "enqueue",
+      "napi_vm": 4111318.6666666665,
+      "rquickjs": 234284.66666666666,
+      "napi_vm_over_rquickjs": 17.548389850523723
+    },
+    {
+      "workload": "any_reject_127",
+      "mode": "checkpoint",
+      "napi_vm": 1223407.6666666667,
+      "rquickjs": 36165.666666666664,
+      "napi_vm_over_rquickjs": 33.82787542512697
+    },
+    {
+      "workload": "any_reject_127",
+      "mode": "source_completed",
+      "napi_vm": 5396759.0,
+      "rquickjs": 267360.3333333333,
+      "napi_vm_over_rquickjs": 20.185339136570995
+    },
+    {
+      "workload": "any_reject_127",
+      "mode": "call_completed",
+      "napi_vm": 5182515.333333333,
+      "rquickjs": 254752.66666666666,
+      "napi_vm_over_rquickjs": 20.34332123445224
+    },
+    {
+      "workload": "thenable_chain_64",
+      "mode": "enqueue",
+      "napi_vm": 794375.6666666666,
+      "rquickjs": 63263.666666666664,
+      "napi_vm_over_rquickjs": 12.556585928732131
+    },
+    {
+      "workload": "thenable_chain_64",
+      "mode": "checkpoint",
+      "napi_vm": 910888.6666666666,
+      "rquickjs": 69836.33333333333,
+      "napi_vm_over_rquickjs": 13.04319146194197
+    },
+    {
+      "workload": "thenable_chain_64",
+      "mode": "source_completed",
+      "napi_vm": 1726572.6666666667,
+      "rquickjs": 133810.0,
+      "napi_vm_over_rquickjs": 12.903166180903272
+    },
+    {
+      "workload": "thenable_chain_64",
+      "mode": "call_completed",
+      "napi_vm": 1779813.0,
+      "rquickjs": 124911.0,
+      "napi_vm_over_rquickjs": 14.248649038115138
+    },
+    {
+      "workload": "catch_finally_64",
+      "mode": "enqueue",
+      "napi_vm": 2739194.6666666665,
+      "rquickjs": 175463.33333333334,
+      "napi_vm_over_rquickjs": 15.611208419612833
+    },
+    {
+      "workload": "catch_finally_64",
+      "mode": "checkpoint",
+      "napi_vm": 5106840.0,
+      "rquickjs": 223570.0,
+      "napi_vm_over_rquickjs": 22.842241803462002
+    },
+    {
+      "workload": "catch_finally_64",
+      "mode": "source_completed",
+      "napi_vm": 7842115.666666667,
+      "rquickjs": 403371.6666666667,
+      "napi_vm_over_rquickjs": 19.441414245753503
+    },
+    {
+      "workload": "catch_finally_64",
+      "mode": "call_completed",
+      "napi_vm": 8021780.0,
+      "rquickjs": 389569.0,
+      "napi_vm_over_rquickjs": 20.591422828818516
+    },
+    {
+      "workload": "await_values_128",
+      "mode": "enqueue",
+      "napi_vm": 258463.66666666666,
+      "rquickjs": 19621.0,
+      "napi_vm_over_rquickjs": 13.172808045801267
+    },
+    {
+      "workload": "await_values_128",
+      "mode": "checkpoint",
+      "napi_vm": 390675.3333333333,
+      "rquickjs": 96140.33333333333,
+      "napi_vm_over_rquickjs": 4.063594537152288
+    },
+    {
+      "workload": "await_values_128",
+      "mode": "source_completed",
+      "napi_vm": 662085.3333333334,
+      "rquickjs": 116147.0,
+      "napi_vm_over_rquickjs": 5.700408390516616
+    },
+    {
+      "workload": "await_values_128",
+      "mode": "call_completed",
+      "napi_vm": 616112.0,
+      "rquickjs": 106343.66666666667,
+      "napi_vm_over_rquickjs": 5.793593726001548
+    },
+    {
+      "workload": "await_promises_128",
+      "mode": "enqueue",
+      "napi_vm": 419855.0,
+      "rquickjs": 20911.0,
+      "napi_vm_over_rquickjs": 20.078188513222706
+    },
+    {
+      "workload": "await_promises_128",
+      "mode": "checkpoint",
+      "napi_vm": 5812323.333333333,
+      "rquickjs": 107795.0,
+      "napi_vm_over_rquickjs": 53.92015708830032
+    },
+    {
+      "workload": "await_promises_128",
+      "mode": "source_completed",
+      "napi_vm": 6388105.666666667,
+      "rquickjs": 132750.33333333334,
+      "napi_vm_over_rquickjs": 48.1212024577465
+    },
+    {
+      "workload": "await_promises_128",
+      "mode": "call_completed",
+      "napi_vm": 6215664.0,
+      "rquickjs": 120077.33333333333,
+      "napi_vm_over_rquickjs": 51.76384108019277
+    },
+    {
+      "workload": "async_generator_64",
+      "mode": "enqueue",
+      "napi_vm": 442535.3333333333,
+      "rquickjs": 23348.666666666668,
+      "napi_vm_over_rquickjs": 18.95334494475059
+    },
+    {
+      "workload": "async_generator_64",
+      "mode": "checkpoint",
+      "napi_vm": 3040647.6666666665,
+      "rquickjs": 136142.66666666666,
+      "napi_vm_over_rquickjs": 22.334274339663295
+    },
+    {
+      "workload": "async_generator_64",
+      "mode": "source_completed",
+      "napi_vm": 3548305.3333333335,
+      "rquickjs": 158522.33333333334,
+      "napi_vm_over_rquickjs": 22.38363048739715
+    },
+    {
+      "workload": "async_generator_64",
+      "mode": "call_completed",
+      "napi_vm": 3573396.0,
+      "rquickjs": 150529.66666666666,
+      "napi_vm_over_rquickjs": 23.738815604454494
+    }
+  ],
+  "job_counts": [
+    {
+      "workload": "resolved",
+      "napi_jobs": 1,
+      "rquickjs_jobs": 1
+    },
+    {
+      "workload": "chain_128",
+      "napi_jobs": 129,
+      "rquickjs_jobs": 129
+    },
+    {
+      "workload": "fanout_128",
+      "napi_jobs": 258,
+      "rquickjs_jobs": 258
+    },
+    {
+      "workload": "all_values_128",
+      "napi_jobs": 130,
+      "rquickjs_jobs": 130
+    },
+    {
+      "workload": "all_promises_128",
+      "napi_jobs": 130,
+      "rquickjs_jobs": 130
+    },
+    {
+      "workload": "all_settled_128",
+      "napi_jobs": 130,
+      "rquickjs_jobs": 130
+    },
+    {
+      "workload": "race_128",
+      "napi_jobs": 129,
+      "rquickjs_jobs": 129
+    },
+    {
+      "workload": "any_reject_127",
+      "napi_jobs": 129,
+      "rquickjs_jobs": 129
+    },
+    {
+      "workload": "thenable_chain_64",
+      "napi_jobs": 129,
+      "rquickjs_jobs": 129
+    },
+    {
+      "workload": "catch_finally_64",
+      "napi_jobs": 385,
+      "rquickjs_jobs": 385
+    },
+    {
+      "workload": "await_values_128",
+      "napi_jobs": 129,
+      "rquickjs_jobs": 129
+    },
+    {
+      "workload": "await_promises_128",
+      "napi_jobs": 129,
+      "rquickjs_jobs": 129
+    },
+    {
+      "workload": "async_generator_64",
+      "napi_jobs": 130,
+      "rquickjs_jobs": 130
+    }
+  ],
+  "limitations": [
+    "Warm synchronous host API calls that enqueue and/or drain promise jobs; no I/O, timers, Node or WASM bindings.",
+    "enqueue times source evaluation only; its job cleanup is outside timing. checkpoint prepares pending jobs outside timing.",
+    "source_completed includes source evaluation and all pending jobs. call_completed retains start() and includes a checkpoint on both engines.",
+    "Every invocation checks exactly one numeric completion and no rejection outside timing. Cyclic GC runs outside each batch on both engines.",
+    "napi-vm caches invocation source; rquickjs reparses it. Context construction and setup are excluded.",
+    "Job counts are engine-specific diagnostics, not equal units of work. Five warmups do not prove equal tiers.",
+    "Samples are per-call timer averages; no host isolation or enforced affinity.",
+    "Aggregate statistics are medians/MAD of independent process medians; all child batch samples are retained."
+  ]
+}

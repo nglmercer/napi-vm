@@ -282,7 +282,17 @@ fn promise_then(i: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value
     {
         target.borrow_mut().external_pending = true;
     }
-    i.register_capability(&this, arg(&a, 0), arg(&a, 1), cap.resolve, cap.reject)?;
+    // Native species already supplied a promise. Keep that same target in the
+    // reaction instead of allocating an unreachable internal placeholder.
+    // A custom species may return another object, so retain the fallback.
+    i.register_capability(
+        &this,
+        arg(&a, 0),
+        arg(&a, 1),
+        cap.promise.as_promise(),
+        cap.resolve,
+        cap.reject,
+    )?;
     Ok(cap.promise)
 }
 fn promise_catch(i: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {

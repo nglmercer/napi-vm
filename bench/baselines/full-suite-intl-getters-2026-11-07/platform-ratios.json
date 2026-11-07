@@ -1,0 +1,2449 @@
+{
+  "schema": 1,
+  "source_report_sha256": "6c91080849774913dd36f82e0988caf62c960be86fba04dc5ee523235199b174",
+  "results": [
+    {
+      "workload": "startup_dominated",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 3956662.6666666665,
+        "napi-wasm": 5016071.666666667,
+        "node-v8": 572077.3333333334
+      },
+      "mads": {
+        "napi-native": 96437.66666666698,
+        "napi-wasm": 101728.33333333302,
+        "node-v8": 20926.0
+      },
+      "wasm_over_native": 1.2677531771725465,
+      "native_over_node_context": 6.916307352385924,
+      "wasm_over_node_context": 8.768170620289098
+    },
+    {
+      "workload": "startup_dominated",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 23149.333333333332,
+        "napi-wasm": 40728,
+        "node-v8": 43601.666666666664
+      },
+      "mads": {
+        "napi-native": 596.3333333333321,
+        "napi-wasm": 805.3333333333358,
+        "node-v8": 152.66666666666424
+      },
+      "wasm_over_native": 1.7593595207925354,
+      "native_over_node_context": 0.5309277168303964,
+      "wasm_over_node_context": 0.9340927334582012
+    },
+    {
+      "workload": "arithmetic_loop",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 6388782.333333333,
+        "napi-wasm": 7845372.333333333,
+        "node-v8": 941246
+      },
+      "mads": {
+        "napi-native": 36594.0,
+        "napi-wasm": 371064.0,
+        "node-v8": 20967
+      },
+      "wasm_over_native": 1.2279918025067584,
+      "native_over_node_context": 6.787579796709185,
+      "wasm_over_node_context": 8.335092349219368
+    },
+    {
+      "workload": "arithmetic_loop",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 2009657.6666666667,
+        "napi-wasm": 2958850.3333333335,
+        "node-v8": 52827
+      },
+      "mads": {
+        "napi-native": 13924.333333333489,
+        "napi-wasm": 7861.333333333023,
+        "node-v8": 1378.6666666666642
+      },
+      "wasm_over_native": 1.472315600020103,
+      "native_over_node_context": 38.042244811680895,
+      "wasm_over_node_context": 56.01019049602161
+    },
+    {
+      "workload": "recursion_fib",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4136628.6666666665,
+        "napi-wasm": 5104601.333333333,
+        "node-v8": 732928.6666666666
+      },
+      "mads": {
+        "napi-native": 35881.33333333302,
+        "napi-wasm": 241116.66666666698,
+        "node-v8": 47722.33333333337
+      },
+      "wasm_over_native": 1.2340003767963703,
+      "native_over_node_context": 5.643971718939452,
+      "wasm_over_node_context": 6.96466322779934
+    },
+    {
+      "workload": "recursion_fib",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 143266,
+        "napi-wasm": 209705.33333333334,
+        "node-v8": 58393
+      },
+      "mads": {
+        "napi-native": 3852,
+        "napi-wasm": 20171.333333333343,
+        "node-v8": 741.3333333333358
+      },
+      "wasm_over_native": 1.4637480863103134,
+      "native_over_node_context": 2.4534790128953814,
+      "wasm_over_node_context": 3.591275209928131
+    },
+    {
+      "workload": "array_chain",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 12304013.666666666,
+        "napi-wasm": 15488030.333333334,
+        "node-v8": 959810
+      },
+      "mads": {
+        "napi-native": 143156.3333333321,
+        "napi-wasm": 89953.0,
+        "node-v8": 40098.66666666663
+      },
+      "wasm_over_native": 1.2587787004246123,
+      "native_over_node_context": 12.819218039681465,
+      "wasm_over_node_context": 16.13655862444998
+    },
+    {
+      "workload": "array_chain",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 8505084,
+        "napi-wasm": 10054918.333333334,
+        "node-v8": 103467
+      },
+      "mads": {
+        "napi-native": 36350.666666666046,
+        "napi-wasm": 209276.3333333321,
+        "node-v8": 7248.3333333333285
+      },
+      "wasm_over_native": 1.1822244593155498,
+      "native_over_node_context": 82.20093363101279,
+      "wasm_over_node_context": 97.1799543171575
+    },
+    {
+      "workload": "string_ops",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 11597521.333333334,
+        "napi-wasm": 13260719.666666666,
+        "node-v8": 830610
+      },
+      "mads": {
+        "napi-native": 209608.66666666605,
+        "napi-wasm": 392566.3333333321,
+        "node-v8": 29639.333333333372
+      },
+      "wasm_over_native": 1.1434098102111703,
+      "native_over_node_context": 13.962655558364737,
+      "wasm_over_node_context": 15.965037342033765
+    },
+    {
+      "workload": "string_ops",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 7282316,
+        "napi-wasm": 8709621.666666666,
+        "node-v8": 126383.33333333333
+      },
+      "mads": {
+        "napi-native": 255898.33333333302,
+        "napi-wasm": 70529.0,
+        "node-v8": 1913.6666666666715
+      },
+      "wasm_over_native": 1.1959961180847778,
+      "native_over_node_context": 57.62085718053541,
+      "wasm_over_node_context": 68.91432150863774
+    },
+    {
+      "workload": "closures",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4544174.333333333,
+        "napi-wasm": 5165859.666666667,
+        "node-v8": 946816.6666666666
+      },
+      "mads": {
+        "napi-native": 406801.99999999953,
+        "napi-wasm": 71314.66666666698,
+        "node-v8": 111865.00000000012
+      },
+      "wasm_over_native": 1.1368093052181172,
+      "native_over_node_context": 4.799423682867151,
+      "wasm_over_node_context": 5.456029502367583
+    },
+    {
+      "workload": "closures",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 526554.6666666666,
+        "napi-wasm": 601320.6666666666,
+        "node-v8": 49687
+      },
+      "mads": {
+        "napi-native": 21012.666666666628,
+        "napi-wasm": 1447.3333333332557,
+        "node-v8": 663.6666666666642
+      },
+      "wasm_over_native": 1.1419909550385399,
+      "native_over_node_context": 10.597433265575837,
+      "wasm_over_node_context": 12.102172935912142
+    },
+    {
+      "workload": "json_roundtrip",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 9911853,
+        "napi-wasm": 12298554.333333334,
+        "node-v8": 991514.6666666666
+      },
+      "mads": {
+        "napi-native": 54099.333333333954,
+        "napi-wasm": 115624.0,
+        "node-v8": 168.66666666674428
+      },
+      "wasm_over_native": 1.2407926482902172,
+      "native_over_node_context": 9.996678146297382,
+      "wasm_over_node_context": 12.403804751249268
+    },
+    {
+      "workload": "json_roundtrip",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 5824068.666666667,
+        "napi-wasm": 6959004.666666667,
+        "node-v8": 307551.3333333333
+      },
+      "mads": {
+        "napi-native": 34495.666666666046,
+        "napi-wasm": 132891.66666666698,
+        "node-v8": 2024.0
+      },
+      "wasm_over_native": 1.1948699551733766,
+      "native_over_node_context": 18.936899422752195,
+      "wasm_over_node_context": 22.62713216438665
+    },
+    {
+      "workload": "property_reads",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 5646398,
+        "napi-wasm": 7525935.333333333,
+        "node-v8": 892002
+      },
+      "mads": {
+        "napi-native": 24563.333333333023,
+        "napi-wasm": 139708.0,
+        "node-v8": 11028.333333333372
+      },
+      "wasm_over_native": 1.3328736892676238,
+      "native_over_node_context": 6.3300284080080536,
+      "wasm_over_node_context": 8.437128317350558
+    },
+    {
+      "workload": "property_reads",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 1923372.6666666667,
+        "napi-wasm": 2493178,
+        "node-v8": 52518.666666666664
+      },
+      "mads": {
+        "napi-native": 40288.0,
+        "napi-wasm": 200630,
+        "node-v8": 1391.3333333333285
+      },
+      "wasm_over_native": 1.2962532135391338,
+      "native_over_node_context": 36.62264845515246,
+      "wasm_over_node_context": 47.47222574830537
+    },
+    {
+      "workload": "property_updates",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 6135884.666666667,
+        "napi-wasm": 8374503.333333333,
+        "node-v8": 867286.3333333334
+      },
+      "mads": {
+        "napi-native": 27522.0,
+        "napi-wasm": 165251.00000000093,
+        "node-v8": 48319.33333333337
+      },
+      "wasm_over_native": 1.3648404082345311,
+      "native_over_node_context": 7.074808435045865,
+      "wasm_over_node_context": 9.655984432669102
+    },
+    {
+      "workload": "property_updates",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 2484913.6666666665,
+        "napi-wasm": 3455350.3333333335,
+        "node-v8": 50062
+      },
+      "mads": {
+        "napi-native": 7321.333333333023,
+        "napi-wasm": 75563.33333333302,
+        "node-v8": 1991.6666666666642
+      },
+      "wasm_over_native": 1.390531341062017,
+      "native_over_node_context": 49.636723795826505,
+      "wasm_over_node_context": 69.02142010573556
+    },
+    {
+      "workload": "class_methods",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 15793343,
+        "napi-wasm": 19436584.333333332,
+        "node-v8": 904781
+      },
+      "mads": {
+        "napi-native": 290076.66666666605,
+        "napi-wasm": 499838.3333333321,
+        "node-v8": 25883.333333333372
+      },
+      "wasm_over_native": 1.230682087594332,
+      "native_over_node_context": 17.455431756413983,
+      "wasm_over_node_context": 21.48208719384396
+    },
+    {
+      "workload": "class_methods",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 12277983,
+        "napi-wasm": 14335502.333333334,
+        "node-v8": 134435
+      },
+      "mads": {
+        "napi-native": 1009315.666666666,
+        "napi-wasm": 364672.0,
+        "node-v8": 5976.3333333333285
+      },
+      "wasm_over_native": 1.1675779591267827,
+      "native_over_node_context": 91.330256257671,
+      "wasm_over_node_context": 106.63519420785758
+    },
+    {
+      "workload": "bitwise_loop",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4975602.666666667,
+        "napi-wasm": 6004360,
+        "node-v8": 765888.6666666666
+      },
+      "mads": {
+        "napi-native": 444507.666666667,
+        "napi-wasm": 45771,
+        "node-v8": 24571.0
+      },
+      "wasm_over_native": 1.2067603468872916,
+      "native_over_node_context": 6.4965090661567,
+      "wasm_over_node_context": 7.839729534231695
+    },
+    {
+      "workload": "bitwise_loop",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 958127,
+        "napi-wasm": 1228561,
+        "node-v8": 51606.333333333336
+      },
+      "mads": {
+        "napi-native": 7324,
+        "napi-wasm": 27180,
+        "node-v8": 465.66666666666424
+      },
+      "wasm_over_native": 1.2822527702486204,
+      "native_over_node_context": 18.566073931494195,
+      "wasm_over_node_context": 23.80639973129913
+    },
+    {
+      "workload": "array_index_updates",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 10366175.333333334,
+        "napi-wasm": 13918609.333333334,
+        "node-v8": 1110648.6666666667
+      },
+      "mads": {
+        "napi-native": 292536.66666666605,
+        "napi-wasm": 151372.3333333321,
+        "node-v8": 21201.0
+      },
+      "wasm_over_native": 1.3426947630894146,
+      "native_over_node_context": 9.333442378718022,
+      "wasm_over_node_context": 12.531964203501497
+    },
+    {
+      "workload": "array_index_updates",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 6557525.333333333,
+        "napi-wasm": 8785650.666666666,
+        "node-v8": 59930
+      },
+      "mads": {
+        "napi-native": 3230.333333333954,
+        "napi-wasm": 413793.33333333395,
+        "node-v8": 2259.6666666666642
+      },
+      "wasm_over_native": 1.339781429742602,
+      "native_over_node_context": 109.41974525835697,
+      "wasm_over_node_context": 146.5985427443128
+    },
+    {
+      "workload": "array_sort_numeric",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 14524591,
+        "napi-wasm": 18347271.666666668,
+        "node-v8": 837254
+      },
+      "mads": {
+        "napi-native": 151997,
+        "napi-wasm": 850061.0,
+        "node-v8": 12599
+      },
+      "wasm_over_native": 1.2631868027586228,
+      "native_over_node_context": 17.347890843161096,
+      "wasm_over_node_context": 21.913626768778254
+    },
+    {
+      "workload": "array_sort_numeric",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 9286373.333333334,
+        "napi-wasm": 11361360.333333334,
+        "node-v8": 87602.33333333333
+      },
+      "mads": {
+        "napi-native": 109406.33333333395,
+        "napi-wasm": 589767.6666666679,
+        "node-v8": 2195.666666666657
+      },
+      "wasm_over_native": 1.223444279647024,
+      "native_over_node_context": 106.00600440627534,
+      "wasm_over_node_context": 129.6924396990948
+    },
+    {
+      "workload": "map_set_get",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 8028341.333333333,
+        "napi-wasm": 9823550.666666666,
+        "node-v8": 832213.6666666666
+      },
+      "mads": {
+        "napi-native": 19930.333333333023,
+        "napi-wasm": 69834.33333333209,
+        "node-v8": 57616.0
+      },
+      "wasm_over_native": 1.2236089945353594,
+      "native_over_node_context": 9.646971270599177,
+      "wasm_over_node_context": 11.804120816729357
+    },
+    {
+      "workload": "map_set_get",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4162083,
+        "napi-wasm": 5611936.333333333,
+        "node-v8": 102585.66666666667
+      },
+      "mads": {
+        "napi-native": 6256.666666666511,
+        "napi-wasm": 172030.66666666605,
+        "node-v8": 725.0
+      },
+      "wasm_over_native": 1.3483480106795884,
+      "native_over_node_context": 40.57177903345821,
+      "wasm_over_node_context": 54.704877549495215
+    },
+    {
+      "workload": "set_add_has_delete",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 8571220.333333334,
+        "napi-wasm": 11131130.333333334,
+        "node-v8": 835745.3333333334
+      },
+      "mads": {
+        "napi-native": 161030.33333333395,
+        "napi-wasm": 136976.0,
+        "node-v8": 38917.666666666744
+      },
+      "wasm_over_native": 1.298663422528593,
+      "native_over_node_context": 10.255780070164915,
+      "wasm_over_node_context": 13.3188064466209
+    },
+    {
+      "workload": "set_add_has_delete",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 5146673,
+        "napi-wasm": 5886381.333333333,
+        "node-v8": 104635.33333333333
+      },
+      "mads": {
+        "napi-native": 249190.66666666698,
+        "napi-wasm": 109385.0,
+        "node-v8": 896.0
+      },
+      "wasm_over_native": 1.1437255355709082,
+      "native_over_node_context": 49.18675973062,
+      "wasm_over_node_context": 56.256153115900936
+    },
+    {
+      "workload": "typed_array_index",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4161313.3333333335,
+        "napi-wasm": 5730059,
+        "node-v8": 764433.6666666666
+      },
+      "mads": {
+        "napi-native": 21500.333333333023,
+        "napi-wasm": 74979,
+        "node-v8": 9372.0
+      },
+      "wasm_over_native": 1.3769833081543166,
+      "native_over_node_context": 5.443655237581112,
+      "wasm_over_node_context": 7.495822397496012
+    },
+    {
+      "workload": "typed_array_index",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 475868.3333333333,
+        "napi-wasm": 693563.6666666666,
+        "node-v8": 51984.333333333336
+      },
+      "mads": {
+        "napi-native": 5828.333333333314,
+        "napi-wasm": 14442.333333333256,
+        "node-v8": 91.33333333332848
+      },
+      "wasm_over_native": 1.4574696782373275,
+      "native_over_node_context": 9.154072060171973,
+      "wasm_over_node_context": 13.341782460100157
+    },
+    {
+      "workload": "regexp_exec",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 6966018.666666667,
+        "napi-wasm": 8913152.333333334,
+        "node-v8": 877595.6666666666
+      },
+      "mads": {
+        "napi-native": 6102.333333333023,
+        "napi-wasm": 293310.0,
+        "node-v8": 55449.666666666744
+      },
+      "wasm_over_native": 1.2795188700805473,
+      "native_over_node_context": 7.937617437339216,
+      "wasm_over_node_context": 10.156331294555923
+    },
+    {
+      "workload": "regexp_exec",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 3064422,
+        "napi-wasm": 3474058.6666666665,
+        "node-v8": 211322
+      },
+      "mads": {
+        "napi-native": 57664.33333333349,
+        "napi-wasm": 70664.0,
+        "node-v8": 3711.666666666657
+      },
+      "wasm_over_native": 1.133675018214419,
+      "native_over_node_context": 14.50119722508778,
+      "wasm_over_node_context": 16.439645028282275
+    },
+    {
+      "workload": "unicode_strings",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4612826.333333333,
+        "napi-wasm": 6112707.333333333,
+        "node-v8": 791430
+      },
+      "mads": {
+        "napi-native": 25633.0,
+        "napi-wasm": 66817.0,
+        "node-v8": 55372.66666666663
+      },
+      "wasm_over_native": 1.3251544479707633,
+      "native_over_node_context": 5.82847040588976,
+      "wasm_over_node_context": 7.723623483230776
+    },
+    {
+      "workload": "unicode_strings",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 843553,
+        "napi-wasm": 1131384.3333333333,
+        "node-v8": 45642.333333333336
+      },
+      "mads": {
+        "napi-native": 10210,
+        "napi-wasm": 42883.0,
+        "node-v8": 325.33333333333576
+      },
+      "wasm_over_native": 1.3412130990386297,
+      "native_over_node_context": 18.481811476188042,
+      "wasm_over_node_context": 24.788047645825873
+    },
+    {
+      "workload": "prototype_getter",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 5597314.333333333,
+        "napi-wasm": 7371273.333333333,
+        "node-v8": 846824
+      },
+      "mads": {
+        "napi-native": 60693.33333333302,
+        "napi-wasm": 46227.33333333302,
+        "node-v8": 53887.33333333337
+      },
+      "wasm_over_native": 1.3169303873887614,
+      "native_over_node_context": 6.609772908341442,
+      "wasm_over_node_context": 8.704610796733835
+    },
+    {
+      "workload": "prototype_getter",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 1828670,
+        "napi-wasm": 2314452,
+        "node-v8": 105888
+      },
+      "mads": {
+        "napi-native": 7966.666666666744,
+        "napi-wasm": 174951.6666666665,
+        "node-v8": 2048.3333333333285
+      },
+      "wasm_over_native": 1.2656477111780693,
+      "native_over_node_context": 17.269851163493502,
+      "wasm_over_node_context": 21.85754759746147
+    },
+    {
+      "workload": "property_key_churn",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 7640664,
+        "napi-wasm": 9515545.666666666,
+        "node-v8": 1666014.3333333333
+      },
+      "mads": {
+        "napi-native": 322494.666666667,
+        "napi-wasm": 291287.33333333395,
+        "node-v8": 215027.6666666665
+      },
+      "wasm_over_native": 1.2453820331147485,
+      "native_over_node_context": 4.586193436110894,
+      "wasm_over_node_context": 5.7115629057212995
+    },
+    {
+      "workload": "property_key_churn",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 3549951,
+        "napi-wasm": 4468927,
+        "node-v8": 484884.6666666667
+      },
+      "mads": {
+        "napi-native": 68913.33333333349,
+        "napi-wasm": 45614.33333333302,
+        "node-v8": 25193.333333333314
+      },
+      "wasm_over_native": 1.2588700520091687,
+      "native_over_node_context": 7.32122759089103,
+      "wasm_over_node_context": 9.21647415811595
+    },
+    {
+      "workload": "exception_catch",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4042177.6666666665,
+        "napi-wasm": 6022912.666666667,
+        "node-v8": 1064416.6666666667
+      },
+      "mads": {
+        "napi-native": 151819.0,
+        "napi-wasm": 434716.333333333,
+        "node-v8": 13959.0
+      },
+      "wasm_over_native": 1.4900168085964884,
+      "native_over_node_context": 3.797552023800203,
+      "wasm_over_node_context": 5.658416346981915
+    },
+    {
+      "workload": "exception_catch",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 154465.66666666666,
+        "napi-wasm": 204157.33333333334,
+        "node-v8": 372911
+      },
+      "mads": {
+        "napi-native": 9800.666666666657,
+        "napi-wasm": 1573.0,
+        "node-v8": 5248.666666666686
+      },
+      "wasm_over_native": 1.3217003994415157,
+      "native_over_node_context": 0.4142159031690314,
+      "wasm_over_node_context": 0.5474693246735369
+    },
+    {
+      "workload": "spread_destructure",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 16043852.333333334,
+        "napi-wasm": 21155316,
+        "node-v8": 1116360.3333333333
+      },
+      "mads": {
+        "napi-native": 215187.66666666605,
+        "napi-wasm": 77017.66666666791,
+        "node-v8": 36022.33333333349
+      },
+      "wasm_over_native": 1.3185932879752882,
+      "native_over_node_context": 14.371571484834199,
+      "wasm_over_node_context": 18.950257697559422
+    },
+    {
+      "workload": "spread_destructure",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 11739692.666666666,
+        "napi-wasm": 14962300.333333334,
+        "node-v8": 84299
+      },
+      "mads": {
+        "napi-native": 428481.66666666605,
+        "napi-wasm": 232073.66666666605,
+        "node-v8": 7378
+      },
+      "wasm_over_native": 1.2745052837555828,
+      "native_over_node_context": 139.26253771298195,
+      "wasm_over_node_context": 177.49084014440663
+    },
+    {
+      "workload": "math_builtins",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 5431319.333333333,
+        "napi-wasm": 7397347.333333333,
+        "node-v8": 1554783.3333333333
+      },
+      "mads": {
+        "napi-native": 69406.66666666698,
+        "napi-wasm": 130333.0,
+        "node-v8": 53507.0
+      },
+      "wasm_over_native": 1.361979820986405,
+      "native_over_node_context": 3.4932966008125463,
+      "wasm_over_node_context": 4.7577994790270886
+    },
+    {
+      "workload": "math_builtins",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 1419342.3333333333,
+        "napi-wasm": 1861765.6666666667,
+        "node-v8": 729462.6666666666
+      },
+      "mads": {
+        "napi-native": 126592.33333333349,
+        "napi-wasm": 70392.66666666674,
+        "node-v8": 20757.666666666744
+      },
+      "wasm_over_native": 1.3117100948396994,
+      "native_over_node_context": 1.9457367706275122,
+      "wasm_over_node_context": 2.5522425639329045
+    },
+    {
+      "workload": "bigint_arithmetic",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4459842.666666667,
+        "napi-wasm": 6622004.333333333,
+        "node-v8": 720194.3333333334
+      },
+      "mads": {
+        "napi-native": 219624.66666666698,
+        "napi-wasm": 166513.0,
+        "node-v8": 70400.33333333337
+      },
+      "wasm_over_native": 1.484806713659854,
+      "native_over_node_context": 6.192554509593013,
+      "wasm_over_node_context": 9.19474651054831
+    },
+    {
+      "workload": "bigint_arithmetic",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 518584.6666666667,
+        "napi-wasm": 728243,
+        "node-v8": 99043.33333333333
+      },
+      "mads": {
+        "napi-native": 78692.99999999994,
+        "napi-wasm": 116339,
+        "node-v8": 7654.333333333343
+      },
+      "wasm_over_native": 1.4042894956400562,
+      "native_over_node_context": 5.23593713189513,
+      "wasm_over_node_context": 7.352771514152055
+    },
+    {
+      "workload": "cyclic_allocations",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 5972447.666666667,
+        "napi-wasm": 8612499.333333334,
+        "node-v8": 739808.3333333334
+      },
+      "mads": {
+        "napi-native": 30286.666666666977,
+        "napi-wasm": 1072.6666666679084,
+        "node-v8": 32079.0
+      },
+      "wasm_over_native": 1.4420384763522136,
+      "native_over_node_context": 8.072966196199467,
+      "wasm_over_node_context": 11.641527873210403
+    },
+    {
+      "workload": "cyclic_allocations",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 2844918.3333333335,
+        "napi-wasm": 3588993.6666666665,
+        "node-v8": 81753.33333333333
+      },
+      "mads": {
+        "napi-native": 57312.33333333302,
+        "napi-wasm": 14154.333333333489,
+        "node-v8": 1986.0
+      },
+      "wasm_over_native": 1.2615454105009458,
+      "native_over_node_context": 34.7988053494251,
+      "wasm_over_node_context": 43.900273179483
+    },
+    {
+      "workload": "generator_iteration",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4881030.333333333,
+        "napi-wasm": 6493581,
+        "node-v8": 832787
+      },
+      "mads": {
+        "napi-native": 43985.0,
+        "napi-wasm": 139739.33333333302,
+        "node-v8": 2153.333333333372
+      },
+      "wasm_over_native": 1.3303709578804093,
+      "native_over_node_context": 5.861078923342142,
+      "wasm_over_node_context": 7.797409181459365
+    },
+    {
+      "workload": "generator_iteration",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 796267,
+        "napi-wasm": 628728,
+        "node-v8": 64967.333333333336
+      },
+      "mads": {
+        "napi-native": 152302.33333333337,
+        "napi-wasm": 40754.66666666663,
+        "node-v8": 922.0
+      },
+      "wasm_over_native": 0.7895944450793515,
+      "native_over_node_context": 12.256421175770386,
+      "wasm_over_node_context": 9.677602076941232
+    },
+    {
+      "workload": "custom_iterator",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4793145,
+        "napi-wasm": 6826612.333333333,
+        "node-v8": 918244
+      },
+      "mads": {
+        "napi-native": 2914.666666666977,
+        "napi-wasm": 118200.33333333302,
+        "node-v8": 28303
+      },
+      "wasm_over_native": 1.4242449025292023,
+      "native_over_node_context": 5.219903424362152,
+      "wasm_over_node_context": 7.434420843842522
+    },
+    {
+      "workload": "custom_iterator",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 875401,
+        "napi-wasm": 1110641.3333333333,
+        "node-v8": 70975.66666666667
+      },
+      "mads": {
+        "napi-native": 62826,
+        "napi-wasm": 60116.0,
+        "node-v8": 3237.3333333333285
+      },
+      "wasm_over_native": 1.2687229433520562,
+      "native_over_node_context": 12.333818632676927,
+      "wasm_over_node_context": 15.648198678420302
+    },
+    {
+      "workload": "proxy_reflect_get",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 7946943.333333333,
+        "napi-wasm": 11128429.666666666,
+        "node-v8": 1209260
+      },
+      "mads": {
+        "napi-native": 287384.333333333,
+        "napi-wasm": 1071463.666666666,
+        "node-v8": 24733.666666666744
+      },
+      "wasm_over_native": 1.4003408857829194,
+      "native_over_node_context": 6.571740844262882,
+      "wasm_over_node_context": 9.202677394990875
+    },
+    {
+      "workload": "proxy_reflect_get",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4438430.666666667,
+        "napi-wasm": 5257186.333333333,
+        "node-v8": 364572.3333333333
+      },
+      "mads": {
+        "napi-native": 44724.333333333954,
+        "napi-wasm": 336661.66666666605,
+        "node-v8": 3634.333333333372
+      },
+      "wasm_over_native": 1.1844696308575131,
+      "native_over_node_context": 12.174348574631281,
+      "wasm_over_node_context": 14.420146162124206
+    },
+    {
+      "workload": "reflect_define_property",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 10744642.666666666,
+        "napi-wasm": 14265634,
+        "node-v8": 3309699
+      },
+      "mads": {
+        "napi-native": 57001.666666666046,
+        "napi-wasm": 579446,
+        "node-v8": 124949.33333333349
+      },
+      "wasm_over_native": 1.3276973876717726,
+      "native_over_node_context": 3.2464108266844405,
+      "wasm_over_node_context": 4.310251173898291
+    },
+    {
+      "workload": "reflect_define_property",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 6914606,
+        "napi-wasm": 8348480.333333333,
+        "node-v8": 1178081.6666666667
+      },
+      "mads": {
+        "napi-native": 141262.66666666698,
+        "napi-wasm": 273734.66666666605,
+        "node-v8": 17923.66666666651
+      },
+      "wasm_over_native": 1.2073689134758123,
+      "native_over_node_context": 5.869377476660503,
+      "wasm_over_node_context": 7.086503906774997
+    },
+    {
+      "workload": "reflect_own_keys",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 19345313,
+        "napi-wasm": 22744450,
+        "node-v8": 1792314.3333333333
+      },
+      "mads": {
+        "napi-native": 726159.3333333321,
+        "napi-wasm": 929290.6666666679,
+        "node-v8": 14851.0
+      },
+      "wasm_over_native": 1.1757085553487814,
+      "native_over_node_context": 10.793482281660788,
+      "wasm_over_node_context": 12.689989460554074
+    },
+    {
+      "workload": "reflect_own_keys",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 16632592.333333334,
+        "napi-wasm": 18787356.666666668,
+        "node-v8": 1144658.6666666667
+      },
+      "mads": {
+        "napi-native": 550158.333333334,
+        "napi-wasm": 660242.3333333321,
+        "node-v8": 58585.66666666651
+      },
+      "wasm_over_native": 1.1295507212676028,
+      "native_over_node_context": 14.530613201723018,
+      "wasm_over_node_context": 16.413064622466784
+    },
+    {
+      "workload": "date_utc_fields",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 5052533.333333333,
+        "napi-wasm": 7288729.666666667,
+        "node-v8": 839578
+      },
+      "mads": {
+        "napi-native": 76467.33333333302,
+        "napi-wasm": 129681.33333333302,
+        "node-v8": 9889.666666666628
+      },
+      "wasm_over_native": 1.4425891302053098,
+      "native_over_node_context": 6.0179439353262385,
+      "wasm_over_node_context": 8.681420507286598
+    },
+    {
+      "workload": "date_utc_fields",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 962117.6666666666,
+        "napi-wasm": 1235989.6666666667,
+        "node-v8": 108313.66666666667
+      },
+      "mads": {
+        "napi-native": 29062.333333333372,
+        "napi-wasm": 30472.66666666651,
+        "node-v8": 1937.0
+      },
+      "wasm_over_native": 1.2846554111711217,
+      "native_over_node_context": 8.882698705303424,
+      "wasm_over_node_context": 11.411206957570759
+    },
+    {
+      "workload": "date_iso_parse",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4121338,
+        "napi-wasm": 5965121.333333333,
+        "node-v8": 780682.6666666666
+      },
+      "mads": {
+        "napi-native": 42576.33333333349,
+        "napi-wasm": 103313.66666666605,
+        "node-v8": 3438.666666666628
+      },
+      "wasm_over_native": 1.4473749382684296,
+      "native_over_node_context": 5.279146285644018,
+      "wasm_over_node_context": 7.64090402929402
+    },
+    {
+      "workload": "date_iso_parse",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 280228.6666666667,
+        "napi-wasm": 426414.6666666667,
+        "node-v8": 168759
+      },
+      "mads": {
+        "napi-native": 1636.0,
+        "napi-wasm": 13441.666666666686,
+        "node-v8": 280.33333333334303
+      },
+      "wasm_over_native": 1.5216668292323174,
+      "native_over_node_context": 1.6605257596138083,
+      "wasm_over_node_context": 2.526766967490129
+    },
+    {
+      "workload": "bigint_division_modulo",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4434868.333333333,
+        "napi-wasm": 6993570,
+        "node-v8": 654521.6666666666
+      },
+      "mads": {
+        "napi-native": 179288.66666666605,
+        "napi-wasm": 164973.66666666698,
+        "node-v8": 7101.333333333256
+      },
+      "wasm_over_native": 1.5769509880225683,
+      "native_over_node_context": 6.77573953497847,
+      "wasm_over_node_context": 10.685009154267876
+    },
+    {
+      "workload": "bigint_division_modulo",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 625047.3333333334,
+        "napi-wasm": 859933.3333333334,
+        "node-v8": 73201.66666666667
+      },
+      "mads": {
+        "napi-native": 1160.0,
+        "napi-wasm": 3100.0,
+        "node-v8": 60.333333333343035
+      },
+      "wasm_over_native": 1.3757891402357794,
+      "native_over_node_context": 8.538703581430296,
+      "wasm_over_node_context": 11.747455659024157
+    },
+    {
+      "workload": "string_replace_callback",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 29832409,
+        "napi-wasm": 36236538.333333336,
+        "node-v8": 1984496.6666666667
+      },
+      "mads": {
+        "napi-native": 315105,
+        "napi-wasm": 792493.6666666716,
+        "node-v8": 10290.666666666744
+      },
+      "wasm_over_native": 1.2146702042511328,
+      "native_over_node_context": 15.032733237143255,
+      "wasm_over_node_context": 18.259813151613592
+    },
+    {
+      "workload": "string_replace_callback",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 24947357.666666668,
+        "napi-wasm": 29672924.333333332,
+        "node-v8": 1138919.3333333333
+      },
+      "mads": {
+        "napi-native": 36233.0,
+        "napi-wasm": 17638.0,
+        "node-v8": 23162.333333333256
+      },
+      "wasm_over_native": 1.1894215303202518,
+      "native_over_node_context": 21.90441143329437,
+      "wasm_over_node_context": 26.05357856775341
+    },
+    {
+      "workload": "data_view_read_write",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 10129866,
+        "napi-wasm": 14223501.333333334,
+        "node-v8": 856125.6666666666
+      },
+      "mads": {
+        "napi-native": 455560.66666666605,
+        "napi-wasm": 850599.0,
+        "node-v8": 42219.333333333256
+      },
+      "wasm_over_native": 1.4041154476607425,
+      "native_over_node_context": 11.832218556699425,
+      "wasm_over_node_context": 16.61380085555976
+    },
+    {
+      "workload": "data_view_read_write",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 6287038,
+        "napi-wasm": 7996883.666666667,
+        "node-v8": 61884.666666666664
+      },
+      "mads": {
+        "napi-native": 18320.333333333023,
+        "napi-wasm": 249880.0,
+        "node-v8": 372.0
+      },
+      "wasm_over_native": 1.2719636284473972,
+      "native_over_node_context": 101.5928232087647,
+      "wasm_over_node_context": 129.22237603283529
+    },
+    {
+      "workload": "typed_array_bulk_set",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4448201.333333333,
+        "napi-wasm": 6063229,
+        "node-v8": 665109
+      },
+      "mads": {
+        "napi-native": 21263.333333333023,
+        "napi-wasm": 105091.33333333302,
+        "node-v8": 24536.666666666628
+      },
+      "wasm_over_native": 1.363074318278759,
+      "native_over_node_context": 6.687928344577104,
+      "wasm_over_node_context": 9.116143368981625
+    },
+    {
+      "workload": "typed_array_bulk_set",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 418286,
+        "napi-wasm": 552753.6666666666,
+        "node-v8": 66833
+      },
+      "mads": {
+        "napi-native": 1861,
+        "napi-wasm": 21506.333333333256,
+        "node-v8": 3447.3333333333285
+      },
+      "wasm_over_native": 1.321473027226985,
+      "native_over_node_context": 6.2586746068558945,
+      "wasm_over_node_context": 8.270669679150519
+    },
+    {
+      "workload": "weak_map_objects",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 7187232.333333333,
+        "napi-wasm": 10100958,
+        "node-v8": 986703.3333333334
+      },
+      "mads": {
+        "napi-native": 797406.0,
+        "napi-wasm": 128597.66666666605,
+        "node-v8": 14142.333333333256
+      },
+      "wasm_over_native": 1.4054030162839224,
+      "native_over_node_context": 7.284086402194513,
+      "wasm_over_node_context": 10.237077000516873
+    },
+    {
+      "workload": "weak_map_objects",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 3216404.6666666665,
+        "napi-wasm": 3958708.3333333335,
+        "node-v8": 78003.33333333333
+      },
+      "mads": {
+        "napi-native": 56177.33333333349,
+        "napi-wasm": 57495.66666666651,
+        "node-v8": 1710.3333333333285
+      },
+      "wasm_over_native": 1.2307867770369691,
+      "native_over_node_context": 41.234195119866676,
+      "wasm_over_node_context": 50.750502115294225
+    },
+    {
+      "workload": "weak_set_objects",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 7896133.666666667,
+        "napi-wasm": 11293468.666666666,
+        "node-v8": 1002664
+      },
+      "mads": {
+        "napi-native": 63845.333333333954,
+        "napi-wasm": 87447.66666666605,
+        "node-v8": 69357.66666666674
+      },
+      "wasm_over_native": 1.4302529748630985,
+      "native_over_node_context": 7.875154255729404,
+      "wasm_over_node_context": 11.26346280176277
+    },
+    {
+      "workload": "weak_set_objects",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 3752095.3333333335,
+        "napi-wasm": 4583301.666666667,
+        "node-v8": 98372
+      },
+      "mads": {
+        "napi-native": 83652.0,
+        "napi-wasm": 70949.66666666698,
+        "node-v8": 1530.3333333333285
+      },
+      "wasm_over_native": 1.2215312404109135,
+      "native_over_node_context": 38.14190352268261,
+      "wasm_over_node_context": 46.59152672169588
+    },
+    {
+      "workload": "array_buffer_slice",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 5343856.333333333,
+        "napi-wasm": 7431712.333333333,
+        "node-v8": 945938
+      },
+      "mads": {
+        "napi-native": 111552.0,
+        "napi-wasm": 245803.0,
+        "node-v8": 74439.66666666663
+      },
+      "wasm_over_native": 1.39070212029777,
+      "native_over_node_context": 5.649267006223805,
+      "wasm_over_node_context": 7.85644760368368
+    },
+    {
+      "workload": "array_buffer_slice",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 794991.6666666666,
+        "napi-wasm": 1074588.3333333333,
+        "node-v8": 186979
+      },
+      "mads": {
+        "napi-native": 26840.666666666628,
+        "napi-wasm": 8534.333333333256,
+        "node-v8": 12189.666666666657
+      },
+      "wasm_over_native": 1.3516976068931539,
+      "native_over_node_context": 4.25176980659147,
+      "wasm_over_node_context": 5.747107072630259
+    },
+    {
+      "workload": "string_normalization",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4903716.666666667,
+        "napi-wasm": 7364591.333333333,
+        "node-v8": 998519.6666666666
+      },
+      "mads": {
+        "napi-native": 3455.0,
+        "napi-wasm": 189053.0,
+        "node-v8": 61586.66666666663
+      },
+      "wasm_over_native": 1.5018386733871925,
+      "native_over_node_context": 4.910986563776578,
+      "wasm_over_node_context": 7.375509545964543
+    },
+    {
+      "workload": "string_normalization",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 641780.6666666666,
+        "napi-wasm": 886632,
+        "node-v8": 168732.66666666666
+      },
+      "mads": {
+        "napi-native": 7143.666666666628,
+        "napi-wasm": 11464.666666666628,
+        "node-v8": 1479.333333333314
+      },
+      "wasm_over_native": 1.3815187120002577,
+      "native_over_node_context": 3.803535375485482,
+      "wasm_over_node_context": 5.25465529298812
+    },
+    {
+      "workload": "sparse_array_map",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 8945640,
+        "napi-wasm": 12692405,
+        "node-v8": 903845.6666666666
+      },
+      "mads": {
+        "napi-native": 292346.66666666605,
+        "napi-wasm": 280585.33333333395,
+        "node-v8": 118783.33333333337
+      },
+      "wasm_over_native": 1.4188369976882593,
+      "native_over_node_context": 9.897309164507067,
+      "wasm_over_node_context": 14.042668420161702
+    },
+    {
+      "workload": "sparse_array_map",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4439953.666666667,
+        "napi-wasm": 5216718,
+        "node-v8": 73818
+      },
+      "mads": {
+        "napi-native": 19510.333333333023,
+        "napi-wasm": 92530,
+        "node-v8": 3392.6666666666715
+      },
+      "wasm_over_native": 1.1749487475882818,
+      "native_over_node_context": 60.147303728991126,
+      "wasm_over_node_context": 70.66999918719011
+    },
+    {
+      "workload": "collection_map_construct_16",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4061284,
+        "napi-wasm": 6065971,
+        "node-v8": 723287.3333333334
+      },
+      "mads": {
+        "napi-native": 33167,
+        "napi-wasm": 11722,
+        "node-v8": 12555.0
+      },
+      "wasm_over_native": 1.4936091639983808,
+      "native_over_node_context": 5.6150354262160445,
+      "wasm_over_node_context": 8.386668368771838
+    },
+    {
+      "workload": "collection_map_construct_16",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 88795.66666666667,
+        "napi-wasm": 108145.33333333333,
+        "node-v8": 58304.666666666664
+      },
+      "mads": {
+        "napi-native": 1572.333333333343,
+        "napi-wasm": 7927.666666666657,
+        "node-v8": 1638.3333333333285
+      },
+      "wasm_over_native": 1.217912285509428,
+      "native_over_node_context": 1.5229598545570968,
+      "wasm_over_node_context": 1.8548315172027396
+    },
+    {
+      "workload": "collection_set_construct_16",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4116023,
+        "napi-wasm": 6131117,
+        "node-v8": 707665
+      },
+      "mads": {
+        "napi-native": 67567.66666666651,
+        "napi-wasm": 29387.333333333023,
+        "node-v8": 12700.666666666628
+      },
+      "wasm_over_native": 1.4895730660397184,
+      "native_over_node_context": 5.816343891530597,
+      "wasm_over_node_context": 8.66386920364862
+    },
+    {
+      "workload": "collection_set_construct_16",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 98198,
+        "napi-wasm": 103800.33333333333,
+        "node-v8": 56027.333333333336
+      },
+      "mads": {
+        "napi-native": 3002.3333333333285,
+        "napi-wasm": 8021.666666666657,
+        "node-v8": 5223.3333333333285
+      },
+      "wasm_over_native": 1.0570513995532835,
+      "native_over_node_context": 1.752680239406956,
+      "wasm_over_node_context": 1.8526731000345067
+    },
+    {
+      "workload": "collection_map_lookup_numbers_16",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4001896,
+        "napi-wasm": 6185857.333333333,
+        "node-v8": 758266.6666666666
+      },
+      "mads": {
+        "napi-native": 89781,
+        "napi-wasm": 185651.33333333395,
+        "node-v8": 2878.666666666628
+      },
+      "wasm_over_native": 1.545731656528139,
+      "native_over_node_context": 5.277689467205908,
+      "wasm_over_node_context": 8.1578916827853
+    },
+    {
+      "workload": "collection_map_lookup_numbers_16",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 65888.66666666667,
+        "napi-wasm": 84953.66666666667,
+        "node-v8": 56740.666666666664
+      },
+      "mads": {
+        "napi-native": 2798.0,
+        "napi-wasm": 5398.666666666657,
+        "node-v8": 4095.3333333333358
+      },
+      "wasm_over_native": 1.2893517347444678,
+      "native_over_node_context": 1.1612247535571196,
+      "wasm_over_node_context": 1.4972271504270895
+    },
+    {
+      "workload": "collection_map_lookup_strings_16",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4127858,
+        "napi-wasm": 6325009,
+        "node-v8": 732342.3333333334
+      },
+      "mads": {
+        "napi-native": 249214.3333333335,
+        "napi-wasm": 51652.66666666698,
+        "node-v8": 22738.333333333372
+      },
+      "wasm_over_native": 1.532273881514335,
+      "native_over_node_context": 5.6365142531247905,
+      "wasm_over_node_context": 8.636683572846396
+    },
+    {
+      "workload": "collection_map_lookup_strings_16",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 73589.33333333333,
+        "napi-wasm": 91553.66666666667,
+        "node-v8": 58806.666666666664
+      },
+      "mads": {
+        "napi-native": 2314.0,
+        "napi-wasm": 4500.333333333343,
+        "node-v8": 2710.3333333333285
+      },
+      "wasm_over_native": 1.2441159950717497,
+      "native_over_node_context": 1.2513773948531912,
+      "wasm_over_node_context": 1.5568586328080718
+    },
+    {
+      "workload": "collection_map_lookup_objects_16",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4115747,
+        "napi-wasm": 6145032.333333333,
+        "node-v8": 849426.3333333334
+      },
+      "mads": {
+        "napi-native": 73943.33333333349,
+        "napi-wasm": 56313.0,
+        "node-v8": 68914.66666666674
+      },
+      "wasm_over_native": 1.4930539543206454,
+      "native_over_node_context": 4.845325413740018,
+      "wasm_over_node_context": 7.234332268954851
+    },
+    {
+      "workload": "collection_map_lookup_objects_16",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 62227,
+        "napi-wasm": 79707,
+        "node-v8": 53243.333333333336
+      },
+      "mads": {
+        "napi-native": 3224,
+        "napi-wasm": 8139.3333333333285,
+        "node-v8": 1845.6666666666715
+      },
+      "wasm_over_native": 1.2809070017837916,
+      "native_over_node_context": 1.1687284793088335,
+      "wasm_over_node_context": 1.4970324923308083
+    },
+    {
+      "workload": "collection_set_has_16",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 3837657.3333333335,
+        "napi-wasm": 5982719,
+        "node-v8": 737407
+      },
+      "mads": {
+        "napi-native": 70517.33333333349,
+        "napi-wasm": 124312.66666666698,
+        "node-v8": 55235
+      },
+      "wasm_over_native": 1.5589508078365863,
+      "native_over_node_context": 5.204259429776681,
+      "wasm_over_node_context": 8.113184442241531
+    },
+    {
+      "workload": "collection_set_has_16",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 84867,
+        "napi-wasm": 99364,
+        "node-v8": 53743.333333333336
+      },
+      "mads": {
+        "napi-native": 1209,
+        "napi-wasm": 2153.3333333333285,
+        "node-v8": 2590.6666666666715
+      },
+      "wasm_over_native": 1.1708202245867063,
+      "native_over_node_context": 1.57911678967934,
+      "wasm_over_node_context": 1.8488618743410035
+    },
+    {
+      "workload": "collection_map_construct_64",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4443642,
+        "napi-wasm": 6702948,
+        "node-v8": 770814.3333333334
+      },
+      "mads": {
+        "napi-native": 74154.33333333302,
+        "napi-wasm": 531216.333333333,
+        "node-v8": 22044.333333333256
+      },
+      "wasm_over_native": 1.5084356480562566,
+      "native_over_node_context": 5.764866852934321,
+      "wasm_over_node_context": 8.695930667264014
+    },
+    {
+      "workload": "collection_map_construct_64",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 224849.66666666666,
+        "napi-wasm": 246764.33333333334,
+        "node-v8": 53483.333333333336
+      },
+      "mads": {
+        "napi-native": 9494.333333333343,
+        "napi-wasm": 11353.666666666657,
+        "node-v8": 436.0
+      },
+      "wasm_over_native": 1.0974636386682066,
+      "native_over_node_context": 4.204107198504206,
+      "wasm_over_node_context": 4.613854783421627
+    },
+    {
+      "workload": "collection_set_construct_64",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4359124,
+        "napi-wasm": 6876412,
+        "node-v8": 744245.6666666666
+      },
+      "mads": {
+        "napi-native": 358866.6666666665,
+        "napi-wasm": 933251,
+        "node-v8": 120460.0
+      },
+      "wasm_over_native": 1.5774756579532951,
+      "native_over_node_context": 5.857103635582695,
+      "wasm_over_node_context": 9.23943841124145
+    },
+    {
+      "workload": "collection_set_construct_64",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 239196,
+        "napi-wasm": 285672,
+        "node-v8": 55667
+      },
+      "mads": {
+        "napi-native": 16144.666666666657,
+        "napi-wasm": 20869.333333333314,
+        "node-v8": 848
+      },
+      "wasm_over_native": 1.1943009080419404,
+      "native_over_node_context": 4.296908401746097,
+      "wasm_over_node_context": 5.131801605978407
+    },
+    {
+      "workload": "collection_map_lookup_numbers_64",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4150524,
+        "napi-wasm": 6163639,
+        "node-v8": 826834
+      },
+      "mads": {
+        "napi-native": 136447,
+        "napi-wasm": 10862.666666666977,
+        "node-v8": 53541
+      },
+      "wasm_over_native": 1.4850267098804875,
+      "native_over_node_context": 5.019779060851392,
+      "wasm_over_node_context": 7.454505983063106
+    },
+    {
+      "workload": "collection_map_lookup_numbers_64",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 139999.33333333334,
+        "napi-wasm": 161558.66666666666,
+        "node-v8": 54142
+      },
+      "mads": {
+        "napi-native": 901.666666666657,
+        "napi-wasm": 691.666666666657,
+        "node-v8": 713
+      },
+      "wasm_over_native": 1.1539959714093875,
+      "native_over_node_context": 2.5857806016278184,
+      "wasm_over_node_context": 2.983980397227045
+    },
+    {
+      "workload": "collection_map_lookup_strings_64",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4598726.666666667,
+        "napi-wasm": 6582813.666666667,
+        "node-v8": 898025
+      },
+      "mads": {
+        "napi-native": 110320.33333333302,
+        "napi-wasm": 361535.0,
+        "node-v8": 54812.33333333337
+      },
+      "wasm_over_native": 1.4314426892081722,
+      "native_over_node_context": 5.120933901246254,
+      "wasm_over_node_context": 7.330323394857233
+    },
+    {
+      "workload": "collection_map_lookup_strings_64",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 171185.33333333334,
+        "napi-wasm": 221235.33333333334,
+        "node-v8": 75100
+      },
+      "mads": {
+        "napi-native": 9641.0,
+        "napi-wasm": 16692.0,
+        "node-v8": 2612.6666666666715
+      },
+      "wasm_over_native": 1.2923731783875565,
+      "native_over_node_context": 2.279431868619618,
+      "wasm_over_node_context": 2.9458766089658233
+    },
+    {
+      "workload": "collection_map_lookup_objects_64",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4754922,
+        "napi-wasm": 6868141,
+        "node-v8": 1025573.6666666666
+      },
+      "mads": {
+        "napi-native": 123961.66666666698,
+        "napi-wasm": 50252,
+        "node-v8": 35241.0
+      },
+      "wasm_over_native": 1.44442768987588,
+      "native_over_node_context": 4.636353442512338,
+      "wasm_over_node_context": 6.69687729241618
+    },
+    {
+      "workload": "collection_map_lookup_objects_64",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 150241.33333333334,
+        "napi-wasm": 207668.66666666666,
+        "node-v8": 64406.666666666664
+      },
+      "mads": {
+        "napi-native": 2213.0,
+        "napi-wasm": 10125.0,
+        "node-v8": 1833.6666666666642
+      },
+      "wasm_over_native": 1.382233916986892,
+      "native_over_node_context": 2.3326984784183833,
+      "wasm_over_node_context": 3.2243349549736053
+    },
+    {
+      "workload": "collection_set_has_64",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4338028.666666667,
+        "napi-wasm": 6409107.666666667,
+        "node-v8": 758719.6666666666
+      },
+      "mads": {
+        "napi-native": 64578.0,
+        "napi-wasm": 138933.33333333302,
+        "node-v8": 681.0
+      },
+      "wasm_over_native": 1.4774240004253851,
+      "native_over_node_context": 5.717564546237764,
+      "wasm_over_node_context": 8.44726708459295
+    },
+    {
+      "workload": "collection_set_has_64",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 218064.66666666666,
+        "napi-wasm": 348445.6666666667,
+        "node-v8": 78002
+      },
+      "mads": {
+        "napi-native": 9662.333333333314,
+        "napi-wasm": 50583.66666666663,
+        "node-v8": 1354.6666666666715
+      },
+      "wasm_over_native": 1.5979006227510495,
+      "native_over_node_context": 2.795629171901575,
+      "wasm_over_node_context": 4.467137594762527
+    },
+    {
+      "workload": "collection_map_construct_256",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4734486,
+        "napi-wasm": 7086281,
+        "node-v8": 777741
+      },
+      "mads": {
+        "napi-native": 130151.66666666698,
+        "napi-wasm": 44942.33333333302,
+        "node-v8": 58645
+      },
+      "wasm_over_native": 1.4967371326053134,
+      "native_over_node_context": 6.087484136749895,
+      "wasm_over_node_context": 9.11136355161937
+    },
+    {
+      "workload": "collection_map_construct_256",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 768738,
+        "napi-wasm": 791818.3333333334,
+        "node-v8": 57276.666666666664
+      },
+      "mads": {
+        "napi-native": 67243.33333333337,
+        "napi-wasm": 37846.0,
+        "node-v8": 469.0
+      },
+      "wasm_over_native": 1.0300236664940896,
+      "native_over_node_context": 13.421486352790549,
+      "wasm_over_node_context": 13.824448582901706
+    },
+    {
+      "workload": "collection_set_construct_256",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 4825522,
+        "napi-wasm": 7370503.666666667,
+        "node-v8": 707008.6666666666
+      },
+      "mads": {
+        "napi-native": 316100.666666667,
+        "napi-wasm": 717890.666666666,
+        "node-v8": 56940.0
+      },
+      "wasm_over_native": 1.5274002826360893,
+      "native_over_node_context": 6.825265696884433,
+      "wasm_over_node_context": 10.424912754487687
+    },
+    {
+      "workload": "collection_set_construct_256",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 796802.3333333334,
+        "napi-wasm": 918186.6666666666,
+        "node-v8": 59337
+      },
+      "mads": {
+        "napi-native": 119543.0,
+        "napi-wasm": 147197.66666666663,
+        "node-v8": 115
+      },
+      "wasm_over_native": 1.1523393296622708,
+      "native_over_node_context": 13.428422962625906,
+      "wasm_over_node_context": 15.474099915173781
+    },
+    {
+      "workload": "collection_map_lookup_numbers_256",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 5326630.333333333,
+        "napi-wasm": 8021536,
+        "node-v8": 1313950
+      },
+      "mads": {
+        "napi-native": 20807.333333333954,
+        "napi-wasm": 36593.66666666698,
+        "node-v8": 82741
+      },
+      "wasm_over_native": 1.505930672493323,
+      "native_over_node_context": 4.053906414500805,
+      "wasm_over_node_context": 6.104902013014194
+    },
+    {
+      "workload": "collection_map_lookup_numbers_256",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 410240.6666666667,
+        "napi-wasm": 572881.3333333334,
+        "node-v8": 94238
+      },
+      "mads": {
+        "napi-native": 465.0,
+        "napi-wasm": 5586.0,
+        "node-v8": 11663.666666666672
+      },
+      "wasm_over_native": 1.3964518388393155,
+      "native_over_node_context": 4.353240377200988,
+      "wasm_over_node_context": 6.079090529651875
+    },
+    {
+      "workload": "collection_map_lookup_strings_256",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 5374518.333333333,
+        "napi-wasm": 7754633.333333333,
+        "node-v8": 1417786.3333333333
+      },
+      "mads": {
+        "napi-native": 113425.33333333302,
+        "napi-wasm": 22876.666666666046,
+        "node-v8": 46670.0
+      },
+      "wasm_over_native": 1.442851778035303,
+      "native_over_node_context": 3.7907815916784826,
+      "wasm_over_node_context": 5.469535959696795
+    },
+    {
+      "workload": "collection_map_lookup_strings_256",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 569015.3333333334,
+        "napi-wasm": 686513,
+        "node-v8": 129480.33333333333
+      },
+      "mads": {
+        "napi-native": 33899.0,
+        "napi-wasm": 13367.333333333372,
+        "node-v8": 9119.333333333328
+      },
+      "wasm_over_native": 1.206492970898265,
+      "native_over_node_context": 4.3946081901756,
+      "wasm_over_node_context": 5.302063891298808
+    },
+    {
+      "workload": "collection_map_lookup_objects_256",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 7166157,
+        "napi-wasm": 10671855,
+        "node-v8": 1871987.3333333333
+      },
+      "mads": {
+        "napi-native": 49070.66666666698,
+        "napi-wasm": 195576,
+        "node-v8": 27925.66666666651
+      },
+      "wasm_over_native": 1.4892019530133096,
+      "native_over_node_context": 3.828101222907135,
+      "wasm_over_node_context": 5.700815817485945
+    },
+    {
+      "workload": "collection_map_lookup_objects_256",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 496621.6666666667,
+        "napi-wasm": 619052,
+        "node-v8": 112193.33333333333
+      },
+      "mads": {
+        "napi-native": 29798.0,
+        "napi-wasm": 212,
+        "node-v8": 189.33333333334303
+      },
+      "wasm_over_native": 1.2465263631268604,
+      "native_over_node_context": 4.426481074335968,
+      "wasm_over_node_context": 5.517725355041892
+    },
+    {
+      "workload": "collection_set_has_256",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 5249835.333333333,
+        "napi-wasm": 7641790.666666667,
+        "node-v8": 1223195
+      },
+      "mads": {
+        "napi-native": 93467.0,
+        "napi-wasm": 76958.66666666605,
+        "node-v8": 63072.666666666744
+      },
+      "wasm_over_native": 1.4556248303915058,
+      "native_over_node_context": 4.291903852887996,
+      "wasm_over_node_context": 6.2474018179167405
+    },
+    {
+      "workload": "collection_set_has_256",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 738602.3333333334,
+        "napi-wasm": 1132915.3333333333,
+        "node-v8": 122478
+      },
+      "mads": {
+        "napi-native": 15782.333333333372,
+        "napi-wasm": 24996.33333333349,
+        "node-v8": 5529
+      },
+      "wasm_over_native": 1.5338637345220048,
+      "native_over_node_context": 6.030489829465973,
+      "wasm_over_node_context": 9.249949650821643
+    },
+    {
+      "workload": "collection_map_construct_1024",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 6668840.333333333,
+        "napi-wasm": 9654547.666666666,
+        "node-v8": 843431.3333333334
+      },
+      "mads": {
+        "napi-native": 78127.0,
+        "napi-wasm": 7603.666666666046,
+        "node-v8": 44697.0
+      },
+      "wasm_over_native": 1.4477101241140327,
+      "native_over_node_context": 7.906796996712634,
+      "wasm_over_node_context": 11.446750061455308
+    },
+    {
+      "workload": "collection_map_construct_1024",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 2968640.3333333335,
+        "napi-wasm": 3540445.3333333335,
+        "node-v8": 91033.66666666667
+      },
+      "mads": {
+        "napi-native": 27080.0,
+        "napi-wasm": 6148.666666666977,
+        "node-v8": 2125.0
+      },
+      "wasm_over_native": 1.1926151152699422,
+      "native_over_node_context": 32.610356607994845,
+      "wasm_over_node_context": 38.891604205037694
+    },
+    {
+      "workload": "collection_set_construct_1024",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 6718797.333333333,
+        "napi-wasm": 9779107.666666666,
+        "node-v8": 848096.3333333334
+      },
+      "mads": {
+        "napi-native": 363706.333333333,
+        "napi-wasm": 16537.666666666046,
+        "node-v8": 37485.666666666744
+      },
+      "wasm_over_native": 1.4554848407393546,
+      "native_over_node_context": 7.922210094843785,
+      "wasm_over_node_context": 11.530656698197413
+    },
+    {
+      "workload": "collection_set_construct_1024",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 3072915,
+        "napi-wasm": 4104866.3333333335,
+        "node-v8": 89735
+      },
+      "mads": {
+        "napi-native": 226916.3333333335,
+        "napi-wasm": 138682.99999999953,
+        "node-v8": 3243.3333333333285
+      },
+      "wasm_over_native": 1.3358216329880044,
+      "native_over_node_context": 34.24433052877918,
+      "wasm_over_node_context": 45.74431752753478
+    },
+    {
+      "workload": "collection_map_lookup_numbers_1024",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 8479600.666666666,
+        "napi-wasm": 13672441.666666666,
+        "node-v8": 2814517.3333333335
+      },
+      "mads": {
+        "napi-native": 113584.66666666791,
+        "napi-wasm": 183169.3333333321,
+        "node-v8": 14818.333333333489
+      },
+      "wasm_over_native": 1.6123921637504786,
+      "native_over_node_context": 3.012808116773604,
+      "wasm_over_node_context": 4.857828198369596
+    },
+    {
+      "workload": "collection_map_lookup_numbers_1024",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 1644693.3333333333,
+        "napi-wasm": 2237003,
+        "node-v8": 195108
+      },
+      "mads": {
+        "napi-native": 147054.6666666665,
+        "napi-wasm": 29710.66666666651,
+        "node-v8": 7526
+      },
+      "wasm_over_native": 1.3601338040728972,
+      "native_over_node_context": 8.429656053741175,
+      "wasm_over_node_context": 11.46546015540111
+    },
+    {
+      "workload": "collection_map_lookup_strings_1024",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 10272647.333333334,
+        "napi-wasm": 14833490.666666666,
+        "node-v8": 3752235.6666666665
+      },
+      "mads": {
+        "napi-native": 27332.0,
+        "napi-wasm": 391952.0,
+        "node-v8": 98999.66666666698
+      },
+      "wasm_over_native": 1.4439793546240043,
+      "native_over_node_context": 2.7377404422092537,
+      "wasm_over_node_context": 3.9532406768693544
+    },
+    {
+      "workload": "collection_map_lookup_strings_1024",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 2285409,
+        "napi-wasm": 2725609.3333333335,
+        "node-v8": 356400
+      },
+      "mads": {
+        "napi-native": 205657.66666666674,
+        "napi-wasm": 47259.33333333349,
+        "node-v8": 180.66666666668607
+      },
+      "wasm_over_native": 1.1926133717567986,
+      "native_over_node_context": 6.412483164983165,
+      "wasm_over_node_context": 7.6476131687242805
+    },
+    {
+      "workload": "collection_map_lookup_objects_1024",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 20848096,
+        "napi-wasm": 29240524.666666668,
+        "node-v8": 5124280.333333333
+      },
+      "mads": {
+        "napi-native": 1333942.333333332,
+        "napi-wasm": 7347.0,
+        "node-v8": 102466.66666666698
+      },
+      "wasm_over_native": 1.4025513249107577,
+      "native_over_node_context": 4.068492479691946,
+      "wasm_over_node_context": 5.706269517781392
+    },
+    {
+      "workload": "collection_map_lookup_objects_1024",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 2393534.3333333335,
+        "napi-wasm": 2626643.3333333335,
+        "node-v8": 321492.6666666667
+      },
+      "mads": {
+        "napi-native": 292118.333333333,
+        "napi-wasm": 187856.0,
+        "node-v8": 19721.333333333372
+      },
+      "wasm_over_native": 1.0973911243944277,
+      "native_over_node_context": 7.445066657819048,
+      "wasm_over_node_context": 8.170150070815508
+    },
+    {
+      "workload": "collection_set_has_1024",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 10687988.666666666,
+        "napi-wasm": 15699680.666666666,
+        "node-v8": 2974967.3333333335
+      },
+      "mads": {
+        "napi-native": 779623.333333334,
+        "napi-wasm": 662751.333333334,
+        "node-v8": 264230.3333333335
+      },
+      "wasm_over_native": 1.4689088056043973,
+      "native_over_node_context": 3.592640681096554,
+      "wasm_over_node_context": 5.277261531835307
+    },
+    {
+      "workload": "collection_set_has_1024",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "medians": {
+        "napi-native": 2991702,
+        "napi-wasm": 3574119,
+        "node-v8": 340559
+      },
+      "mads": {
+        "napi-native": 261567,
+        "napi-wasm": 12202.333333333489,
+        "node-v8": 22042.333333333314
+      },
+      "wasm_over_native": 1.1946774779038822,
+      "native_over_node_context": 8.784680481208836,
+      "wasm_over_node_context": 10.494859921482034
+    },
+    {
+      "workload": "vm_lifecycle",
+      "mode": "construct_dispose",
+      "unit": "ns/instance",
+      "medians": {
+        "napi-native": 4226543,
+        "napi-wasm": 3623891,
+        "node-v8": 552445
+      },
+      "mads": {
+        "napi-native": 5740.666666666977,
+        "napi-wasm": 274260,
+        "node-v8": 13911
+      },
+      "wasm_over_native": 0.857412547322954,
+      "native_over_node_context": 7.650613183212808,
+      "wasm_over_node_context": 6.559731738001068
+    }
+  ],
+  "startup_components": [
+    {
+      "engine": "napi-native",
+      "mode": "module_load",
+      "workload": "startup",
+      "unit": "ns/component",
+      "source_sha256": null,
+      "samples": [
+        3102400,
+        3298348,
+        3205423
+      ],
+      "median": 3205423,
+      "mad": 92925
+    },
+    {
+      "engine": "node-v8",
+      "mode": "module_load",
+      "workload": "startup",
+      "unit": "ns/component",
+      "source_sha256": null,
+      "samples": [
+        517988,
+        441988,
+        510336
+      ],
+      "median": 510336,
+      "mad": 7652
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "module_load",
+      "workload": "startup",
+      "unit": "ns/component",
+      "source_sha256": null,
+      "samples": [
+        2571109,
+        2816521,
+        1828189
+      ],
+      "median": 2571109,
+      "mad": 245412
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "compile_module",
+      "workload": "startup",
+      "unit": "ns/component",
+      "source_sha256": null,
+      "samples": [
+        19360011,
+        13259410,
+        17195991
+      ],
+      "median": 17195991,
+      "mad": 2164020
+    },
+    {
+      "engine": "napi-wasm",
+      "mode": "instantiate_init",
+      "workload": "startup",
+      "unit": "ns/component",
+      "source_sha256": null,
+      "samples": [
+        9754378,
+        6010409,
+        3635177
+      ],
+      "median": 6010409,
+      "mad": 2375232
+    }
+  ],
+  "limitations": [
+    "Public source APIs, not bare engines or retained guest-function calls.",
+    "Native returns a string; WASM returns an ok/value/error/logs object; Node returns a number. API serialization stays timed; assertions and fresh-comment preparation do not.",
+    "Fresh includes creation/evaluation/disposal. Node context references are released without synchronous guest-heap disposal; V8 host GC runs between batches.",
+    "Native/WASM automatic guest cycle collection remains in their public APIs. No extra native-only explicit guest GC is imposed.",
+    "WASM compile/init and module loads are one first-use observation per fresh process, after hashing/reading files; process startup and disk-cold I/O are excluded.",
+    "Five warmup calls do not guarantee identical JIT/tiering states. Backend order rotates per sample; no CPU or host isolation.",
+    "Native/WASM builtin/console setup and bridge result formats differ. No aggregate runtime score is computed.",
+    "Aggregate timings are medians of independent process medians; full child batch samples are retained.",
+    "A ratio above one means the numerator took longer for this public API boundary.",
+    "Component startup rows have different boundaries and are not combined into an engine score.",
+    "Ratios of process medians are descriptive, not significance tests."
+  ]
+}

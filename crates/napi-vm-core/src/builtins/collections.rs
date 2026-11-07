@@ -6,17 +6,197 @@
 //! is what `===` cannot express and what distinguishes a `Map` key from a
 //! property name.
 //!
-//! Lookup is a linear scan. That is honest for the sizes a sandboxed script
-//! works with and avoids hashing values whose identity is an `Rc` address;
-//! the array and object caps bound the worst case.
+//! Small collections scan their private entry pairs directly. Larger ones use
+//! a lazy hash index into the same tombstoned list, preserving live iteration.
+//! The index stores only hashes and positions, never additional guest roots.
 
 use std::cell::RefCell;
+use std::collections::{HashMap, hash_map::RandomState};
+use std::hash::{BuildHasher, Hash, Hasher};
 use std::rc::Rc;
 
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter, strict_equals};
 use crate::value::weak::{WeakStorage, WeakTarget};
 use crate::value::{ArrayCell, CollectionKind as Kind, ObjectCell, Value};
+
+const INDEX_THRESHOLD: usize = 32;
+
+/// The entry array remains a separately traced heap allocation. Keeping the
+/// index beside it avoids adding fields to every ordinary object or array.
+#[derive(Debug)]
+pub(crate) struct CollectionData {
+    pub(crate) entries: Rc<ArrayCell>,
+    index: RefCell<IndexState>,
+}
+
+#[derive(Debug, Default)]
+struct IndexState {
+    live: usize,
+    lookup: Option<Box<KeyIndex>>,
+}
+
+#[derive(Debug, Default)]
+struct KeyIndex {
+    buckets: HashMap<u64, usize>,
+    // Only colliding fingerprints need links. Ordinary keys do not allocate
+    // a separate bucket vector, and deleted positions leave no index nodes.
+    links: HashMap<usize, usize>,
+    hasher: RandomState,
+}
+
+impl KeyIndex {
+    fn insert_hash(&mut self, hash: u64, position: usize) {
+        if let Some(previous) = self.buckets.insert(hash, position) {
+            self.links.insert(position, previous);
+        }
+    }
+
+    fn remove_hash(&mut self, hash: u64, position: usize) {
+        let Some(mut cursor) = self.buckets.get(&hash).copied() else {
+            return;
+        };
+        if cursor == position {
+            if let Some(next) = self.links.remove(&position) {
+                self.buckets.insert(hash, next);
+            } else {
+                self.buckets.remove(&hash);
+            }
+            return;
+        }
+        while let Some(next) = self.links.get(&cursor).copied() {
+            if next == position {
+                if let Some(after) = self.links.remove(&position) {
+                    self.links.insert(cursor, after);
+                } else {
+                    self.links.remove(&cursor);
+                }
+                return;
+            }
+            cursor = next;
+        }
+    }
+
+    fn position(&self, entries: &[Value], hash: u64, key: &Value) -> Option<usize> {
+        let mut cursor = *self.buckets.get(&hash)?;
+        loop {
+            if entry_matches(&entries[cursor], key) {
+                return Some(cursor);
+            }
+            cursor = *self.links.get(&cursor)?;
+        }
+    }
+}
+
+type CollectionHandle = Rc<CollectionData>;
+
+impl std::ops::Deref for CollectionData {
+    type Target = ArrayCell;
+    fn deref(&self) -> &Self::Target {
+        &self.entries
+    }
+}
+
+impl CollectionData {
+    fn push(&self, item: Value) {
+        let position = self.borrow().len();
+        self.borrow_mut().push(item);
+        let mut state = self.index.borrow_mut();
+        state.live += 1;
+        if let Some(index) = &mut state.lookup {
+            let entries = self.borrow();
+            let hash = entry_hash(&entries[position], &index.hasher);
+            index.insert_hash(hash, position);
+        } else if position + 1 >= INDEX_THRESHOLD {
+            let mut index = Box::<KeyIndex>::default();
+            for (position, item) in self.borrow().iter().enumerate() {
+                if !matches!(item, Value::Undefined) {
+                    index.insert_hash(entry_hash(item, &index.hasher), position);
+                }
+            }
+            state.lookup = Some(index);
+        }
+    }
+
+    fn delete(&self, position: usize, key: &Value) {
+        {
+            let mut state = self.index.borrow_mut();
+            state.live -= 1;
+            if let Some(index) = &mut state.lookup {
+                index.remove_hash(hash_key(key, &index.hasher), position);
+            }
+        }
+        self.borrow_mut()[position] = Value::Undefined;
+    }
+
+    fn len_live(&self) -> usize {
+        self.index.borrow().live
+    }
+}
+
+fn entry_matches(entry: &Value, key: &Value) -> bool {
+    match entry {
+        Value::Array(pair) => pair
+            .borrow()
+            .first()
+            .is_some_and(|candidate| same_value_zero(candidate, key)),
+        _ => false,
+    }
+}
+
+fn entry_hash(entry: &Value, hasher: &RandomState) -> u64 {
+    let Value::Array(pair) = entry else {
+        unreachable!("live collection entry is a private pair")
+    };
+    hash_key(&pair.borrow()[0], hasher)
+}
+
+/// Fingerprints must agree whenever SameValueZero does. Collisions are always
+/// resolved against the actual key. Hashing invokes no guest coercions/traps.
+fn hash_key(key: &Value, builder: &RandomState) -> u64 {
+    let mut h = builder.build_hasher();
+    std::mem::discriminant(key).hash(&mut h);
+    match key {
+        Value::Bool(v) => v.hash(&mut h),
+        Value::Number(v) => {
+            let bits = if v.is_nan() {
+                f64::NAN.to_bits()
+            } else if *v == 0.0 {
+                0
+            } else {
+                v.to_bits()
+            };
+            bits.hash(&mut h);
+        }
+        Value::String(v) => v.hash(&mut h),
+        Value::BigInt(v) => v.hash(&mut h),
+        Value::Symbol(v) => v.id.hash(&mut h),
+        Value::Object { props } => (Rc::as_ptr(props) as usize).hash(&mut h),
+        Value::Array(v) => (Rc::as_ptr(v) as usize).hash(&mut h),
+        Value::RealmGlobal(v) => (Rc::as_ptr(v) as usize).hash(&mut h),
+        Value::Proxy(v) => (Rc::as_ptr(v) as usize).hash(&mut h),
+        Value::Promise(v) => (Rc::as_ptr(v) as usize).hash(&mut h),
+        Value::Generator { inner } => (Rc::as_ptr(inner) as usize).hash(&mut h),
+        Value::StringIterator { inner } => (Rc::as_ptr(inner) as usize).hash(&mut h),
+        Value::Class(v) => (Rc::as_ptr(&v.prototype) as usize).hash(&mut h),
+        Value::Function(v) => (Rc::as_ptr(&v.identity) as usize).hash(&mut h),
+        Value::NativeFunction { callable, .. } => (*callable as usize).hash(&mut h),
+        Value::HostFunction { properties, .. } => {
+            properties.meta.borrow().host_function_id.hash(&mut h)
+        }
+        Value::HostPending { id } => id.hash(&mut h),
+        Value::Date(v) => (Rc::as_ptr(v) as usize).hash(&mut h),
+        Value::ArrayBuffer(v) => v.identity().hash(&mut h),
+        Value::SharedArrayBuffer(v) => v.identity().hash(&mut h),
+        Value::TypedArray(v) | Value::DataView(v) => (Rc::as_ptr(v) as usize).hash(&mut h),
+        Value::RegExp(v) => (Rc::as_ptr(v) as usize).hash(&mut h),
+        Value::Error(v) => (Rc::as_ptr(&v.identity) as usize).hash(&mut h),
+        // Null/undefined/global are singleton values. Internal-only variants
+        // have no equal-key case in strict_equals; the tag is sufficient.
+        _ => {}
+    }
+    h.finish()
+}
 
 #[derive(Clone, Copy)]
 enum Projection {
@@ -198,7 +378,7 @@ fn same_value_zero(a: &Value, b: &Value) -> bool {
     strict_equals(a, b)
 }
 
-fn entries_of(this: &Value) -> Option<Rc<ArrayCell>> {
+fn entries_of(this: &Value) -> Option<CollectionHandle> {
     let Value::Object { props } = this else {
         return None;
     };
@@ -217,7 +397,7 @@ pub fn collection_tag(value: &Value) -> Option<&'static str> {
     kind_of(value).map(Kind::tag)
 }
 
-fn require(this: &Value, method: &str) -> Result<Rc<ArrayCell>, VmErr> {
+fn require(this: &Value, method: &str) -> Result<CollectionHandle, VmErr> {
     entries_of(this).ok_or_else(|| {
         VmErr::Msg(format!(
             "TypeError: {} called on an incompatible receiver",
@@ -275,12 +455,16 @@ fn weak_insert(
     Ok(())
 }
 /// Index of the entry whose key matches, if any.
-fn position(entries: &Rc<ArrayCell>, key: &Value) -> Option<usize> {
-    entries.borrow().iter().position(|entry| {
-        entry
-            .get_prop("0")
-            .is_some_and(|candidate| same_value_zero(&candidate, key))
-    })
+fn position(entries: &CollectionHandle, key: &Value) -> Option<usize> {
+    let state = entries.index.borrow();
+    if let Some(index) = &state.lookup {
+        index.position(&entries.borrow(), hash_key(key, &index.hasher), key)
+    } else {
+        entries
+            .borrow()
+            .iter()
+            .position(|entry| entry_matches(entry, key))
+    }
 }
 
 fn entry(key: Value, value: Value) -> Value {
@@ -504,7 +688,10 @@ fn construct(
         let storage = Value::array(vec![]).as_array().expect("collection data");
         let mut meta = props.meta.borrow_mut();
         meta.collection_kind = Some(kind);
-        meta.collection_entries = Some(storage);
+        meta.collection_entries = Some(Rc::new(CollectionData {
+            entries: storage,
+            index: RefCell::default(),
+        }));
         if matches!(kind, Kind::WeakMap | Kind::WeakSet) {
             *props.weak.borrow_mut() = WeakStorage::Map(Default::default());
         }
@@ -737,11 +924,7 @@ fn new_weak_set(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<
 
 fn size_getter(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     let entries = require(&this, "size")?;
-    let size = entries
-        .borrow()
-        .iter()
-        .filter(|e| !matches!(e, Value::Undefined))
-        .count();
+    let size = entries.len_live();
     Ok(Value::Number(size as f64))
 }
 
@@ -784,7 +967,7 @@ fn map_set(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value
             if entries.borrow().len() >= crate::value::MAX_ARRAY_LEN {
                 return Err(crate::value::limit_err("Maximum collection size exceeded"));
             }
-            entries.borrow_mut().push(entry(key, value));
+            entries.push(entry(key, value));
         }
     }
     Ok(this)
@@ -806,7 +989,7 @@ fn set_add(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value
         if entries.borrow().len() >= crate::value::MAX_ARRAY_LEN {
             return Err(crate::value::limit_err("Maximum collection size exceeded"));
         }
-        entries.borrow_mut().push(entry(value.clone(), value));
+        entries.push(entry(value.clone(), value));
     }
     Ok(this)
 }
@@ -842,7 +1025,7 @@ fn collection_delete(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<
     let key = a.first().cloned().unwrap_or(Value::Undefined);
     match position(&entries, &key) {
         Some(index) => {
-            entries.borrow_mut()[index] = Value::Undefined;
+            entries.delete(index, &key);
             Ok(Value::Bool(true))
         }
         None => Ok(Value::Bool(false)),
@@ -850,8 +1033,15 @@ fn collection_delete(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<
 }
 
 fn collection_clear(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    for value in require(&this, "clear")?.borrow_mut().iter_mut() {
+    let entries = require(&this, "clear")?;
+    for value in entries.borrow_mut().iter_mut() {
         *value = Value::Undefined;
+    }
+    let mut state = entries.index.borrow_mut();
+    state.live = 0;
+    if let Some(index) = &mut state.lookup {
+        index.buckets = HashMap::new();
+        index.links = HashMap::new();
     }
     Ok(Value::Undefined)
 }
@@ -1021,15 +1211,7 @@ pub fn collection_entries_of(value: &Value) -> Option<(&'static str, Vec<(Value,
 pub fn describe_collection(value: &Value) -> Option<String> {
     let kind = kind_of(value)?;
     let entries = entries_of(value)?;
-    Some(format!(
-        "{}({})",
-        kind.tag(),
-        entries
-            .borrow()
-            .iter()
-            .filter(|e| !matches!(e, Value::Undefined))
-            .count()
-    ))
+    Some(format!("{}({})", kind.tag(), entries.len_live()))
 }
 
 #[cfg(test)]
@@ -1098,11 +1280,8 @@ fn set_record(i: &mut Interpreter, v: Value) -> Result<SetRecord, VmErr> {
         keys,
     })
 }
-fn set_count(v: &Rc<ArrayCell>) -> usize {
-    v.borrow()
-        .iter()
-        .filter(|x| !matches!(x, Value::Undefined))
-        .count()
+fn set_count(v: &CollectionHandle) -> usize {
+    v.len_live()
 }
 fn set_has_record(i: &mut Interpreter, r: &SetRecord, k: Value) -> Result<bool, VmErr> {
     Ok(i.call_this(&r.has, r.object.clone(), vec![k])?.is_truthy())
@@ -1146,7 +1325,7 @@ fn set_keys_visit(
     }
     Ok(())
 }
-fn set_copy(i: &mut Interpreter, source: &Rc<ArrayCell>) -> Result<Value, VmErr> {
+fn set_copy(i: &mut Interpreter, source: &CollectionHandle) -> Result<Value, VmErr> {
     let result = construct(i, Kind::Set, Value::Undefined, vec![])?;
     let target = entries_of(&result).unwrap();
     for item in source
@@ -1154,11 +1333,11 @@ fn set_copy(i: &mut Interpreter, source: &Rc<ArrayCell>) -> Result<Value, VmErr>
         .iter()
         .filter(|e| !matches!(e, Value::Undefined))
     {
-        target.borrow_mut().push(item.clone());
+        target.push(item.clone());
     }
     Ok(result)
 }
-fn set_require(v: &Value) -> Result<Rc<ArrayCell>, VmErr> {
+fn set_require(v: &Value) -> Result<CollectionHandle, VmErr> {
     if kind_of(v) != Some(Kind::Set) {
         return Err(VmErr::Msg("TypeError: Set receiver required".into()));
     }
@@ -1350,7 +1529,7 @@ fn group_by(i: &mut Interpreter, a: Vec<Value>, map: bool) -> Result<Value, VmEr
         let out = construct(i, Kind::Map, Value::Undefined, vec![])?;
         let entries = entries_of(&out).unwrap();
         for (key, values) in groups {
-            entries.borrow_mut().push(entry(key, Value::array(values)));
+            entries.push(entry(key, Value::array(values)));
         }
         Ok(out)
     } else {
@@ -1372,5 +1551,88 @@ fn group_by(i: &mut Interpreter, a: Vec<Value>, map: bool) -> Result<Value, VmEr
             }
         }
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod index_tests {
+    use super::*;
+
+    #[test]
+    fn fingerprint_collisions_check_keys_and_unlink_every_chain_position() {
+        let entries: Vec<_> = (0..4)
+            .map(|key| entry(Value::Number(key as f64), Value::Null))
+            .collect();
+        let mut index = KeyIndex::default();
+        for position in 0..3 {
+            index.insert_hash(7, position);
+        }
+        for key in 0..3 {
+            assert_eq!(
+                index.position(&entries, 7, &Value::Number(key as f64)),
+                Some(key)
+            );
+        }
+        assert_eq!(index.position(&entries, 7, &Value::Number(99.0)), None);
+        index.remove_hash(7, 1);
+        assert_eq!(index.position(&entries, 7, &Value::Number(1.0)), None);
+        assert_eq!(index.position(&entries, 7, &Value::Number(0.0)), Some(0));
+        index.remove_hash(7, 2);
+        index.insert_hash(7, 3);
+        assert_eq!(index.position(&entries, 7, &Value::Number(3.0)), Some(3));
+        index.remove_hash(7, 0);
+        assert_eq!(index.position(&entries, 7, &Value::Number(0.0)), None);
+        assert_eq!(index.position(&entries, 7, &Value::Number(3.0)), Some(3));
+        index.remove_hash(7, 3);
+        assert!(index.buckets.is_empty());
+        assert!(index.links.is_empty());
+    }
+
+    #[test]
+    fn equal_numeric_string_and_bigint_keys_share_fingerprints() {
+        let builder = RandomState::new();
+        for (left, right) in [
+            (Value::Number(-0.0), Value::Number(0.0)),
+            (
+                Value::Number(f64::from_bits(0x7ff8_0000_0000_0001)),
+                Value::Number(f64::from_bits(0xfff8_0000_0000_0002)),
+            ),
+            (Value::String("same".into()), Value::String("same".into())),
+            (
+                Value::BigInt(Rc::new(
+                    crate::bigint::BigInt::parse("0x10000000000000000").unwrap(),
+                )),
+                Value::BigInt(Rc::new(
+                    crate::bigint::BigInt::parse("18446744073709551616").unwrap(),
+                )),
+            ),
+        ] {
+            assert!(same_value_zero(&left, &right));
+            assert_eq!(hash_key(&left, &builder), hash_key(&right, &builder));
+        }
+    }
+
+    #[test]
+    fn host_pinned_collection_traces_indexed_entries_and_releases_after_unpin() {
+        #[cfg(feature = "napi")]
+        let mut context = crate::runtime::OwnerContext::default();
+        #[cfg(feature = "napi")]
+        let _lease = context.enter();
+        let mut vm = Interpreter::with_builtins();
+        let map = vm.eval_source("(function(){var m=new Map();for(var i=0;i<64;i++)m.set(i,i);m.set(m,{answer:42});return m;})()").unwrap();
+        let handle = entries_of(&map).unwrap();
+        let pin = crate::heap::add_root(map);
+        assert!(vm.collect_cycles().skipped.is_none());
+        let key = handle.borrow()[64].get_prop("0").unwrap();
+        let found = map_get(&mut vm, key.clone(), vec![key.clone()]).unwrap();
+        assert!(matches!(
+            found.get_prop("answer"),
+            Some(Value::Number(42.0))
+        ));
+        drop(found);
+        drop(key);
+        drop(handle);
+        crate::heap::remove_root(pin);
+        assert!(vm.collect_cycles().collected > 0);
     }
 }

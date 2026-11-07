@@ -1,0 +1,24 @@
+    Checking futures-sink v0.3.33
+    Checking futures-core v0.3.33
+   Compiling futures-macro v0.3.33
+    Checking timezone_provider v0.2.6
+   Compiling unicode-segmentation v1.13.3
+   Compiling napi-build v2.4.1
+    Checking libloading v0.9.0
+   Compiling semver v1.0.28
+    Checking nohash-hasher v0.2.0
+    Checking ctor v1.0.11
+   Compiling napi-vm v0.1.5 (/home/meme/Documentos/Default Project/node-vm)
+   Compiling convert_case v0.11.0
+    Checking futures-channel v0.3.33
+    Checking napi-sys v3.3.0
+   Compiling napi v3.12.2
+   Compiling napi-derive-backend v6.1.2
+    Checking temporal_rs v0.2.6
+    Checking futures-util v0.3.33
+    Checking napi-vm-core v0.1.5 (/home/meme/Documentos/Default Project/node-vm/crates/napi-vm-core)
+   Compiling napi-derive v3.6.3
+    Checking futures-executor v0.3.33
+    Checking futures v0.3.33
+    Checking napi-vm-runtime v0.1.5 (/home/meme/Documentos/Default Project/node-vm/crates/napi-vm-runtime)
+    Finished `ci` profile [unoptimized] target(s) in 18.66s

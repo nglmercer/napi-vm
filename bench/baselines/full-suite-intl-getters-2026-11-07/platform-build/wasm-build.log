@@ -1,0 +1,11 @@
+[INFO]: 🎯  Checking for the Wasm target...
+[INFO]: 🌀  Compiling to Wasm...
+   Compiling napi-vm-core v0.1.5 (/home/meme/Documentos/Default Project/node-vm/crates/napi-vm-core)
+   Compiling napi-vm-runtime v0.1.5 (/home/meme/Documentos/Default Project/node-vm/crates/napi-vm-runtime)
+   Compiling napi-vm v0.1.5 (/home/meme/Documentos/Default Project/node-vm)
+    Finished `release` profile [optimized] target(s) in 1m 22s
+[INFO]: ⬇️  Installing wasm-bindgen...
+[INFO]: Optional fields missing from Cargo.toml: 'description', 'repository', and 'license'. These are not necessary, but recommended
+[INFO]: ✨   Done in 1m 23s
+[INFO]: 📦   Your wasm pkg is ready to publish at /home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/platform-build/wasm.
+[WARN]: ⚠️   There's a newer version of wasm-pack available, the new version is: 0.15.1, you are using: 0.15.0. To update, navigate to: https://wasm-bindgen.github.io/wasm-pack/installer/

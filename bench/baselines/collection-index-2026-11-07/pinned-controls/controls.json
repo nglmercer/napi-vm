@@ -1,0 +1,392 @@
+{
+  "schema": 1,
+  "status": "complete",
+  "cpu_affinity": [
+    11
+  ],
+  "allowed_cpus": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+  ],
+  "helper_sha256": "12c358e901c68636b53af1179e33d62e6961f4d7100cf8db2a03f7fa972e5b70",
+  "samples": 31,
+  "iterations": 25,
+  "comparisons": [
+    {
+      "case": "property_reads",
+      "pair": 1,
+      "results": [
+        {
+          "workload": "property_reads",
+          "mode": "fresh_source",
+          "engine": "napi-vm",
+          "unit": "ns/call",
+          "before_median": 8550284.92,
+          "after_median": 8336964.12,
+          "after_over_before": 0.9750510302292944
+        },
+        {
+          "workload": "property_reads",
+          "mode": "fresh_source",
+          "engine": "rquickjs",
+          "unit": "ns/call",
+          "before_median": 675363.36,
+          "after_median": 628294.4,
+          "after_over_before": 0.9303057246102306
+        },
+        {
+          "workload": "property_reads",
+          "mode": "warm_call",
+          "engine": "napi-vm",
+          "unit": "ns/call",
+          "before_median": 1821879.4,
+          "after_median": 2008106.2,
+          "after_over_before": 1.10221686462891
+        },
+        {
+          "workload": "property_reads",
+          "mode": "warm_call",
+          "engine": "rquickjs",
+          "unit": "ns/call",
+          "before_median": 405042.28,
+          "after_median": 416476.72,
+          "after_over_before": 1.0282302380877373
+        },
+        {
+          "workload": "property_reads",
+          "mode": "warm_source",
+          "engine": "napi-vm",
+          "unit": "ns/call",
+          "before_median": 1756455.88,
+          "after_median": 1984748.32,
+          "after_over_before": 1.1299733415450208
+        },
+        {
+          "workload": "property_reads",
+          "mode": "warm_source",
+          "engine": "rquickjs",
+          "unit": "ns/call",
+          "before_median": 391484.4,
+          "after_median": 428771.2,
+          "after_over_before": 1.095244663644324
+        }
+      ]
+    },
+    {
+      "case": "property_reads",
+      "pair": 2,
+      "results": [
+        {
+          "workload": "property_reads",
+          "mode": "fresh_source",
+          "engine": "napi-vm",
+          "unit": "ns/call",
+          "before_median": 8317082.6,
+          "after_median": 8372211.48,
+          "after_over_before": 1.0066283915468148
+        },
+        {
+          "workload": "property_reads",
+          "mode": "fresh_source",
+          "engine": "rquickjs",
+          "unit": "ns/call",
+          "before_median": 644424.44,
+          "after_median": 618272.72,
+          "after_over_before": 0.9594184851213899
+        },
+        {
+          "workload": "property_reads",
+          "mode": "warm_call",
+          "engine": "napi-vm",
+          "unit": "ns/call",
+          "before_median": 1844614.64,
+          "after_median": 1842152.76,
+          "after_over_before": 0.998665368935812
+        },
+        {
+          "workload": "property_reads",
+          "mode": "warm_call",
+          "engine": "rquickjs",
+          "unit": "ns/call",
+          "before_median": 400594.96,
+          "after_median": 388039.2,
+          "after_over_before": 0.9686572192520845
+        },
+        {
+          "workload": "property_reads",
+          "mode": "warm_source",
+          "engine": "napi-vm",
+          "unit": "ns/call",
+          "before_median": 1827271.44,
+          "after_median": 1849306.28,
+          "after_over_before": 1.0120588761568998
+        },
+        {
+          "workload": "property_reads",
+          "mode": "warm_source",
+          "engine": "rquickjs",
+          "unit": "ns/call",
+          "before_median": 419198.68,
+          "after_median": 406114.16,
+          "after_over_before": 0.9687868291951682
+        }
+      ]
+    },
+    {
+      "case": "class_methods",
+      "pair": 1,
+      "results": [
+        {
+          "workload": "class_methods",
+          "mode": "fresh_source",
+          "engine": "napi-vm",
+          "unit": "ns/call",
+          "before_median": 19500138.52,
+          "after_median": 18106423.72,
+          "after_over_before": 0.92852795386194
+        },
+        {
+          "workload": "class_methods",
+          "mode": "fresh_source",
+          "engine": "rquickjs",
+          "unit": "ns/call",
+          "before_median": 680352.52,
+          "after_median": 610943.0,
+          "after_over_before": 0.8979800648052277
+        },
+        {
+          "workload": "class_methods",
+          "mode": "warm_call",
+          "engine": "napi-vm",
+          "unit": "ns/call",
+          "before_median": 10915303.2,
+          "after_median": 11130863.68,
+          "after_over_before": 1.0197484647059551
+        },
+        {
+          "workload": "class_methods",
+          "mode": "warm_call",
+          "engine": "rquickjs",
+          "unit": "ns/call",
+          "before_median": 390882.32,
+          "after_median": 409607.16,
+          "after_over_before": 1.047904034134877
+        },
+        {
+          "workload": "class_methods",
+          "mode": "warm_source",
+          "engine": "napi-vm",
+          "unit": "ns/call",
+          "before_median": 10623060.76,
+          "after_median": 11279104.32,
+          "after_over_before": 1.061756547836972
+        },
+        {
+          "workload": "class_methods",
+          "mode": "warm_source",
+          "engine": "rquickjs",
+          "unit": "ns/call",
+          "before_median": 392930.32,
+          "after_median": 400142.52,
+          "after_over_before": 1.0183549083206407
+        }
+      ]
+    },
+    {
+      "case": "class_methods",
+      "pair": 2,
+      "results": [
+        {
+          "workload": "class_methods",
+          "mode": "fresh_source",
+          "engine": "napi-vm",
+          "unit": "ns/call",
+          "before_median": 18915222.12,
+          "after_median": 20713529.44,
+          "after_over_before": 1.0950719641879627
+        },
+        {
+          "workload": "class_methods",
+          "mode": "fresh_source",
+          "engine": "rquickjs",
+          "unit": "ns/call",
+          "before_median": 652322.24,
+          "after_median": 678881.44,
+          "after_over_before": 1.0407148466990792
+        },
+        {
+          "workload": "class_methods",
+          "mode": "warm_call",
+          "engine": "napi-vm",
+          "unit": "ns/call",
+          "before_median": 11355537.2,
+          "after_median": 11482399.56,
+          "after_over_before": 1.0111718501525406
+        },
+        {
+          "workload": "class_methods",
+          "mode": "warm_call",
+          "engine": "rquickjs",
+          "unit": "ns/call",
+          "before_median": 408396.8,
+          "after_median": 423572.2,
+          "after_over_before": 1.0371584694101423
+        },
+        {
+          "workload": "class_methods",
+          "mode": "warm_source",
+          "engine": "napi-vm",
+          "unit": "ns/call",
+          "before_median": 11237594.8,
+          "after_median": 11579067.4,
+          "after_over_before": 1.0303866268607584
+        },
+        {
+          "workload": "class_methods",
+          "mode": "warm_source",
+          "engine": "rquickjs",
+          "unit": "ns/call",
+          "before_median": 403705.4,
+          "after_median": 427640.16,
+          "after_over_before": 1.0592876884976024
+        }
+      ]
+    },
+    {
+      "case": "array_index_updates",
+      "pair": 1,
+      "results": [
+        {
+          "workload": "array_index_updates",
+          "mode": "fresh_source",
+          "engine": "napi-vm",
+          "unit": "ns/call",
+          "before_median": 14227579.56,
+          "after_median": 12458925.84,
+          "after_over_before": 0.8756883619914897
+        },
+        {
+          "workload": "array_index_updates",
+          "mode": "fresh_source",
+          "engine": "rquickjs",
+          "unit": "ns/call",
+          "before_median": 720782.68,
+          "after_median": 647912.32,
+          "after_over_before": 0.8989010668236367
+        },
+        {
+          "workload": "array_index_updates",
+          "mode": "warm_call",
+          "engine": "napi-vm",
+          "unit": "ns/call",
+          "before_median": 5934884.12,
+          "after_median": 5792957.12,
+          "after_over_before": 0.976085969476351
+        },
+        {
+          "workload": "array_index_updates",
+          "mode": "warm_call",
+          "engine": "rquickjs",
+          "unit": "ns/call",
+          "before_median": 459421.32,
+          "after_median": 456108.6,
+          "after_over_before": 0.9927893638022719
+        },
+        {
+          "workload": "array_index_updates",
+          "mode": "warm_source",
+          "engine": "napi-vm",
+          "unit": "ns/call",
+          "before_median": 6112236.76,
+          "after_median": 5848088.08,
+          "after_over_before": 0.9567836308749271
+        },
+        {
+          "workload": "array_index_updates",
+          "mode": "warm_source",
+          "engine": "rquickjs",
+          "unit": "ns/call",
+          "before_median": 484373.96,
+          "after_median": 454490.0,
+          "after_over_before": 0.9383039501132554
+        }
+      ]
+    },
+    {
+      "case": "array_index_updates",
+      "pair": 2,
+      "results": [
+        {
+          "workload": "array_index_updates",
+          "mode": "fresh_source",
+          "engine": "napi-vm",
+          "unit": "ns/call",
+          "before_median": 13002940.48,
+          "after_median": 11527441.88,
+          "after_over_before": 0.8865257745146581
+        },
+        {
+          "workload": "array_index_updates",
+          "mode": "fresh_source",
+          "engine": "rquickjs",
+          "unit": "ns/call",
+          "before_median": 720142.0,
+          "after_median": 642791.04,
+          "after_over_before": 0.8925892948890636
+        },
+        {
+          "workload": "array_index_updates",
+          "mode": "warm_call",
+          "engine": "napi-vm",
+          "unit": "ns/call",
+          "before_median": 5970933.68,
+          "after_median": 5926530.12,
+          "after_over_before": 0.992563380807807
+        },
+        {
+          "workload": "array_index_updates",
+          "mode": "warm_call",
+          "engine": "rquickjs",
+          "unit": "ns/call",
+          "before_median": 461252.52,
+          "after_median": 447331.32,
+          "after_over_before": 0.9698187014783138
+        },
+        {
+          "workload": "array_index_updates",
+          "mode": "warm_source",
+          "engine": "napi-vm",
+          "unit": "ns/call",
+          "before_median": 6176440.72,
+          "after_median": 5574778.96,
+          "after_over_before": 0.9025876249323089
+        },
+        {
+          "workload": "array_index_updates",
+          "mode": "warm_source",
+          "engine": "rquickjs",
+          "unit": "ns/call",
+          "before_median": 485852.04,
+          "after_median": 449754.44,
+          "after_over_before": 0.925702483414498
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Affinity prevents cross-CPU migrations, not competition from other work.",
+    "Both engines alternate within each process; build order reverses in the second pair.",
+    "Wall-time timings, process CPU/wall counters and raw samples are descriptive, not significance tests.",
+    "Small ratios can still change with frequency, caches, code placement and host activity."
+  ]
+}

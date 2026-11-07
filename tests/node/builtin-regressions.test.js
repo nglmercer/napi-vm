@@ -196,3 +196,25 @@ test('Array.from generator side effects follow the platform generator backend', 
     else matchesNode(expression);
   }
 });
+
+
+test("Intl bound getters preserve cached identity and legacy receiver effects", () => {
+  const source = `
+var n=new Intl.NumberFormat('en-US'),d=new Intl.DateTimeFormat('en-US',{timeZone:'UTC',year:'numeric',month:'2-digit',day:'2-digit'}),c=new Intl.Collator('en-US');
+var nf=n.format,df=d.format,cf=c.compare;
+var ng=Object.getOwnPropertyDescriptor(Intl.NumberFormat.prototype,'format').get,dg=Object.getOwnPropertyDescriptor(Intl.DateTimeFormat.prototype,'format').get,cg=Object.getOwnPropertyDescriptor(Intl.Collator.prototype,'compare').get;
+
+      var nw=Object.create(Intl.NumberFormat.prototype),dw=Object.create(Intl.DateTimeFormat.prototype);
+      Intl.NumberFormat.call(nw,'en-US');Intl.DateTimeFormat.call(dw,'en-US');
+      var ns=Object.getOwnPropertySymbols(nw),ds=Object.getOwnPropertySymbols(dw);
+      var forgedN=Object.create(Intl.NumberFormat.prototype),forgedD=Object.create(Intl.DateTimeFormat.prototype);
+      forgedN[ns[0]]=d;forgedD[ds[0]]=n;
+var ok=ns.length===1&&ds.length===1&&nf===n.format&&df===d.format&&cf===c.compare;
+for(var pair of [[ng,forgedN],[dg,forgedD],[ng,d],[dg,n],[cg,n]]){try{pair[0].call(pair[1]);ok=false;}catch(e){ok=ok&&e instanceof TypeError;}}
+var marker={},traps=0;try{ng.call(new Proxy(n,{get(){traps++;throw marker;}}));ok=false;}catch(e){ok=ok&&e===marker&&traps===1;}
+var wrapper=Object.create(Intl.NumberFormat.prototype);Intl.NumberFormat.call(wrapper,'en-US');
+ok&&wrapper.format===wrapper.format&&wrapper.format(1234)==='1,234'&&nf(1234)==='1,234'&&df(1704067200000)==='01/01/2024'&&cf('a','b')<0;
+`;
+  assert.equal(runInNewContext(source), true);
+  assert.equal(runCode(source), "true");
+});

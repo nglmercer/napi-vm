@@ -1,0 +1,2188 @@
+{
+  "schema": 1,
+  "changed_inputs": [
+    "crates/napi-vm-core/src/builtins/intl/collator.rs",
+    "crates/napi-vm-core/src/builtins/intl/datetime.rs",
+    "crates/napi-vm-core/src/builtins/intl/number.rs"
+  ],
+  "results": [
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "number_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 4043806.9,
+      "after": 4111129.1,
+      "after_over_before": 1.0166482232373657
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "number_construct",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "number_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1202477.1,
+      "after": 1188605.5,
+      "after_over_before": 0.9884641462194996
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "number_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 530534.7,
+      "after": 546521.8,
+      "after_over_before": 1.030133938458691
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "number_construct",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "number_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 634372.5,
+      "after": 637811.3,
+      "after_over_before": 1.005420789835625
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "number_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 534137.4,
+      "after": 531851.7,
+      "after_over_before": 0.9957207639831998
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "number_construct",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "number_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 602058.7,
+      "after": 606002.2,
+      "after_over_before": 1.0065500257699125
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "number_format",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 4402487.1,
+      "after": 4458243.5,
+      "after_over_before": 1.012664750340779
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "number_format",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "number_format",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 757182.3,
+      "after": 764373.7,
+      "after_over_before": 1.0094975807015034
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "number_format",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 330537.0,
+      "after": 297130.4,
+      "after_over_before": 0.8989323434290262
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "number_format",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "number_format",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 129320,
+      "after": 132280,
+      "after_over_before": 1.0228889576244973
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "number_format",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 328784.1,
+      "after": 295882.5,
+      "after_over_before": 0.8999294673921276
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "number_format",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "number_format",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 113639.8,
+      "after": 112981.3,
+      "after_over_before": 0.9942053752294531
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "number_parts",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 9077232.9,
+      "after": 9101263.0,
+      "after_over_before": 1.0026472935381001
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "number_parts",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "number_parts",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1223700.7,
+      "after": 1193205.3,
+      "after_over_before": 0.9750793637692616
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "number_parts",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 3520612.1,
+      "after": 3626894.1,
+      "after_over_before": 1.0301885004599058
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "number_parts",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "number_parts",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 456060.1,
+      "after": 451987.3,
+      "after_over_before": 0.9910695980639393
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "number_parts",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 3529902.4,
+      "after": 3607047.9,
+      "after_over_before": 1.021854853550625
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "number_parts",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "number_parts",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 444367.2,
+      "after": 437226.5,
+      "after_over_before": 0.9839306321438666
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "date_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 8694409.1,
+      "after": 8821689.0,
+      "after_over_before": 1.0146392812364904
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "date_construct",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "date_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1945230.6,
+      "after": 1963419.2,
+      "after_over_before": 1.0093503567134918
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "date_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1971996.9,
+      "after": 1996061.7,
+      "after_over_before": 1.0122032646197365
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "date_construct",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "date_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1222441.6,
+      "after": 1217588.5,
+      "after_over_before": 0.9960299943980964
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "date_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1983707.5,
+      "after": 1999044.5,
+      "after_over_before": 1.0077314825900492
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "date_construct",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "date_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1174191.5,
+      "after": 1179871.9,
+      "after_over_before": 1.004837711736118
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "date_parts",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 12311640.1,
+      "after": 12672673.9,
+      "after_over_before": 1.0293245901494474
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "date_parts",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "date_parts",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1155127.5,
+      "after": 1168220.8,
+      "after_over_before": 1.0113349392166666
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "date_parts",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 4668915.1,
+      "after": 4760684.7,
+      "after_over_before": 1.0196554441523258
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "date_parts",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "date_parts",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 413178.8,
+      "after": 410369,
+      "after_over_before": 0.993199554284973
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "date_parts",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 4689469.3,
+      "after": 4740043.8,
+      "after_over_before": 1.010784695829014
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "date_parts",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "date_parts",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 397127.4,
+      "after": 389010.1,
+      "after_over_before": 0.9795599598516747
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "collator_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 8126485.5,
+      "after": 8292200.0,
+      "after_over_before": 1.0203919025020103
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "collator_construct",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "collator_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 678473,
+      "after": 718095.6,
+      "after_over_before": 1.0583996710259655
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "collator_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 306366.0,
+      "after": 314629.9,
+      "after_over_before": 1.026973946195074
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "collator_construct",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "collator_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 190564.2,
+      "after": 193709,
+      "after_over_before": 1.0165025749852281
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "collator_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 307001.8,
+      "after": 312969.7,
+      "after_over_before": 1.0194392997044317
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "collator_construct",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "collator_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 171150.8,
+      "after": 173160,
+      "after_over_before": 1.0117393550015543
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "collator_compare",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 9896019.9,
+      "after": 10057891.3,
+      "after_over_before": 1.0163572225637905
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "collator_compare",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "collator_compare",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 896854.4,
+      "after": 962709.5,
+      "after_over_before": 1.073428975762398
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "collator_compare",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 2145635.4,
+      "after": 2082725.5,
+      "after_over_before": 0.9706800605545565
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "collator_compare",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "collator_compare",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 248391.8,
+      "after": 253628.1,
+      "after_over_before": 1.0210808086257277
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "collator_compare",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 2148811.4,
+      "after": 2077202.8,
+      "after_over_before": 0.9666752512575092
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "collator_compare",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "collator_compare",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 230834.9,
+      "after": 238817.7,
+      "after_over_before": 1.0345822923656691
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "plural_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 8133119.0,
+      "after": 8396985.2,
+      "after_over_before": 1.0324434205376805
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "plural_construct",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "plural_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1200838.4,
+      "after": 1197406.5,
+      "after_over_before": 0.9971420800667268
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "plural_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 278185.7,
+      "after": 292667.5,
+      "after_over_before": 1.0520580317392303
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "plural_construct",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "plural_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 640053.1,
+      "after": 637528.3,
+      "after_over_before": 0.9960553272845645
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "plural_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 278531.3,
+      "after": 294148.8,
+      "after_over_before": 1.0560708975975053
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "plural_construct",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "plural_construct",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 612510.3,
+      "after": 607577.3,
+      "after_over_before": 0.9919462578833368
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "plural_select",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 8323041.1,
+      "after": 8448415.6,
+      "after_over_before": 1.0150635445017808
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "plural_select",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "plural_select",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 786148.9,
+      "after": 778254,
+      "after_over_before": 0.9899575004175417
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "plural_select",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 346396.4,
+      "after": 345247.0,
+      "after_over_before": 0.9966818361853644
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "plural_select",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "plural_select",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 162216.9,
+      "after": 162333.3,
+      "after_over_before": 1.0007175577883685
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "plural_select",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 345321.4,
+      "after": 343228.7,
+      "after_over_before": 0.9939398485005563
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "plural_select",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "plural_select",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 146655.6,
+      "after": 144389.7,
+      "after_over_before": 0.9845495160089353
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "segment_words",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 9799690.1,
+      "after": 9870359.9,
+      "after_over_before": 1.0072114321247772
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "segment_words",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "segment_words",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 951531.5,
+      "after": 967335.1,
+      "after_over_before": 1.0166085936198643
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "segment_words",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1582723.8,
+      "after": 1572637.2,
+      "after_over_before": 0.9936270624097521
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "segment_words",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "segment_words",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 311619.3,
+      "after": 317010.3,
+      "after_over_before": 1.0172999554263809
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "segment_words",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1568352.1,
+      "after": 1536216.7,
+      "after_over_before": 0.9795100857772945
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "segment_words",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "segment_words",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 282240.8,
+      "after": 280489.5,
+      "after_over_before": 0.9937950147533596
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "list_format",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 9461817.1,
+      "after": 9383551.0,
+      "after_over_before": 0.9917282167713853
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "list_format",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "list_format",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 657288.8,
+      "after": 670222.7,
+      "after_over_before": 1.0196776515893773
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "list_format",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1306526.3,
+      "after": 1304862.3,
+      "after_over_before": 0.998726393797048
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "list_format",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "list_format",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 124300.9,
+      "after": 122994.9,
+      "after_over_before": 0.9894932377802574
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "list_format",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1286106.3,
+      "after": 1291547.4,
+      "after_over_before": 1.0042306767333307
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "list_format",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "list_format",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 108307.8,
+      "after": 106894.4,
+      "after_over_before": 0.9869501550211526
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "relative_time",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 8452173.0,
+      "after": 8102760.9,
+      "after_over_before": 0.9586600865836514
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "relative_time",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "relative_time",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 749988.1,
+      "after": 725225.6,
+      "after_over_before": 0.9669828094605768
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "relative_time",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 213284.5,
+      "after": 217042.5,
+      "after_over_before": 1.0176196582498962
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "relative_time",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "relative_time",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 127874.8,
+      "after": 128393.4,
+      "after_over_before": 1.0040555293146107
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "relative_time",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 213322.9,
+      "after": 213898.2,
+      "after_over_before": 1.0026968506428517
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "relative_time",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "relative_time",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 113019.2,
+      "after": 112838.9,
+      "after_over_before": 0.998404695839291
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "display_names",
+      "before_status": "incompatible_result",
+      "after_status": "incompatible_result"
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "display_names",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "display_names",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 837469.6,
+      "after": 860142.8,
+      "after_over_before": 1.0270734603381424
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "display_names",
+      "before_status": "incompatible_result",
+      "after_status": "incompatible_result"
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "display_names",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "display_names",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 282116.9,
+      "after": 277979,
+      "after_over_before": 0.9853326759226405
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "display_names",
+      "before_status": "incompatible_result",
+      "after_status": "incompatible_result"
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "display_names",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "display_names",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 261506.1,
+      "after": 258109.9,
+      "after_over_before": 0.9870129224519045
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "locale_maximize",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 9229342.9,
+      "after": 9210184.7,
+      "after_over_before": 0.9979242075836189
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "locale_maximize",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "locale_maximize",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1083474.9,
+      "after": 1153220.1,
+      "after_over_before": 1.064371772710194
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "locale_maximize",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1078496.0,
+      "after": 1104811.3,
+      "after_over_before": 1.024399997774679
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "locale_maximize",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "locale_maximize",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 544632.7,
+      "after": 555228,
+      "after_over_before": 1.0194540283754538
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "locale_maximize",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1077274.5,
+      "after": 1101946.6,
+      "after_over_before": 1.0229023336206324
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "locale_maximize",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "locale_maximize",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 524071.4,
+      "after": 527731.5,
+      "after_over_before": 1.0069839720312919
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "duration_parts",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 13578987.1,
+      "after": 13727567.9,
+      "after_over_before": 1.0109419648833748
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "duration_parts",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "duration_parts",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 7410064.3,
+      "after": 7472131.9,
+      "after_over_before": 1.0083761216484992
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "duration_parts",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 4971193.4,
+      "after": 5023659.9,
+      "after_over_before": 1.0105541055795577
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "duration_parts",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "duration_parts",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 6364564.4,
+      "after": 6203645.8,
+      "after_over_before": 0.9747164786328503
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "duration_parts",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 4974425.5,
+      "after": 5020057.4,
+      "after_over_before": 1.0091733005148031
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "duration_parts",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "duration_parts",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 6274698.9,
+      "after": 6145659.1,
+      "after_over_before": 0.9794349016492249
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "temporal_date_add",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 9664559.1,
+      "after": 9662174.6,
+      "after_over_before": 0.9997532737939385
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "temporal_date_add",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "temporal_date_add",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1141729.8,
+      "after": 1000277.5,
+      "after_over_before": 0.8761070263734905
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "temporal_date_add",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1464077.7,
+      "after": 1465171.5,
+      "after_over_before": 1.0007470914965784
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "temporal_date_add",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "temporal_date_add",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 156135.6,
+      "after": 144364.3,
+      "after_over_before": 0.924608481345702
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "temporal_date_add",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1465697.6,
+      "after": 1464612.3,
+      "after_over_before": 0.999259533480849
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "temporal_date_add",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "temporal_date_add",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 137655,
+      "after": 125945.4,
+      "after_over_before": 0.9149351639969489
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "temporal_date_parse",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 8534217.8,
+      "after": 8860552.7,
+      "after_over_before": 1.0382384077425348
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "temporal_date_parse",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "temporal_date_parse",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1005114.3,
+      "after": 932961.7,
+      "after_over_before": 0.9282145324168604
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "temporal_date_parse",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 481189.3,
+      "after": 479269.2,
+      "after_over_before": 0.9960096785194518
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "temporal_date_parse",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "temporal_date_parse",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 102846,
+      "after": 99020.5,
+      "after_over_before": 0.9628036092798942
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "temporal_date_parse",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 483386.2,
+      "after": 479351.3,
+      "after_over_before": 0.9916528440406449
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "temporal_date_parse",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "temporal_date_parse",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 82114.9,
+      "after": 80717.4,
+      "after_over_before": 0.9829811641979713
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "temporal_date_until",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 8565601.7,
+      "after": 8623879.2,
+      "after_over_before": 1.006803666810704
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "temporal_date_until",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "temporal_date_until",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1027802.7,
+      "after": 1014310.4,
+      "after_over_before": 0.9868726750766466
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "temporal_date_until",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 467020.3,
+      "after": 477664.1,
+      "after_over_before": 1.0227908722597283
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "temporal_date_until",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "temporal_date_until",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 159376.6,
+      "after": 155043.5,
+      "after_over_before": 0.9728121945128707
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "temporal_date_until",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 467951.4,
+      "after": 470480.0,
+      "after_over_before": 1.005403552591145
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "temporal_date_until",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "temporal_date_until",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 143019.1,
+      "after": 136546.3,
+      "after_over_before": 0.9547417093241392
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "temporal_datetime_add",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 9536339.9,
+      "after": 9484416.1,
+      "after_over_before": 0.9945551647126167
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "temporal_datetime_add",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "temporal_datetime_add",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1071212.8,
+      "after": 1068007.3,
+      "after_over_before": 0.997007597370009
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "temporal_datetime_add",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1435063.4,
+      "after": 1431550.6,
+      "after_over_before": 0.997552163897428
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "temporal_datetime_add",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "temporal_datetime_add",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 148012.4,
+      "after": 144831.2,
+      "after_over_before": 0.9785072061529981
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "temporal_datetime_add",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1424484.1,
+      "after": 1435240.2,
+      "after_over_before": 1.0075508740322197
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "temporal_datetime_add",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "temporal_datetime_add",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 130562.7,
+      "after": 129120.8,
+      "after_over_before": 0.9889562639253018
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "temporal_instant_parse",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 8316364.4,
+      "after": 8194775.6,
+      "after_over_before": 0.9853795728335328
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "temporal_instant_parse",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "temporal_instant_parse",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 939459.5,
+      "after": 918073.2,
+      "after_over_before": 0.97723552744956
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "temporal_instant_parse",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 294788.4,
+      "after": 295821.3,
+      "after_over_before": 1.0035038692160205
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "temporal_instant_parse",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "temporal_instant_parse",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 94662.6,
+      "after": 98157.3,
+      "after_over_before": 1.0369174309600624
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "temporal_instant_parse",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 295157.4,
+      "after": 296714.0,
+      "after_over_before": 1.0052737962863203
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "temporal_instant_parse",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "temporal_instant_parse",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 76137.7,
+      "after": 80179.4,
+      "after_over_before": 1.0530840831808683
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "temporal_instant_round",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 8749996.1,
+      "after": 8699324.5,
+      "after_over_before": 0.9942089574188496
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "temporal_instant_round",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "temporal_instant_round",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 974558.9,
+      "after": 1004390.2,
+      "after_over_before": 1.0306100534303262
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "temporal_instant_round",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 687232.1,
+      "after": 685140.4,
+      "after_over_before": 0.9969563412419182
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "temporal_instant_round",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "temporal_instant_round",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 112490.8,
+      "after": 120026,
+      "after_over_before": 1.0669850334427349
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "temporal_instant_round",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 695361.3,
+      "after": 690363.2,
+      "after_over_before": 0.992812225816996
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "temporal_instant_round",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "temporal_instant_round",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 92351.8,
+      "after": 96292.4,
+      "after_over_before": 1.04266944445046
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "temporal_zoned_utc",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 8622571.4,
+      "after": 8582702.5,
+      "after_over_before": 0.9953762168904742
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "temporal_zoned_utc",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "temporal_zoned_utc",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1056641.6,
+      "after": 1060560.2,
+      "after_over_before": 1.0037085422341878
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "temporal_zoned_utc",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 625906.1,
+      "after": 640044.0,
+      "after_over_before": 1.0225878929762788
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "temporal_zoned_utc",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "temporal_zoned_utc",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 194498.7,
+      "after": 197283.9,
+      "after_over_before": 1.0143198900558204
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "temporal_zoned_utc",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 622002.8,
+      "after": 643235.0,
+      "after_over_before": 1.0341352161115673
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "temporal_zoned_utc",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "temporal_zoned_utc",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 178975.3,
+      "after": 173931.9,
+      "after_over_before": 0.9718206925760147
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "temporal_duration_round",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 9092673.8,
+      "after": 9267022.9,
+      "after_over_before": 1.019174678849691
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "temporal_duration_round",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "temporal_duration_round",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1032548.3,
+      "after": 1054180.2,
+      "after_over_before": 1.020950012701585
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "temporal_duration_round",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1060454.3,
+      "after": 1077833.7,
+      "after_over_before": 1.0163886364551493
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "temporal_duration_round",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "temporal_duration_round",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 150832.3,
+      "after": 156596.8,
+      "after_over_before": 1.0382179413825818
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "temporal_duration_round",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1057197.3,
+      "after": 1068282.8,
+      "after_over_before": 1.0104857437679797
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "temporal_duration_round",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "temporal_duration_round",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 134289.4,
+      "after": 131814.8,
+      "after_over_before": 0.981572633431976
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "number_bound_getter",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 9757784.9,
+      "after": 9514414.5,
+      "after_over_before": 0.9750588476284202
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "number_bound_getter",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "number_bound_getter",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1074681.8,
+      "after": 1071850.6,
+      "after_over_before": 0.9973655457829471
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "number_bound_getter",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1823170.2,
+      "after": 1430470.6,
+      "after_over_before": 0.7846061766476877
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "number_bound_getter",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "number_bound_getter",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 368692,
+      "after": 362810.3,
+      "after_over_before": 0.9840471179195642
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "number_bound_getter",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1830081.2,
+      "after": 1426712.4,
+      "after_over_before": 0.7795896706659792
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "number_bound_getter",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "number_bound_getter",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 346889,
+      "after": 347114.9,
+      "after_over_before": 1.0006512169598922
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "collator_bound_getter",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 9343868.1,
+      "after": 9421595.5,
+      "after_over_before": 1.0083185463630422
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "collator_bound_getter",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "collator_bound_getter",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 939918.9,
+      "after": 923859.9,
+      "after_over_before": 0.9829144833665968
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "collator_bound_getter",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1530122.3,
+      "after": 1443221.4,
+      "after_over_before": 0.9432065659065291
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "collator_bound_getter",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "collator_bound_getter",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 255468.8,
+      "after": 254303,
+      "after_over_before": 0.9954366247463488
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "collator_bound_getter",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1535004.0,
+      "after": 1439866.4,
+      "after_over_before": 0.9380212689999504
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "collator_bound_getter",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "collator_bound_getter",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 240467.7,
+      "after": 237172.8,
+      "after_over_before": 0.9862979518663004
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "date_bound_getter",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 9767652.2,
+      "after": 9461655.1,
+      "after_over_before": 0.9686724001085952
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "date_bound_getter",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "date_bound_getter",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1232649.8,
+      "after": 1258960.9,
+      "after_over_before": 1.0213451541548946
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "date_bound_getter",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1740896.6,
+      "after": 1436548.9,
+      "after_over_before": 0.825177612501512
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "date_bound_getter",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "date_bound_getter",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 354384.2,
+      "after": 357871.2,
+      "after_over_before": 1.0098396034586192
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "date_bound_getter",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 1736638.5,
+      "after": 1422379.5,
+      "after_over_before": 0.8190417867621845
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "date_bound_getter",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "date_bound_getter",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 337074.1,
+      "after": 343835.8,
+      "after_over_before": 1.0200599808766084
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "date_format",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 8996443.6,
+      "after": 8961388.6,
+      "after_over_before": 0.9961034602606745
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "date_format",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "fresh_source",
+      "workload": "date_format",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 894323.5,
+      "after": 903823.3,
+      "after_over_before": 1.0106223307337894
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "date_format",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 839360.2,
+      "after": 863785.5,
+      "after_over_before": 1.0290999025209917
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "date_format",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_source",
+      "workload": "date_format",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 199881.8,
+      "after": 200406.5,
+      "after_over_before": 1.0026250514053807
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "date_format",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 832736.2,
+      "after": 847311.5,
+      "after_over_before": 1.0175029018793706
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "date_format",
+      "before_status": "unsupported",
+      "after_status": "unsupported"
+    },
+    {
+      "engine": "node-v8-context",
+      "mode": "warm_call",
+      "workload": "date_format",
+      "before_status": "measured",
+      "after_status": "measured",
+      "before": 182372.3,
+      "after": 183737.8,
+      "after_over_before": 1.0074874309311228
+    }
+  ]
+}

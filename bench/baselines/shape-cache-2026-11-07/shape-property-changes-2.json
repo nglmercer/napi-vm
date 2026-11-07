@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "removed": [],
+  "added": [],
+  "results": [
+    {
+      "workload": "property_reads",
+      "mode": "fresh_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 7678081.7,
+      "after_median": 8729901.1,
+      "after_over_before": 1.136989868185435
+    },
+    {
+      "workload": "property_reads",
+      "mode": "fresh_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 571021.0,
+      "after_median": 640342.8333333334,
+      "after_over_before": 1.121399796738357
+    },
+    {
+      "workload": "property_reads",
+      "mode": "warm_call",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 1631108.9666666666,
+      "after_median": 1698489.7,
+      "after_over_before": 1.041309768206984
+    },
+    {
+      "workload": "property_reads",
+      "mode": "warm_call",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 380992.0,
+      "after_median": 381283.1666666667,
+      "after_over_before": 1.000764233019766
+    },
+    {
+      "workload": "property_reads",
+      "mode": "warm_source",
+      "engine": "napi-vm",
+      "unit": "ns/call",
+      "before_median": 1653269.4333333333,
+      "after_median": 1677457.3,
+      "after_over_before": 1.0146303235147214
+    },
+    {
+      "workload": "property_reads",
+      "mode": "warm_source",
+      "engine": "rquickjs",
+      "unit": "ns/call",
+      "before_median": 385932.63333333336,
+      "after_median": 384320.3,
+      "after_over_before": 0.9958222415155529
+    }
+  ],
+  "provenance_warnings": [],
+  "build_environment_differences": {},
+  "warning": "Ratios are descriptive. Inspect raw samples/MAD and repeat interleaved measurements."
+}

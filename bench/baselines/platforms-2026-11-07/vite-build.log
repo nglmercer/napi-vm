@@ -1,0 +1,13 @@
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (playground/vite.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+vite v8.2.0 building client environment for production...
+[2Ktransforming...✓ 37 modules transformed.
+rendering chunks...
+computing gzip size...
+playground/dist/index.html                            0.66 kB │ gzip:     0.37 kB
+playground/dist/assets/napi_vm_bg-BhAT4drR.wasm  19,151.93 kB │ gzip: 9,163.54 kB
+playground/dist/assets/index-Dm1t9TnS.css            22.94 kB │ gzip:     5.18 kB
+playground/dist/assets/index-ciZZNwTA.js             66.57 kB │ gzip:    24.17 kB
+
+✓ built in 556ms

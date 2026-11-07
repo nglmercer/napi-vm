@@ -1,0 +1,213 @@
+{
+  "schema": 1,
+  "kind": "international_fixtures",
+  "cases": [
+    {
+      "name": "number_construct",
+      "requires": [
+        "Intl.NumberFormat"
+      ],
+      "setup": "",
+      "body": "let n=0;for(let i=0;i<20;i++){const f=new Intl.NumberFormat(\"en-US\");if(f.format(1234.5)!==\"1,234.5\")throw Error(\"format\");n++;}return n;",
+      "expected": 20
+    },
+    {
+      "name": "number_format",
+      "requires": [
+        "Intl.NumberFormat"
+      ],
+      "setup": "var f=new Intl.NumberFormat(\"en-US\");",
+      "body": "let n=0;for(let i=0;i<100;i++){if(f.format(1234.5)!==\"1,234.5\")throw Error(\"format\");n++;}return n;",
+      "expected": 100
+    },
+    {
+      "name": "number_parts",
+      "requires": [
+        "Intl.NumberFormat"
+      ],
+      "setup": "var f=new Intl.NumberFormat(\"en-US\");",
+      "body": "let n=0;for(let i=0;i<100;i++){const p=f.formatToParts(1234.5);if(p.map(x=>x.type).join()!==\"integer,group,integer,decimal,fraction\"||p.map(x=>x.value).join(\"\")!==\"1,234.5\")throw Error(\"parts\");n++;}return n;",
+      "expected": 100
+    },
+    {
+      "name": "date_construct",
+      "requires": [
+        "Intl.DateTimeFormat"
+      ],
+      "setup": "",
+      "body": "let n=0;for(let i=0;i<20;i++){const f=new Intl.DateTimeFormat(\"en-US\",{timeZone:\"UTC\",year:\"numeric\",month:\"2-digit\",day:\"2-digit\"});const p=f.formatToParts(1704067200000);const o={};for(const x of p)o[x.type]=x.value;if(o.year!==\"2024\"||o.month!==\"01\"||o.day!==\"01\")throw Error(\"date\");n++;}return n;",
+      "expected": 20
+    },
+    {
+      "name": "date_parts",
+      "requires": [
+        "Intl.DateTimeFormat"
+      ],
+      "setup": "var f=new Intl.DateTimeFormat(\"en-US\",{timeZone:\"UTC\",year:\"numeric\",month:\"2-digit\",day:\"2-digit\"});",
+      "body": "let n=0;for(let i=0;i<100;i++){const p=f.formatToParts(1704067200000);const o={};for(const x of p)o[x.type]=x.value;if(o.year!==\"2024\"||o.month!==\"01\"||o.day!==\"01\")throw Error(\"date\");n++;}return n;",
+      "expected": 100
+    },
+    {
+      "name": "collator_construct",
+      "requires": [
+        "Intl.Collator"
+      ],
+      "setup": "",
+      "body": "let n=0;for(let i=0;i<20;i++){const f=new Intl.Collator(\"en-US\");if(!(f.compare(\"a\",\"b\")<0))throw Error(\"compare\");n++;}return n;",
+      "expected": 20
+    },
+    {
+      "name": "collator_compare",
+      "requires": [
+        "Intl.Collator"
+      ],
+      "setup": "var f=new Intl.Collator(\"en-US\");",
+      "body": "let n=0;for(let i=0;i<1000;i++){if(!(f.compare(\"a\",\"b\")<0))throw Error(\"compare\");n++;}return n;",
+      "expected": 1000
+    },
+    {
+      "name": "plural_construct",
+      "requires": [
+        "Intl.PluralRules"
+      ],
+      "setup": "",
+      "body": "let n=0;for(let i=0;i<20;i++){const f=new Intl.PluralRules(\"en-US\");if(f.select(1)!==\"one\"||f.select(2)!==\"other\")throw Error(\"plural\");n++;}return n;",
+      "expected": 20
+    },
+    {
+      "name": "plural_select",
+      "requires": [
+        "Intl.PluralRules"
+      ],
+      "setup": "var f=new Intl.PluralRules(\"en-US\");",
+      "body": "let n=0;for(let i=0;i<100;i++){if(f.select(1)!==\"one\"||f.select(2)!==\"other\")throw Error(\"plural\");n++;}return n;",
+      "expected": 100
+    },
+    {
+      "name": "segment_words",
+      "requires": [
+        "Intl.Segmenter"
+      ],
+      "setup": "var f=new Intl.Segmenter(\"en-US\",{granularity:\"word\"});",
+      "body": "let n=0;for(let i=0;i<100;i++){let words=0;for(const x of f.segment(\"one two\"))if(x.isWordLike)words++;if(words!==2)throw Error(\"segments\");n+=words;}return n;",
+      "expected": 200
+    },
+    {
+      "name": "list_format",
+      "requires": [
+        "Intl.ListFormat"
+      ],
+      "setup": "var f=new Intl.ListFormat(\"en-US\",{style:\"long\",type:\"conjunction\"});",
+      "body": "let n=0;for(let i=0;i<100;i++){if(f.format([\"A\",\"B\",\"C\"])!==\"A, B, and C\")throw Error(\"list\");n++;}return n;",
+      "expected": 100
+    },
+    {
+      "name": "relative_time",
+      "requires": [
+        "Intl.RelativeTimeFormat"
+      ],
+      "setup": "var f=new Intl.RelativeTimeFormat(\"en-US\",{numeric:\"always\"});",
+      "body": "let n=0;for(let i=0;i<100;i++){if(f.format(-1,\"day\")!==\"1 day ago\")throw Error(\"relative\");n++;}return n;",
+      "expected": 100
+    },
+    {
+      "name": "display_names",
+      "requires": [
+        "Intl.DisplayNames"
+      ],
+      "setup": "var f=new Intl.DisplayNames(\"en-US\",{type:\"region\"});",
+      "body": "let n=0;for(let i=0;i<100;i++){const name=f.of(\"US\");if(name!==\"United States\")throw Error(\"DisplayNames.of(US) returned \"+name);n++;}return n;",
+      "expected": 100
+    },
+    {
+      "name": "locale_maximize",
+      "requires": [
+        "Intl.Locale"
+      ],
+      "setup": "",
+      "body": "let n=0;for(let i=0;i<100;i++){const f=new Intl.Locale(\"en\").maximize();if(f.language!==\"en\"||f.region!==\"US\"||f.script!==\"Latn\")throw Error(\"locale\");n++;}return n;",
+      "expected": 100
+    },
+    {
+      "name": "duration_parts",
+      "requires": [
+        "Intl.DurationFormat"
+      ],
+      "setup": "var f=new Intl.DurationFormat(\"en-US\",{style:\"long\"});",
+      "body": "let n=0;for(let i=0;i<100;i++){const p=f.formatToParts({hours:1,minutes:2});if(p.filter(x=>x.type===\"integer\").map(x=>x.value).join()!==\"1,2\")throw Error(\"duration\");n++;}return n;",
+      "expected": 100
+    },
+    {
+      "name": "temporal_date_add",
+      "requires": [
+        "Temporal.PlainDate"
+      ],
+      "setup": "var start=Temporal.PlainDate.from(\"2024-01-01\");",
+      "body": "let d=start;for(let i=0;i<100;i++)d=d.add({days:1});return d.since(start).days;",
+      "expected": 100
+    },
+    {
+      "name": "temporal_date_parse",
+      "requires": [
+        "Temporal.PlainDate"
+      ],
+      "setup": "",
+      "body": "let n=0;for(let i=0;i<100;i++){const d=Temporal.PlainDate.from(\"2024-02-29\");n+=d.year+d.month+d.day;}return n;",
+      "expected": 205500
+    },
+    {
+      "name": "temporal_date_until",
+      "requires": [
+        "Temporal.PlainDate"
+      ],
+      "setup": "var a=Temporal.PlainDate.from(\"2024-01-01\"),b=Temporal.PlainDate.from(\"2024-02-01\");",
+      "body": "let n=0;for(let i=0;i<100;i++)n+=a.until(b).days;return n;",
+      "expected": 3100
+    },
+    {
+      "name": "temporal_datetime_add",
+      "requires": [
+        "Temporal.PlainDateTime"
+      ],
+      "setup": "var start=Temporal.PlainDateTime.from(\"2024-01-01T00:00\");",
+      "body": "let d=start;for(let i=0;i<100;i++)d=d.add({minutes:1});return d.hour*60+d.minute;",
+      "expected": 100
+    },
+    {
+      "name": "temporal_instant_parse",
+      "requires": [
+        "Temporal.Instant"
+      ],
+      "setup": "",
+      "body": "let n=0;for(let i=0;i<100;i++){if(Temporal.Instant.from(\"2024-01-01T00:00:00Z\").epochMilliseconds!==1704067200000)throw Error(\"instant\");n++;}return n;",
+      "expected": 100
+    },
+    {
+      "name": "temporal_instant_round",
+      "requires": [
+        "Temporal.Instant"
+      ],
+      "setup": "var a=Temporal.Instant.from(\"2024-01-01T00:00:00.123456789Z\");",
+      "body": "let n=0;for(let i=0;i<100;i++){if(a.round({smallestUnit:\"millisecond\",roundingMode:\"halfExpand\"}).epochMilliseconds!==1704067200123)throw Error(\"round\");n++;}return n;",
+      "expected": 100
+    },
+    {
+      "name": "temporal_zoned_utc",
+      "requires": [
+        "Temporal.ZonedDateTime"
+      ],
+      "setup": "",
+      "body": "let n=0;for(let i=0;i<100;i++){const d=Temporal.ZonedDateTime.from(\"2024-02-29T12:34:56+00:00[UTC]\");if(d.day!==29||d.hour!==12||d.timeZoneId!==\"UTC\")throw Error(\"zoned\");n++;}return n;",
+      "expected": 100
+    },
+    {
+      "name": "temporal_duration_round",
+      "requires": [
+        "Temporal.Duration"
+      ],
+      "setup": "var d=Temporal.Duration.from(\"PT90M\");",
+      "body": "let n=0;for(let i=0;i<100;i++){const r=d.round({largestUnit:\"hour\",smallestUnit:\"minute\"});if(r.hours!==1||r.minutes!==30)throw Error(\"duration\");n++;}return n;",
+      "expected": 100
+    }
+  ]
+}

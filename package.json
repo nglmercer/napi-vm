@@ -45,7 +45,7 @@
     "ipc:smoke": "bun examples/ipc-smoke.ts",
     "runtime:smoke": "node runtime/smoke.cjs",
     "zed:build": "cargo build --manifest-path zed-extension/Cargo.toml --target wasm32-wasip2 --release",
-    "playground:build": "wasm-pack build --target web --out-dir playground/pkg --release -- --no-default-features --features wasm,runtime",
+    "playground:build": "node tools/ci/wasm-package.mjs build",
     "playground": "vite --config playground/vite.config.ts",
     "plugins:example": "bun examples/plugins.ts",
     "plugins:generate": "node tools/plugins/generate.mjs",

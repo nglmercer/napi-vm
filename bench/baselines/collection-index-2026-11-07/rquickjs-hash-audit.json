@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "source": "/home/meme/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rquickjs-sys-0.14.0/quickjs/quickjs.c",
+  "symbol": "map_hash_key",
+  "source_sha256": "3a6b52a225c21709ef1fd314183efd3af862e867ce4ef8caabcae67922a745b3",
+  "source_matches_locked_crate_archive": true,
+  "crate_archive_sha256": "cee271d0eeba64f0915b846cb7ae02e16faf3dfdffdca91731101d9d30fe3423",
+  "rows": [
+    {
+      "sequential_integer_keys": 16,
+      "table_buckets": 16,
+      "occupied_buckets_before_seed_tag_xor": 1,
+      "largest_chain": 16
+    },
+    {
+      "sequential_integer_keys": 16,
+      "table_buckets": 32,
+      "occupied_buckets_before_seed_tag_xor": 1,
+      "largest_chain": 16
+    },
+    {
+      "sequential_integer_keys": 64,
+      "table_buckets": 64,
+      "occupied_buckets_before_seed_tag_xor": 1,
+      "largest_chain": 64
+    },
+    {
+      "sequential_integer_keys": 64,
+      "table_buckets": 128,
+      "occupied_buckets_before_seed_tag_xor": 1,
+      "largest_chain": 64
+    },
+    {
+      "sequential_integer_keys": 256,
+      "table_buckets": 256,
+      "occupied_buckets_before_seed_tag_xor": 1,
+      "largest_chain": 256
+    },
+    {
+      "sequential_integer_keys": 256,
+      "table_buckets": 512,
+      "occupied_buckets_before_seed_tag_xor": 1,
+      "largest_chain": 256
+    },
+    {
+      "sequential_integer_keys": 1024,
+      "table_buckets": 1024,
+      "occupied_buckets_before_seed_tag_xor": 1,
+      "largest_chain": 1024
+    },
+    {
+      "sequential_integer_keys": 1024,
+      "table_buckets": 2048,
+      "occupied_buckets_before_seed_tag_xor": 1,
+      "largest_chain": 1024
+    }
+  ],
+  "analysis": "The bundled numeric-key hash first converts small integer keys to doubles, XORs the double words and multiplies by 3163. Masking low bits for these power-of-two tables puts sequential small integers in one bucket. The constant per-context seed/tag XOR permutes bucket numbers without changing these occupancies. map_find_record scans a bucket chain and checks SameValueZero.",
+  "limits": [
+    "Derived from the exact locally compiled rquickjs-sys 0.14.0 source; no QuickJS source patch was made.",
+    "This explains a key-distribution sensitivity, not every observed timing or a universal ranking.",
+    "String and object fixtures remain necessary controls; numeric-only relative gains can overstate performance against other key distributions."
+  ]
+}

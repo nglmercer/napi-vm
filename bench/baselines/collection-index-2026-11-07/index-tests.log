@@ -1,0 +1,15 @@
+   Compiling napi-vm-core v0.1.5 (/home/meme/Documentos/Default Project/node-vm/crates/napi-vm-core)
+   Compiling napi-vm v0.1.5 (/home/meme/Documentos/Default Project/node-vm)
+    Finished `ci` profile [unoptimized] target(s) in 33.72s
+     Running tests/collection_index.rs (target/ci/deps/collection_index-51e04ac236a4c4af)
+
+running 6 tests
+test live_iterators_survive_index_activation_clear_and_reinsertion ... ok
+test computed_upsert_rechecks_mutations_on_indexed_maps ... ok
+test indexed_keys_use_same_value_zero_and_reference_identity_without_coercion ... ok
+test index_does_not_retain_deleted_keys_and_collection_entries_remain_gc_roots ... ok
+test set_composition_and_group_by_populate_indexes_and_live_counts ... ok
+test indexing_preserves_updates_deletions_reinsertion_order_and_clear ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+

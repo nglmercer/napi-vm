@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "scope": "complete Intl402 selection; no new whole-corpus claim",
+  "variants": 6764,
+  "exact_prior_intl_variant_set": true,
+  "zero_outcome_changes": true,
+  "current_core_worker_inputs_match": true,
+  "worker_sha256": "dbbb8b5e9e15d355f2cb0dd15e3174c828831c9f512a881e36a68383cc513b65",
+  "runner_sha256": "8d79bb336c2bedcf478ad6b173a9bc1083a671b92e919600dc3714ca258ca22c",
+  "report_sha256": "da03900eac825c6f668208395744111a83c91224adf299e7090dac0edc1ffc6f",
+  "compressed_report_sha256": "c8e5c886ede91325e9be993d9e442721065fe1bb0320dc4925dd60dc5f4df05e"
+}

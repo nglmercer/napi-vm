@@ -1,0 +1,136 @@
+{
+  "environment": {
+    "os": "linux",
+    "arch": "x64",
+    "cpu": "AMD BC-250",
+    "hostRuntime": "node",
+    "hostVersion": "v26.13.0",
+    "typescript": "6.0.3",
+    "buildMode": "emitted-esm",
+    "runtime": "node"
+  },
+  "sampleCount": 10,
+  "warmupCalls": 10,
+  "payloads": [
+    {
+      "payloadBytes": 64,
+      "p50Ms": 0.6908080000000041,
+      "p95Ms": 1.0574820000000216,
+      "p99Ms": 1.0574820000000216,
+      "sequentialCallsPerSecond": 1364.2883074079814
+    },
+    {
+      "payloadBytes": 4096,
+      "p50Ms": 1.2371499999999855,
+      "p95Ms": 2.4388720000000035,
+      "p99Ms": 2.4388720000000035,
+      "sequentialCallsPerSecond": 697.6959498261717
+    },
+    {
+      "payloadBytes": 262144,
+      "p50Ms": 9.311117000000024,
+      "p95Ms": 18.34481100000005,
+      "p99Ms": 18.34481100000005,
+      "sequentialCallsPerSecond": 92.75208581586226
+    },
+    {
+      "payloadBytes": 1048576,
+      "p50Ms": 35.825198,
+      "p95Ms": 42.31829499999998,
+      "p99Ms": 42.31829499999998,
+      "sequentialCallsPerSecond": 28.004767856535207
+    }
+  ],
+  "manyInstances": [
+    {
+      "count": 1,
+      "loadMs": 139.168186,
+      "hostRss": 93216768,
+      "pluginRss": [
+        58945536
+      ]
+    },
+    {
+      "count": 5,
+      "loadMs": 664.5449249999999,
+      "hostRss": 96493568,
+      "pluginRss": [
+        58462208,
+        58765312,
+        59482112,
+        58298368,
+        58130432
+      ]
+    },
+    {
+      "count": 20,
+      "loadMs": 2505.486323,
+      "hostRss": 104226816,
+      "pluginRss": [
+        58728448,
+        58728448,
+        59469824,
+        59473920,
+        58884096,
+        59494400,
+        58765312,
+        59019264,
+        59445248,
+        59240448,
+        59457536,
+        59408384,
+        59371520,
+        59363328,
+        58650624,
+        58646528,
+        59346944,
+        59195392,
+        58834944,
+        58195968
+      ]
+    }
+  ],
+  "footprintBytes": 86318,
+  "limitations": [
+    "New process, not cold OS cache",
+    "Linux /proc RSS is resident pages, not exclusive allocation",
+    "CPU workload is echo/serialization, not an application speedup claim",
+    "Rust/Bun standalone binary footprint measured only when those artifacts are available"
+  ],
+  "startupThroughReadyMs": 146.721226,
+  "selectedRuntime": "26.13.0",
+  "boundedConcurrency": {
+    "offered": 8,
+    "accepted": 3,
+    "rejected": [
+      "REENTRANT_CALL",
+      "REENTRANT_CALL",
+      "REENTRANT_CALL",
+      "REENTRANT_CALL",
+      "REENTRANT_CALL"
+    ],
+    "elapsedMs": 2.0060210000000325
+  },
+  "memory": {
+    "method": "process.memoryUsage().rss and Linux /proc/<pid>/status VmRSS",
+    "hostRss": 92954624,
+    "pluginRss": 91234304
+  },
+  "lifecycleMs": {
+    "quiesce": 1.4123039999999492,
+    "snapshot": 0.7296969999999874,
+    "shutdownAndReap": 13.043259000000035,
+    "restartAndInitialize": 133.198488
+  },
+  "binaryFootprints": {
+    "rustPlugin": {
+      "status": "not-built"
+    },
+    "rustHost": {
+      "status": "not-built"
+    },
+    "bunStandalone": {
+      "status": "not-built"
+    }
+  }
+}

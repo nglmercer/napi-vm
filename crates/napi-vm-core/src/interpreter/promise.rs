@@ -215,6 +215,7 @@ impl Interpreter {
         promise: &Value,
         on_fulfilled: Value,
         on_rejected: Value,
+        target: Option<Rc<RefCell<PromiseInner>>>,
         resolve: Value,
         reject: Value,
     ) -> Result<(), VmErr> {
@@ -222,7 +223,7 @@ impl Interpreter {
             promise,
             on_fulfilled,
             on_rejected,
-            None,
+            target,
             Some((resolve, reject)),
         )?;
         Ok(())

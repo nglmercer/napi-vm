@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "unchanged_core_worker_inputs": 166,
+  "existing_intl_gate": "../intl-getters-2026-11-07/source-checks.json",
+  "scope": "Runtime filesystem changes do not change core/worker inputs; no new whole-Test262-corpus claim."
+}

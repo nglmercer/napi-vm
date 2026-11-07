@@ -1,0 +1,2912 @@
+{
+  "schema": 1,
+  "rquickjs_version": "0.14.0",
+  "napi_vm_version": "0.1.5",
+  "features": {
+    "napi-vm-core": "default (no napi/wasm/runtime capabilities)",
+    "rquickjs": "default (std), Context::full"
+  },
+  "samples": 5,
+  "iterations_per_sample": 3,
+  "warmup_calls": 5,
+  "workloads": [
+    {
+      "name": "startup_dominated",
+      "source_sha256": "fff80bcbe958d04f074f22fc21578394f4901e218922dc3f96662841588b8b0c",
+      "expected": 1.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "arithmetic_loop",
+      "source_sha256": "a0c037f59a8ba97665a3700ad5dc35e37b27711cdb234fb84c3a36471722cb9a",
+      "expected": 99980000.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "recursion_fib",
+      "source_sha256": "d2120413ca1e5ec8d4fc6c645d762ddafd195006e280f0955ef21cb522187025",
+      "expected": 55.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "array_chain",
+      "source_sha256": "0d81bd0e619c007df08dd15d87c4d3e4db093d6461cbb21dfd5ed6d935343e3c",
+      "expected": 333666.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "string_ops",
+      "source_sha256": "43d18c850d117f61531d556d52205b3045ee14d23a54114b22f87cbb0367be5b",
+      "expected": 1000.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "closures",
+      "source_sha256": "85ab6cc4bf34d4444efe21109b1045ea213fd1d89bfe5083f8bced66123158ce",
+      "expected": 1001.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "json_roundtrip",
+      "source_sha256": "4628bb8adf931e4d15e81f43177632b5cc1ae1cac800d4be6281031af8596015",
+      "expected": 5.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "property_reads",
+      "source_sha256": "8aec79c74a2d3a9f076833fa2c1f0f8005f1aff7c74ef0ddf67e24875b3058da",
+      "expected": 40000.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "property_updates",
+      "source_sha256": "18f9b9ba0dcd3b737c843a7295e3ea7c788498956bb422dd9f4745948e34c1d5",
+      "expected": 9000.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "class_methods",
+      "source_sha256": "9843de9ff8d3a977c7200e9057ee775a7dbcbeddfa56011eae5a46b1074c7ed3",
+      "expected": 1000000.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "bitwise_loop",
+      "source_sha256": "d9edcceb4a9219eb5443413f68da0ed3f92a5c486c36924c5e70324e35248bad",
+      "expected": 0.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "array_index_updates",
+      "source_sha256": "03c7b6a1c3306e06e70a687fa29c364995cdfe29cb53b9ac717f34e340a5020b",
+      "expected": 5000.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "array_sort_numeric",
+      "source_sha256": "acf2defcc6cc089b14982cd224e777a7f80d64a6e5cfea242b880bf470eeff7f",
+      "expected": 999.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "map_set_get",
+      "source_sha256": "7f6f69836949701cc582ef376fbf573841441e9ed22040403b1abe8a09cf68a3",
+      "expected": 1000000.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "set_add_has_delete",
+      "source_sha256": "8669108ce6c27129cb21a167817bfe2c085800d7d1556d8ae11da9e4a69e9613",
+      "expected": 1500.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "typed_array_index",
+      "source_sha256": "433248c5e40a349b573e188e2cc406abb868799ba16cbd993cd822ba8c7a4311",
+      "expected": 1498500.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "regexp_exec",
+      "source_sha256": "a93cce7394c6ab47b97822461dd1f099af9a4e16844809ec7fd8894c8c9e5cb9",
+      "expected": 61500.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "unicode_strings",
+      "source_sha256": "effad3edd1a53e4490a9361f17a9d5e1bd48ef02e26fcd29521599f8f7799944",
+      "expected": 128516000.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "prototype_getter",
+      "source_sha256": "6b5114e76bc45c24624ea8eb7d748a31cfee04ea0f936447162cecc8d1b36f4d",
+      "expected": 5000.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "property_key_churn",
+      "source_sha256": "57613dfd002eb9b211dfaf37dba82b5a9023c5eb9a9fcb5712b3224f5bfe9d13",
+      "expected": 45150.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "exception_catch",
+      "source_sha256": "33c6bc84fdcc236634b50bb8795e062bff815336eef8e5f4b01e86d15a36dd13",
+      "expected": 124750.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "spread_destructure",
+      "source_sha256": "ed54d3b47ffe782819e028379fe0534dd1d891b20389a77cf3a293b500855a75",
+      "expected": 2000.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "ast"
+    },
+    {
+      "name": "math_builtins",
+      "source_sha256": "473bb396e36a128eaa038516a9c98788746a8bae04a9960bda9923709c74649d",
+      "expected": 999000.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "bigint_arithmetic",
+      "source_sha256": "6c5bd5cb9a01f842eee6718f669a9b96b67d2020df97518fe72738e8895fb05a",
+      "expected": 249500.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    },
+    {
+      "name": "cyclic_allocations",
+      "source_sha256": "cdba3ae7ab0fd1042650b31b366a61dad6c4b5f7e3ad2efeaf4a5bbf9a8ecdd2",
+      "expected": 300.0,
+      "top_level_tier": "Bytecode",
+      "fallback_reason": null,
+      "guest_function_tier": "bytecode"
+    }
+  ],
+  "results": [
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "startup_dominated",
+      "unit": "ns/call",
+      "source_sha256": "fff80bcbe958d04f074f22fc21578394f4901e218922dc3f96662841588b8b0c",
+      "samples": [
+        2783303.3333333335,
+        2663964.0,
+        2786390.6666666665,
+        2578904.6666666665,
+        2611703.3333333335
+      ],
+      "median": 2663964.0,
+      "mad": 85059.33333333349
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "startup_dominated",
+      "unit": "ns/call",
+      "source_sha256": "fff80bcbe958d04f074f22fc21578394f4901e218922dc3f96662841588b8b0c",
+      "samples": [
+        201710.66666666666,
+        168379.33333333334,
+        200182.66666666666,
+        164165.33333333334,
+        202945.66666666666
+      ],
+      "median": 200182.66666666666,
+      "mad": 2763.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "startup_dominated",
+      "unit": "ns/call",
+      "source_sha256": "fff80bcbe958d04f074f22fc21578394f4901e218922dc3f96662841588b8b0c",
+      "samples": [
+        1108.0,
+        45452.0,
+        2227.0,
+        1665.6666666666667,
+        1369.0
+      ],
+      "median": 1665.6666666666667,
+      "mad": 557.6666666666667
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "startup_dominated",
+      "unit": "ns/call",
+      "source_sha256": "fff80bcbe958d04f074f22fc21578394f4901e218922dc3f96662841588b8b0c",
+      "samples": [
+        2805.3333333333335,
+        6513.0,
+        5553.0,
+        3480.6666666666665,
+        3418.3333333333335
+      ],
+      "median": 3480.6666666666665,
+      "mad": 675.333333333333
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "startup_dominated",
+      "unit": "ns/call",
+      "source_sha256": "fff80bcbe958d04f074f22fc21578394f4901e218922dc3f96662841588b8b0c",
+      "samples": [
+        1291.6666666666667,
+        1412.0,
+        1408.6666666666667,
+        1460.0,
+        1358.0
+      ],
+      "median": 1408.6666666666667,
+      "mad": 50.66666666666674
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "startup_dominated",
+      "unit": "ns/call",
+      "source_sha256": "fff80bcbe958d04f074f22fc21578394f4901e218922dc3f96662841588b8b0c",
+      "samples": [
+        65.0,
+        94.0,
+        117.0,
+        94.0,
+        83.0
+      ],
+      "median": 94.0,
+      "mad": 11.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "arithmetic_loop",
+      "unit": "ns/call",
+      "source_sha256": "a0c037f59a8ba97665a3700ad5dc35e37b27711cdb234fb84c3a36471722cb9a",
+      "samples": [
+        4682837.666666667,
+        5050676.0,
+        5509855.0,
+        4914442.333333333,
+        4734579.0
+      ],
+      "median": 4914442.333333333,
+      "mad": 179863.33333333302
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "arithmetic_loop",
+      "unit": "ns/call",
+      "source_sha256": "a0c037f59a8ba97665a3700ad5dc35e37b27711cdb234fb84c3a36471722cb9a",
+      "samples": [
+        1167696.3333333333,
+        1133819.3333333333,
+        1185222.0,
+        1136189.6666666667,
+        1161440.6666666667
+      ],
+      "median": 1161440.6666666667,
+      "mad": 23781.333333333256
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "arithmetic_loop",
+      "unit": "ns/call",
+      "source_sha256": "a0c037f59a8ba97665a3700ad5dc35e37b27711cdb234fb84c3a36471722cb9a",
+      "samples": [
+        1944329.3333333333,
+        1969713.3333333333,
+        1946429.3333333333,
+        1999361.3333333333,
+        1965079.6666666667
+      ],
+      "median": 1965079.6666666667,
+      "mad": 18650.33333333349
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "arithmetic_loop",
+      "unit": "ns/call",
+      "source_sha256": "a0c037f59a8ba97665a3700ad5dc35e37b27711cdb234fb84c3a36471722cb9a",
+      "samples": [
+        955414.3333333334,
+        952533.6666666666,
+        962938.0,
+        1057609.0,
+        967258.6666666666
+      ],
+      "median": 962938.0,
+      "mad": 7523.666666666628
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "arithmetic_loop",
+      "unit": "ns/call",
+      "source_sha256": "a0c037f59a8ba97665a3700ad5dc35e37b27711cdb234fb84c3a36471722cb9a",
+      "samples": [
+        1955906.3333333333,
+        1985247.3333333333,
+        2005830.3333333333,
+        1956093.0,
+        1988644.3333333333
+      ],
+      "median": 1985247.3333333333,
+      "mad": 20583.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "arithmetic_loop",
+      "unit": "ns/call",
+      "source_sha256": "a0c037f59a8ba97665a3700ad5dc35e37b27711cdb234fb84c3a36471722cb9a",
+      "samples": [
+        947448.6666666666,
+        947724.0,
+        957688.3333333334,
+        964587.3333333334,
+        980137.6666666666
+      ],
+      "median": 957688.3333333334,
+      "mad": 9964.333333333372
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "recursion_fib",
+      "unit": "ns/call",
+      "source_sha256": "d2120413ca1e5ec8d4fc6c645d762ddafd195006e280f0955ef21cb522187025",
+      "samples": [
+        3682234.0,
+        3583244.0,
+        3591974.3333333335,
+        3176180.3333333335,
+        2986606.0
+      ],
+      "median": 3583244.0,
+      "mad": 98990.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "recursion_fib",
+      "unit": "ns/call",
+      "source_sha256": "d2120413ca1e5ec8d4fc6c645d762ddafd195006e280f0955ef21cb522187025",
+      "samples": [
+        237779.66666666666,
+        193745.66666666666,
+        314867.0,
+        211557.0,
+        225629.33333333334
+      ],
+      "median": 225629.33333333334,
+      "mad": 14072.333333333343
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "recursion_fib",
+      "unit": "ns/call",
+      "source_sha256": "d2120413ca1e5ec8d4fc6c645d762ddafd195006e280f0955ef21cb522187025",
+      "samples": [
+        103432.66666666667,
+        113669.0,
+        100445.0,
+        102675.66666666667,
+        103773.66666666667
+      ],
+      "median": 103432.66666666667,
+      "mad": 757.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "recursion_fib",
+      "unit": "ns/call",
+      "source_sha256": "d2120413ca1e5ec8d4fc6c645d762ddafd195006e280f0955ef21cb522187025",
+      "samples": [
+        21347.666666666668,
+        18962.0,
+        18007.333333333332,
+        17335.666666666668,
+        17746.666666666668
+      ],
+      "median": 18007.333333333332,
+      "mad": 671.6666666666642
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "recursion_fib",
+      "unit": "ns/call",
+      "source_sha256": "d2120413ca1e5ec8d4fc6c645d762ddafd195006e280f0955ef21cb522187025",
+      "samples": [
+        98371.33333333333,
+        99392.33333333333,
+        98725.0,
+        98794.66666666667,
+        100301.0
+      ],
+      "median": 98794.66666666667,
+      "mad": 423.33333333334303
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "recursion_fib",
+      "unit": "ns/call",
+      "source_sha256": "d2120413ca1e5ec8d4fc6c645d762ddafd195006e280f0955ef21cb522187025",
+      "samples": [
+        16260.333333333334,
+        14667.0,
+        14656.333333333334,
+        16673.666666666668,
+        14607.666666666666
+      ],
+      "median": 14667.0,
+      "mad": 59.33333333333394
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "array_chain",
+      "unit": "ns/call",
+      "source_sha256": "0d81bd0e619c007df08dd15d87c4d3e4db093d6461cbb21dfd5ed6d935343e3c",
+      "samples": [
+        9833330.666666666,
+        10006069.333333334,
+        9907228.333333334,
+        9867693.666666666,
+        9962497.333333334
+      ],
+      "median": 9907228.333333334,
+      "mad": 55269.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "array_chain",
+      "unit": "ns/call",
+      "source_sha256": "0d81bd0e619c007df08dd15d87c4d3e4db093d6461cbb21dfd5ed6d935343e3c",
+      "samples": [
+        511048.6666666667,
+        463382.0,
+        507225.3333333333,
+        466293.0,
+        513464.6666666667
+      ],
+      "median": 507225.3333333333,
+      "mad": 6239.333333333372
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "array_chain",
+      "unit": "ns/call",
+      "source_sha256": "0d81bd0e619c007df08dd15d87c4d3e4db093d6461cbb21dfd5ed6d935343e3c",
+      "samples": [
+        7535276.0,
+        6607740.0,
+        6349333.0,
+        6243143.333333333,
+        6134158.333333333
+      ],
+      "median": 6349333.0,
+      "mad": 215174.66666666698
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "array_chain",
+      "unit": "ns/call",
+      "source_sha256": "0d81bd0e619c007df08dd15d87c4d3e4db093d6461cbb21dfd5ed6d935343e3c",
+      "samples": [
+        433181.6666666667,
+        329811.0,
+        289192.3333333333,
+        289913.0,
+        289700.6666666667
+      ],
+      "median": 289913.0,
+      "mad": 720.6666666666861
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "array_chain",
+      "unit": "ns/call",
+      "source_sha256": "0d81bd0e619c007df08dd15d87c4d3e4db093d6461cbb21dfd5ed6d935343e3c",
+      "samples": [
+        6311631.666666667,
+        6293067.333333333,
+        6114158.666666667,
+        6169676.333333333,
+        6314861.666666667
+      ],
+      "median": 6293067.333333333,
+      "mad": 21794.333333333954
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "array_chain",
+      "unit": "ns/call",
+      "source_sha256": "0d81bd0e619c007df08dd15d87c4d3e4db093d6461cbb21dfd5ed6d935343e3c",
+      "samples": [
+        286643.6666666667,
+        283765.6666666667,
+        282480.0,
+        275883.6666666667,
+        283772.3333333333
+      ],
+      "median": 283765.6666666667,
+      "mad": 1285.666666666686
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "string_ops",
+      "unit": "ns/call",
+      "source_sha256": "43d18c850d117f61531d556d52205b3045ee14d23a54114b22f87cbb0367be5b",
+      "samples": [
+        9231212.0,
+        9130380.333333334,
+        9122878.0,
+        9265865.333333334,
+        9072990.666666666
+      ],
+      "median": 9130380.333333334,
+      "mad": 57389.66666666791
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "string_ops",
+      "unit": "ns/call",
+      "source_sha256": "43d18c850d117f61531d556d52205b3045ee14d23a54114b22f87cbb0367be5b",
+      "samples": [
+        514511.6666666667,
+        468151.3333333333,
+        526852.0,
+        466714.6666666667,
+        517526.6666666667
+      ],
+      "median": 514511.6666666667,
+      "mad": 12340.333333333314
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "string_ops",
+      "unit": "ns/call",
+      "source_sha256": "43d18c850d117f61531d556d52205b3045ee14d23a54114b22f87cbb0367be5b",
+      "samples": [
+        5464733.333333333,
+        5509096.666666667,
+        5680708.666666667,
+        5517239.333333333,
+        5340190.333333333
+      ],
+      "median": 5509096.666666667,
+      "mad": 44363.333333333954
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "string_ops",
+      "unit": "ns/call",
+      "source_sha256": "43d18c850d117f61531d556d52205b3045ee14d23a54114b22f87cbb0367be5b",
+      "samples": [
+        299358.3333333333,
+        292301.3333333333,
+        316083.0,
+        294115.6666666667,
+        298350.6666666667
+      ],
+      "median": 298350.6666666667,
+      "mad": 4235.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "string_ops",
+      "unit": "ns/call",
+      "source_sha256": "43d18c850d117f61531d556d52205b3045ee14d23a54114b22f87cbb0367be5b",
+      "samples": [
+        5560407.333333333,
+        5328705.333333333,
+        5457600.333333333,
+        5581622.666666667,
+        5551835.333333333
+      ],
+      "median": 5551835.333333333,
+      "mad": 29787.333333333954
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "string_ops",
+      "unit": "ns/call",
+      "source_sha256": "43d18c850d117f61531d556d52205b3045ee14d23a54114b22f87cbb0367be5b",
+      "samples": [
+        292471.6666666667,
+        293327.0,
+        290874.3333333333,
+        287521.6666666667,
+        314872.3333333333
+      ],
+      "median": 292471.6666666667,
+      "mad": 1597.3333333333721
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "closures",
+      "unit": "ns/call",
+      "source_sha256": "85ab6cc4bf34d4444efe21109b1045ea213fd1d89bfe5083f8bced66123158ce",
+      "samples": [
+        4352001.333333333,
+        3960119.3333333335,
+        3680482.6666666665,
+        4541977.666666667,
+        5290855.0
+      ],
+      "median": 4352001.333333333,
+      "mad": 391881.99999999953
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "closures",
+      "unit": "ns/call",
+      "source_sha256": "85ab6cc4bf34d4444efe21109b1045ea213fd1d89bfe5083f8bced66123158ce",
+      "samples": [
+        307229.0,
+        260973.66666666666,
+        299502.6666666667,
+        254777.33333333334,
+        340524.3333333333
+      ],
+      "median": 299502.6666666667,
+      "mad": 38529.00000000003
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "closures",
+      "unit": "ns/call",
+      "source_sha256": "85ab6cc4bf34d4444efe21109b1045ea213fd1d89bfe5083f8bced66123158ce",
+      "samples": [
+        440646.3333333333,
+        528681.0,
+        453903.3333333333,
+        454154.6666666667,
+        477267.0
+      ],
+      "median": 454154.6666666667,
+      "mad": 13508.333333333372
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "closures",
+      "unit": "ns/call",
+      "source_sha256": "85ab6cc4bf34d4444efe21109b1045ea213fd1d89bfe5083f8bced66123158ce",
+      "samples": [
+        81066.33333333333,
+        90169.33333333333,
+        93528.0,
+        94504.0,
+        112962.33333333333
+      ],
+      "median": 93528.0,
+      "mad": 3358.6666666666715
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "closures",
+      "unit": "ns/call",
+      "source_sha256": "85ab6cc4bf34d4444efe21109b1045ea213fd1d89bfe5083f8bced66123158ce",
+      "samples": [
+        432690.3333333333,
+        503537.0,
+        448485.3333333333,
+        442833.0,
+        469523.3333333333
+      ],
+      "median": 448485.3333333333,
+      "mad": 15795.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "closures",
+      "unit": "ns/call",
+      "source_sha256": "85ab6cc4bf34d4444efe21109b1045ea213fd1d89bfe5083f8bced66123158ce",
+      "samples": [
+        78901.66666666667,
+        84880.0,
+        86122.0,
+        79669.33333333333,
+        84131.66666666667
+      ],
+      "median": 84131.66666666667,
+      "mad": 1990.3333333333285
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "json_roundtrip",
+      "unit": "ns/call",
+      "source_sha256": "4628bb8adf931e4d15e81f43177632b5cc1ae1cac800d4be6281031af8596015",
+      "samples": [
+        8520902.666666666,
+        8726086.666666666,
+        8549213.0,
+        8341936.333333333,
+        8305505.333333333
+      ],
+      "median": 8520902.666666666,
+      "mad": 178966.33333333302
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "json_roundtrip",
+      "unit": "ns/call",
+      "source_sha256": "4628bb8adf931e4d15e81f43177632b5cc1ae1cac800d4be6281031af8596015",
+      "samples": [
+        1440573.0,
+        1387271.6666666667,
+        1433328.6666666667,
+        1382564.3333333333,
+        1425705.6666666667
+      ],
+      "median": 1425705.6666666667,
+      "mad": 14867.333333333256
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "json_roundtrip",
+      "unit": "ns/call",
+      "source_sha256": "4628bb8adf931e4d15e81f43177632b5cc1ae1cac800d4be6281031af8596015",
+      "samples": [
+        4626045.333333333,
+        4855590.0,
+        4644072.0,
+        5356445.0,
+        4638928.333333333
+      ],
+      "median": 4644072.0,
+      "mad": 18026.666666666977
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "json_roundtrip",
+      "unit": "ns/call",
+      "source_sha256": "4628bb8adf931e4d15e81f43177632b5cc1ae1cac800d4be6281031af8596015",
+      "samples": [
+        1215162.0,
+        1183234.6666666667,
+        1265201.3333333333,
+        1424630.3333333333,
+        1219723.6666666667
+      ],
+      "median": 1219723.6666666667,
+      "mad": 36489.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "json_roundtrip",
+      "unit": "ns/call",
+      "source_sha256": "4628bb8adf931e4d15e81f43177632b5cc1ae1cac800d4be6281031af8596015",
+      "samples": [
+        4833120.333333333,
+        4649990.0,
+        4664565.333333333,
+        4562881.0,
+        4573062.666666667
+      ],
+      "median": 4649990.0,
+      "mad": 76927.33333333302
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "json_roundtrip",
+      "unit": "ns/call",
+      "source_sha256": "4628bb8adf931e4d15e81f43177632b5cc1ae1cac800d4be6281031af8596015",
+      "samples": [
+        1185165.0,
+        1147845.3333333333,
+        1165818.3333333333,
+        1146582.6666666667,
+        1156035.0
+      ],
+      "median": 1156035.0,
+      "mad": 9452.333333333256
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "property_reads",
+      "unit": "ns/call",
+      "source_sha256": "8aec79c74a2d3a9f076833fa2c1f0f8005f1aff7c74ef0ddf67e24875b3058da",
+      "samples": [
+        4979771.333333333,
+        5544460.0,
+        5428760.333333333,
+        5445685.666666667,
+        5215633.333333333
+      ],
+      "median": 5428760.333333333,
+      "mad": 115699.66666666698
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "property_reads",
+      "unit": "ns/call",
+      "source_sha256": "8aec79c74a2d3a9f076833fa2c1f0f8005f1aff7c74ef0ddf67e24875b3058da",
+      "samples": [
+        650582.3333333334,
+        617172.6666666666,
+        635308.3333333334,
+        564020.3333333334,
+        601216.3333333334
+      ],
+      "median": 617172.6666666666,
+      "mad": 18135.666666666744
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "property_reads",
+      "unit": "ns/call",
+      "source_sha256": "8aec79c74a2d3a9f076833fa2c1f0f8005f1aff7c74ef0ddf67e24875b3058da",
+      "samples": [
+        1596680.6666666667,
+        1606174.0,
+        1579280.3333333333,
+        1615508.6666666667,
+        1603379.3333333333
+      ],
+      "median": 1603379.3333333333,
+      "mad": 6698.666666666511
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "property_reads",
+      "unit": "ns/call",
+      "source_sha256": "8aec79c74a2d3a9f076833fa2c1f0f8005f1aff7c74ef0ddf67e24875b3058da",
+      "samples": [
+        382410.0,
+        386823.3333333333,
+        398096.0,
+        386200.0,
+        386966.0
+      ],
+      "median": 386823.3333333333,
+      "mad": 623.3333333333139
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "property_reads",
+      "unit": "ns/call",
+      "source_sha256": "8aec79c74a2d3a9f076833fa2c1f0f8005f1aff7c74ef0ddf67e24875b3058da",
+      "samples": [
+        1638899.3333333333,
+        1605104.6666666667,
+        1614386.0,
+        1617727.0,
+        1616654.6666666667
+      ],
+      "median": 1616654.6666666667,
+      "mad": 2268.6666666667443
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "property_reads",
+      "unit": "ns/call",
+      "source_sha256": "8aec79c74a2d3a9f076833fa2c1f0f8005f1aff7c74ef0ddf67e24875b3058da",
+      "samples": [
+        384010.0,
+        382294.6666666667,
+        383105.0,
+        380376.6666666667,
+        384580.6666666667
+      ],
+      "median": 383105.0,
+      "mad": 905.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "property_updates",
+      "unit": "ns/call",
+      "source_sha256": "18f9b9ba0dcd3b737c843a7295e3ea7c788498956bb422dd9f4745948e34c1d5",
+      "samples": [
+        6139292.333333333,
+        6765451.333333333,
+        6060862.0,
+        6235876.0,
+        6186179.0
+      ],
+      "median": 6186179.0,
+      "mad": 49697.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "property_updates",
+      "unit": "ns/call",
+      "source_sha256": "18f9b9ba0dcd3b737c843a7295e3ea7c788498956bb422dd9f4745948e34c1d5",
+      "samples": [
+        490886.6666666667,
+        439931.3333333333,
+        470547.6666666667,
+        498203.0,
+        484849.3333333333
+      ],
+      "median": 484849.3333333333,
+      "mad": 13353.666666666686
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "property_updates",
+      "unit": "ns/call",
+      "source_sha256": "18f9b9ba0dcd3b737c843a7295e3ea7c788498956bb422dd9f4745948e34c1d5",
+      "samples": [
+        2361063.3333333335,
+        2312477.3333333335,
+        2238101.0,
+        2254188.0,
+        2232198.6666666665
+      ],
+      "median": 2254188.0,
+      "mad": 21989.33333333349
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "property_updates",
+      "unit": "ns/call",
+      "source_sha256": "18f9b9ba0dcd3b737c843a7295e3ea7c788498956bb422dd9f4745948e34c1d5",
+      "samples": [
+        317591.3333333333,
+        265490.6666666667,
+        265361.0,
+        252908.0,
+        254032.66666666666
+      ],
+      "median": 265361.0,
+      "mad": 11328.333333333343
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "property_updates",
+      "unit": "ns/call",
+      "source_sha256": "18f9b9ba0dcd3b737c843a7295e3ea7c788498956bb422dd9f4745948e34c1d5",
+      "samples": [
+        2243638.0,
+        2258080.6666666665,
+        2225990.0,
+        2290704.6666666665,
+        2248648.6666666665
+      ],
+      "median": 2248648.6666666665,
+      "mad": 9432.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "property_updates",
+      "unit": "ns/call",
+      "source_sha256": "18f9b9ba0dcd3b737c843a7295e3ea7c788498956bb422dd9f4745948e34c1d5",
+      "samples": [
+        254336.66666666666,
+        251190.66666666666,
+        254815.0,
+        249233.0,
+        249211.66666666666
+      ],
+      "median": 251190.66666666666,
+      "mad": 1979.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "class_methods",
+      "unit": "ns/call",
+      "source_sha256": "9843de9ff8d3a977c7200e9057ee775a7dbcbeddfa56011eae5a46b1074c7ed3",
+      "samples": [
+        14013118.0,
+        13762829.666666666,
+        15582106.333333334,
+        16584924.333333334,
+        15277034.666666666
+      ],
+      "median": 15277034.666666666,
+      "mad": 1263916.666666666
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "class_methods",
+      "unit": "ns/call",
+      "source_sha256": "9843de9ff8d3a977c7200e9057ee775a7dbcbeddfa56011eae5a46b1074c7ed3",
+      "samples": [
+        631418.0,
+        570485.3333333334,
+        960568.3333333334,
+        887233.0,
+        1073065.3333333333
+      ],
+      "median": 887233.0,
+      "mad": 185832.33333333326
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "class_methods",
+      "unit": "ns/call",
+      "source_sha256": "9843de9ff8d3a977c7200e9057ee775a7dbcbeddfa56011eae5a46b1074c7ed3",
+      "samples": [
+        9765863.333333334,
+        9583211.666666666,
+        9667640.666666666,
+        10242799.666666666,
+        10398487.0
+      ],
+      "median": 9765863.333333334,
+      "mad": 182651.6666666679
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "class_methods",
+      "unit": "ns/call",
+      "source_sha256": "9843de9ff8d3a977c7200e9057ee775a7dbcbeddfa56011eae5a46b1074c7ed3",
+      "samples": [
+        392344.6666666667,
+        384936.0,
+        409171.6666666667,
+        385973.6666666667,
+        393041.0
+      ],
+      "median": 392344.6666666667,
+      "mad": 6371.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "class_methods",
+      "unit": "ns/call",
+      "source_sha256": "9843de9ff8d3a977c7200e9057ee775a7dbcbeddfa56011eae5a46b1074c7ed3",
+      "samples": [
+        9836125.0,
+        9578441.333333334,
+        9578477.666666666,
+        9813482.666666666,
+        9765666.333333334
+      ],
+      "median": 9765666.333333334,
+      "mad": 70458.66666666605
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "class_methods",
+      "unit": "ns/call",
+      "source_sha256": "9843de9ff8d3a977c7200e9057ee775a7dbcbeddfa56011eae5a46b1074c7ed3",
+      "samples": [
+        382038.3333333333,
+        416106.0,
+        436855.6666666667,
+        414441.0,
+        434344.6666666667
+      ],
+      "median": 416106.0,
+      "mad": 18238.666666666686
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "bitwise_loop",
+      "unit": "ns/call",
+      "source_sha256": "d9edcceb4a9219eb5443413f68da0ed3f92a5c486c36924c5e70324e35248bad",
+      "samples": [
+        4609641.333333333,
+        4445013.0,
+        5157853.0,
+        4563992.333333333,
+        4380177.333333333
+      ],
+      "median": 4563992.333333333,
+      "mad": 118979.33333333302
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "bitwise_loop",
+      "unit": "ns/call",
+      "source_sha256": "d9edcceb4a9219eb5443413f68da0ed3f92a5c486c36924c5e70324e35248bad",
+      "samples": [
+        722457.0,
+        558461.6666666666,
+        611810.0,
+        664442.3333333334,
+        599123.3333333334
+      ],
+      "median": 611810.0,
+      "mad": 52632.33333333337
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "bitwise_loop",
+      "unit": "ns/call",
+      "source_sha256": "d9edcceb4a9219eb5443413f68da0ed3f92a5c486c36924c5e70324e35248bad",
+      "samples": [
+        898418.3333333334,
+        942165.6666666666,
+        902708.3333333334,
+        901126.0,
+        905433.3333333334
+      ],
+      "median": 902708.3333333334,
+      "mad": 2725.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "bitwise_loop",
+      "unit": "ns/call",
+      "source_sha256": "d9edcceb4a9219eb5443413f68da0ed3f92a5c486c36924c5e70324e35248bad",
+      "samples": [
+        387426.3333333333,
+        389522.6666666667,
+        391623.3333333333,
+        389746.6666666667,
+        388699.6666666667
+      ],
+      "median": 389522.6666666667,
+      "mad": 823.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "bitwise_loop",
+      "unit": "ns/call",
+      "source_sha256": "d9edcceb4a9219eb5443413f68da0ed3f92a5c486c36924c5e70324e35248bad",
+      "samples": [
+        925789.0,
+        899182.6666666666,
+        900972.6666666666,
+        898308.6666666666,
+        900044.0
+      ],
+      "median": 900044.0,
+      "mad": 928.6666666666279
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "bitwise_loop",
+      "unit": "ns/call",
+      "source_sha256": "d9edcceb4a9219eb5443413f68da0ed3f92a5c486c36924c5e70324e35248bad",
+      "samples": [
+        382897.0,
+        384678.3333333333,
+        379825.0,
+        381274.3333333333,
+        383355.3333333333
+      ],
+      "median": 382897.0,
+      "mad": 1622.666666666686
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "array_index_updates",
+      "unit": "ns/call",
+      "source_sha256": "03c7b6a1c3306e06e70a687fa29c364995cdfe29cb53b9ac717f34e340a5020b",
+      "samples": [
+        9386128.333333334,
+        9462966.666666666,
+        9580224.666666666,
+        9606982.666666666,
+        9687662.333333334
+      ],
+      "median": 9580224.666666666,
+      "mad": 107437.66666666791
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "array_index_updates",
+      "unit": "ns/call",
+      "source_sha256": "03c7b6a1c3306e06e70a687fa29c364995cdfe29cb53b9ac717f34e340a5020b",
+      "samples": [
+        664252.0,
+        622414.3333333334,
+        665177.3333333334,
+        620503.3333333334,
+        667040.0
+      ],
+      "median": 664252.0,
+      "mad": 2788.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "array_index_updates",
+      "unit": "ns/call",
+      "source_sha256": "03c7b6a1c3306e06e70a687fa29c364995cdfe29cb53b9ac717f34e340a5020b",
+      "samples": [
+        5400136.333333333,
+        5425377.666666667,
+        5359217.333333333,
+        5383899.333333333,
+        5419600.0
+      ],
+      "median": 5400136.333333333,
+      "mad": 19463.666666666977
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "array_index_updates",
+      "unit": "ns/call",
+      "source_sha256": "03c7b6a1c3306e06e70a687fa29c364995cdfe29cb53b9ac717f34e340a5020b",
+      "samples": [
+        455536.3333333333,
+        452063.3333333333,
+        452956.0,
+        443794.6666666667,
+        456058.0
+      ],
+      "median": 452956.0,
+      "mad": 2580.333333333314
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "array_index_updates",
+      "unit": "ns/call",
+      "source_sha256": "03c7b6a1c3306e06e70a687fa29c364995cdfe29cb53b9ac717f34e340a5020b",
+      "samples": [
+        5362853.0,
+        5415371.333333333,
+        5402915.333333333,
+        5446628.666666667,
+        5392311.0
+      ],
+      "median": 5402915.333333333,
+      "mad": 12456.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "array_index_updates",
+      "unit": "ns/call",
+      "source_sha256": "03c7b6a1c3306e06e70a687fa29c364995cdfe29cb53b9ac717f34e340a5020b",
+      "samples": [
+        445947.3333333333,
+        440891.3333333333,
+        447128.0,
+        443264.0,
+        447457.3333333333
+      ],
+      "median": 445947.3333333333,
+      "mad": 1510.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "array_sort_numeric",
+      "unit": "ns/call",
+      "source_sha256": "acf2defcc6cc089b14982cd224e777a7f80d64a6e5cfea242b880bf470eeff7f",
+      "samples": [
+        11738984.0,
+        11963486.666666666,
+        12052986.666666666,
+        11861589.0,
+        12032275.0
+      ],
+      "median": 11963486.666666666,
+      "mad": 89500.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "array_sort_numeric",
+      "unit": "ns/call",
+      "source_sha256": "acf2defcc6cc089b14982cd224e777a7f80d64a6e5cfea242b880bf470eeff7f",
+      "samples": [
+        637454.6666666666,
+        577650.6666666666,
+        640085.0,
+        583651.0,
+        656233.0
+      ],
+      "median": 637454.6666666666,
+      "mad": 18778.333333333372
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "array_sort_numeric",
+      "unit": "ns/call",
+      "source_sha256": "acf2defcc6cc089b14982cd224e777a7f80d64a6e5cfea242b880bf470eeff7f",
+      "samples": [
+        7610730.0,
+        7617933.666666667,
+        7659391.0,
+        7600090.333333333,
+        7576763.666666667
+      ],
+      "median": 7610730.0,
+      "mad": 10639.666666666977
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "array_sort_numeric",
+      "unit": "ns/call",
+      "source_sha256": "acf2defcc6cc089b14982cd224e777a7f80d64a6e5cfea242b880bf470eeff7f",
+      "samples": [
+        415986.3333333333,
+        408288.6666666667,
+        415566.0,
+        415357.6666666667,
+        413367.3333333333
+      ],
+      "median": 415357.6666666667,
+      "mad": 628.6666666666279
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "array_sort_numeric",
+      "unit": "ns/call",
+      "source_sha256": "acf2defcc6cc089b14982cd224e777a7f80d64a6e5cfea242b880bf470eeff7f",
+      "samples": [
+        7782171.666666667,
+        7702796.0,
+        7636164.666666667,
+        7739895.666666667,
+        7774621.0
+      ],
+      "median": 7739895.666666667,
+      "mad": 37099.66666666698
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "array_sort_numeric",
+      "unit": "ns/call",
+      "source_sha256": "acf2defcc6cc089b14982cd224e777a7f80d64a6e5cfea242b880bf470eeff7f",
+      "samples": [
+        404283.3333333333,
+        406024.6666666667,
+        408374.6666666667,
+        411891.3333333333,
+        459549.0
+      ],
+      "median": 408374.6666666667,
+      "mad": 3516.666666666628
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "map_set_get",
+      "unit": "ns/call",
+      "source_sha256": "7f6f69836949701cc582ef376fbf573841441e9ed22040403b1abe8a09cf68a3",
+      "samples": [
+        40823008.666666664,
+        40756724.0,
+        40573942.333333336,
+        41124504.333333336,
+        43991135.0
+      ],
+      "median": 40823008.666666664,
+      "mad": 249066.33333332837
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "map_set_get",
+      "unit": "ns/call",
+      "source_sha256": "7f6f69836949701cc582ef376fbf573841441e9ed22040403b1abe8a09cf68a3",
+      "samples": [
+        3114479.0,
+        3083037.0,
+        3128745.0,
+        3055718.6666666665,
+        3151817.6666666665
+      ],
+      "median": 3114479.0,
+      "mad": 31442.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "map_set_get",
+      "unit": "ns/call",
+      "source_sha256": "7f6f69836949701cc582ef376fbf573841441e9ed22040403b1abe8a09cf68a3",
+      "samples": [
+        35969822.333333336,
+        35884514.0,
+        35416781.666666664,
+        35555565.0,
+        35596173.666666664
+      ],
+      "median": 35596173.666666664,
+      "mad": 179392.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "map_set_get",
+      "unit": "ns/call",
+      "source_sha256": "7f6f69836949701cc582ef376fbf573841441e9ed22040403b1abe8a09cf68a3",
+      "samples": [
+        2950614.3333333335,
+        2885836.3333333335,
+        3020117.0,
+        3102212.0,
+        2900009.6666666665
+      ],
+      "median": 2950614.3333333335,
+      "mad": 64778.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "map_set_get",
+      "unit": "ns/call",
+      "source_sha256": "7f6f69836949701cc582ef376fbf573841441e9ed22040403b1abe8a09cf68a3",
+      "samples": [
+        36030958.333333336,
+        35858690.333333336,
+        35556732.333333336,
+        35632954.333333336,
+        35596144.0
+      ],
+      "median": 35632954.333333336,
+      "mad": 76222.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "map_set_get",
+      "unit": "ns/call",
+      "source_sha256": "7f6f69836949701cc582ef376fbf573841441e9ed22040403b1abe8a09cf68a3",
+      "samples": [
+        2934660.3333333335,
+        2931501.0,
+        2886256.6666666665,
+        2899032.0,
+        2882660.6666666665
+      ],
+      "median": 2899032.0,
+      "mad": 16371.333333333489
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "set_add_has_delete",
+      "unit": "ns/call",
+      "source_sha256": "8669108ce6c27129cb21a167817bfe2c085800d7d1556d8ae11da9e4a69e9613",
+      "samples": [
+        40509203.333333336,
+        38631779.0,
+        38857748.333333336,
+        38726251.333333336,
+        38674340.333333336
+      ],
+      "median": 38726251.333333336,
+      "mad": 94472.33333333582
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "set_add_has_delete",
+      "unit": "ns/call",
+      "source_sha256": "8669108ce6c27129cb21a167817bfe2c085800d7d1556d8ae11da9e4a69e9613",
+      "samples": [
+        2902127.3333333335,
+        2805566.0,
+        2849331.3333333335,
+        2817561.3333333335,
+        3048547.3333333335
+      ],
+      "median": 2849331.3333333335,
+      "mad": 43765.33333333349
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "set_add_has_delete",
+      "unit": "ns/call",
+      "source_sha256": "8669108ce6c27129cb21a167817bfe2c085800d7d1556d8ae11da9e4a69e9613",
+      "samples": [
+        33882514.666666664,
+        33749669.333333336,
+        34037091.333333336,
+        33844043.333333336,
+        33752290.0
+      ],
+      "median": 33844043.333333336,
+      "mad": 91753.33333333582
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "set_add_has_delete",
+      "unit": "ns/call",
+      "source_sha256": "8669108ce6c27129cb21a167817bfe2c085800d7d1556d8ae11da9e4a69e9613",
+      "samples": [
+        2649033.3333333335,
+        2646637.3333333335,
+        2732248.3333333335,
+        2645649.6666666665,
+        2649477.6666666665
+      ],
+      "median": 2649033.3333333335,
+      "mad": 2396.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "set_add_has_delete",
+      "unit": "ns/call",
+      "source_sha256": "8669108ce6c27129cb21a167817bfe2c085800d7d1556d8ae11da9e4a69e9613",
+      "samples": [
+        33724204.0,
+        33983665.0,
+        33702107.333333336,
+        33568520.333333336,
+        33482230.666666668
+      ],
+      "median": 33702107.333333336,
+      "mad": 133587.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "set_add_has_delete",
+      "unit": "ns/call",
+      "source_sha256": "8669108ce6c27129cb21a167817bfe2c085800d7d1556d8ae11da9e4a69e9613",
+      "samples": [
+        2638784.3333333335,
+        2636701.6666666665,
+        2639895.3333333335,
+        2623577.6666666665,
+        2633199.3333333335
+      ],
+      "median": 2636701.6666666665,
+      "mad": 3193.666666666977
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "typed_array_index",
+      "unit": "ns/call",
+      "source_sha256": "433248c5e40a349b573e188e2cc406abb868799ba16cbd993cd822ba8c7a4311",
+      "samples": [
+        4660984.0,
+        4737404.333333333,
+        4933275.666666667,
+        4415593.666666667,
+        4667809.666666667
+      ],
+      "median": 4667809.666666667,
+      "mad": 69594.66666666605
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "typed_array_index",
+      "unit": "ns/call",
+      "source_sha256": "433248c5e40a349b573e188e2cc406abb868799ba16cbd993cd822ba8c7a4311",
+      "samples": [
+        332736.3333333333,
+        287432.3333333333,
+        335191.3333333333,
+        288254.6666666667,
+        331701.6666666667
+      ],
+      "median": 331701.6666666667,
+      "mad": 3489.666666666628
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "typed_array_index",
+      "unit": "ns/call",
+      "source_sha256": "433248c5e40a349b573e188e2cc406abb868799ba16cbd993cd822ba8c7a4311",
+      "samples": [
+        398741.3333333333,
+        415425.0,
+        395965.0,
+        397682.6666666667,
+        398937.3333333333
+      ],
+      "median": 398741.3333333333,
+      "mad": 1058.6666666666279
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "typed_array_index",
+      "unit": "ns/call",
+      "source_sha256": "433248c5e40a349b573e188e2cc406abb868799ba16cbd993cd822ba8c7a4311",
+      "samples": [
+        113834.33333333333,
+        116181.0,
+        118421.66666666667,
+        114979.0,
+        116218.33333333333
+      ],
+      "median": 116181.0,
+      "mad": 1202.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "typed_array_index",
+      "unit": "ns/call",
+      "source_sha256": "433248c5e40a349b573e188e2cc406abb868799ba16cbd993cd822ba8c7a4311",
+      "samples": [
+        395608.6666666667,
+        397217.3333333333,
+        399289.0,
+        395024.3333333333,
+        397671.3333333333
+      ],
+      "median": 397217.3333333333,
+      "mad": 1608.6666666666279
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "typed_array_index",
+      "unit": "ns/call",
+      "source_sha256": "433248c5e40a349b573e188e2cc406abb868799ba16cbd993cd822ba8c7a4311",
+      "samples": [
+        109444.0,
+        114408.33333333333,
+        111702.33333333333,
+        111686.66666666667,
+        115405.66666666667
+      ],
+      "median": 111702.33333333333,
+      "mad": 2258.3333333333285
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "regexp_exec",
+      "unit": "ns/call",
+      "source_sha256": "a93cce7394c6ab47b97822461dd1f099af9a4e16844809ec7fd8894c8c9e5cb9",
+      "samples": [
+        6913707.0,
+        7013630.333333333,
+        6980508.0,
+        6679448.333333333,
+        7102177.0
+      ],
+      "median": 6980508.0,
+      "mad": 66801.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "regexp_exec",
+      "unit": "ns/call",
+      "source_sha256": "a93cce7394c6ab47b97822461dd1f099af9a4e16844809ec7fd8894c8c9e5cb9",
+      "samples": [
+        573171.0,
+        522402.0,
+        576574.0,
+        525629.0,
+        628761.3333333334
+      ],
+      "median": 573171.0,
+      "mad": 47542.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "regexp_exec",
+      "unit": "ns/call",
+      "source_sha256": "a93cce7394c6ab47b97822461dd1f099af9a4e16844809ec7fd8894c8c9e5cb9",
+      "samples": [
+        2441246.0,
+        2440644.6666666665,
+        2446232.0,
+        2453623.0,
+        2435593.3333333335
+      ],
+      "median": 2441246.0,
+      "mad": 4986.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "regexp_exec",
+      "unit": "ns/call",
+      "source_sha256": "a93cce7394c6ab47b97822461dd1f099af9a4e16844809ec7fd8894c8c9e5cb9",
+      "samples": [
+        352945.0,
+        345830.6666666667,
+        362939.3333333333,
+        350344.0,
+        363645.0
+      ],
+      "median": 352945.0,
+      "mad": 7114.333333333314
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "regexp_exec",
+      "unit": "ns/call",
+      "source_sha256": "a93cce7394c6ab47b97822461dd1f099af9a4e16844809ec7fd8894c8c9e5cb9",
+      "samples": [
+        2414419.6666666665,
+        2427831.3333333335,
+        2448680.3333333335,
+        2435488.6666666665,
+        2425397.6666666665
+      ],
+      "median": 2427831.3333333335,
+      "mad": 7657.333333333023
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "regexp_exec",
+      "unit": "ns/call",
+      "source_sha256": "a93cce7394c6ab47b97822461dd1f099af9a4e16844809ec7fd8894c8c9e5cb9",
+      "samples": [
+        356431.6666666667,
+        344616.0,
+        357768.0,
+        348000.0,
+        363622.3333333333
+      ],
+      "median": 356431.6666666667,
+      "mad": 7190.666666666628
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "unicode_strings",
+      "unit": "ns/call",
+      "source_sha256": "effad3edd1a53e4490a9361f17a9d5e1bd48ef02e26fcd29521599f8f7799944",
+      "samples": [
+        4720467.666666667,
+        4816525.666666667,
+        4551613.333333333,
+        5252957.0,
+        5096986.666666667
+      ],
+      "median": 4816525.666666667,
+      "mad": 264912.33333333395
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "unicode_strings",
+      "unit": "ns/call",
+      "source_sha256": "effad3edd1a53e4490a9361f17a9d5e1bd48ef02e26fcd29521599f8f7799944",
+      "samples": [
+        351461.0,
+        303996.0,
+        344489.0,
+        301973.6666666667,
+        347530.3333333333
+      ],
+      "median": 344489.0,
+      "mad": 6972.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "unicode_strings",
+      "unit": "ns/call",
+      "source_sha256": "effad3edd1a53e4490a9361f17a9d5e1bd48ef02e26fcd29521599f8f7799944",
+      "samples": [
+        680676.0,
+        692517.6666666666,
+        677419.0,
+        686610.0,
+        673374.3333333334
+      ],
+      "median": 680676.0,
+      "mad": 5934.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "unicode_strings",
+      "unit": "ns/call",
+      "source_sha256": "effad3edd1a53e4490a9361f17a9d5e1bd48ef02e26fcd29521599f8f7799944",
+      "samples": [
+        135661.0,
+        134552.66666666666,
+        136256.66666666666,
+        136479.66666666666,
+        135555.33333333334
+      ],
+      "median": 135661.0,
+      "mad": 595.666666666657
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "unicode_strings",
+      "unit": "ns/call",
+      "source_sha256": "effad3edd1a53e4490a9361f17a9d5e1bd48ef02e26fcd29521599f8f7799944",
+      "samples": [
+        683778.3333333334,
+        685541.0,
+        676010.6666666666,
+        691336.0,
+        683278.0
+      ],
+      "median": 683778.3333333334,
+      "mad": 1762.6666666666279
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "unicode_strings",
+      "unit": "ns/call",
+      "source_sha256": "effad3edd1a53e4490a9361f17a9d5e1bd48ef02e26fcd29521599f8f7799944",
+      "samples": [
+        132738.66666666666,
+        129577.33333333333,
+        129729.66666666667,
+        130281.33333333333,
+        128998.0
+      ],
+      "median": 129729.66666666667,
+      "mad": 551.666666666657
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "prototype_getter",
+      "unit": "ns/call",
+      "source_sha256": "6b5114e76bc45c24624ea8eb7d748a31cfee04ea0f936447162cecc8d1b36f4d",
+      "samples": [
+        5679209.666666667,
+        6101268.333333333,
+        6303476.0,
+        5897338.666666667,
+        6149588.333333333
+      ],
+      "median": 6101268.333333333,
+      "mad": 202207.66666666698
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "prototype_getter",
+      "unit": "ns/call",
+      "source_sha256": "6b5114e76bc45c24624ea8eb7d748a31cfee04ea0f936447162cecc8d1b36f4d",
+      "samples": [
+        363995.3333333333,
+        315014.0,
+        366865.0,
+        316683.3333333333,
+        360853.0
+      ],
+      "median": 360853.0,
+      "mad": 6012.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "prototype_getter",
+      "unit": "ns/call",
+      "source_sha256": "6b5114e76bc45c24624ea8eb7d748a31cfee04ea0f936447162cecc8d1b36f4d",
+      "samples": [
+        1583825.6666666667,
+        1656761.3333333333,
+        1642789.3333333333,
+        1659317.6666666667,
+        1641283.0
+      ],
+      "median": 1642789.3333333333,
+      "mad": 13972.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "prototype_getter",
+      "unit": "ns/call",
+      "source_sha256": "6b5114e76bc45c24624ea8eb7d748a31cfee04ea0f936447162cecc8d1b36f4d",
+      "samples": [
+        142191.0,
+        142416.0,
+        151664.66666666666,
+        150860.0,
+        149884.0
+      ],
+      "median": 149884.0,
+      "mad": 1780.666666666657
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "prototype_getter",
+      "unit": "ns/call",
+      "source_sha256": "6b5114e76bc45c24624ea8eb7d748a31cfee04ea0f936447162cecc8d1b36f4d",
+      "samples": [
+        1589136.3333333333,
+        1601117.3333333333,
+        1599538.6666666667,
+        1598015.3333333333,
+        1589816.6666666667
+      ],
+      "median": 1598015.3333333333,
+      "mad": 3102.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "prototype_getter",
+      "unit": "ns/call",
+      "source_sha256": "6b5114e76bc45c24624ea8eb7d748a31cfee04ea0f936447162cecc8d1b36f4d",
+      "samples": [
+        141609.0,
+        141091.66666666666,
+        142834.0,
+        141877.33333333334,
+        143659.66666666666
+      ],
+      "median": 141877.33333333334,
+      "mad": 785.6666666666861
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "property_key_churn",
+      "unit": "ns/call",
+      "source_sha256": "57613dfd002eb9b211dfaf37dba82b5a9023c5eb9a9fcb5712b3224f5bfe9d13",
+      "samples": [
+        8128714.666666667,
+        7808612.0,
+        7740848.333333333,
+        7500145.666666667,
+        7657755.0
+      ],
+      "median": 7740848.333333333,
+      "mad": 83093.33333333302
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "property_key_churn",
+      "unit": "ns/call",
+      "source_sha256": "57613dfd002eb9b211dfaf37dba82b5a9023c5eb9a9fcb5712b3224f5bfe9d13",
+      "samples": [
+        496739.0,
+        451406.0,
+        497953.3333333333,
+        450438.6666666667,
+        494589.0
+      ],
+      "median": 494589.0,
+      "mad": 3364.333333333314
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "property_key_churn",
+      "unit": "ns/call",
+      "source_sha256": "57613dfd002eb9b211dfaf37dba82b5a9023c5eb9a9fcb5712b3224f5bfe9d13",
+      "samples": [
+        2664283.6666666665,
+        2515752.3333333335,
+        2507379.3333333335,
+        2650202.0,
+        2538085.0
+      ],
+      "median": 2538085.0,
+      "mad": 30705.66666666651
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "property_key_churn",
+      "unit": "ns/call",
+      "source_sha256": "57613dfd002eb9b211dfaf37dba82b5a9023c5eb9a9fcb5712b3224f5bfe9d13",
+      "samples": [
+        368803.3333333333,
+        352281.6666666667,
+        369402.3333333333,
+        350307.0,
+        373681.3333333333
+      ],
+      "median": 368803.3333333333,
+      "mad": 4878.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "property_key_churn",
+      "unit": "ns/call",
+      "source_sha256": "57613dfd002eb9b211dfaf37dba82b5a9023c5eb9a9fcb5712b3224f5bfe9d13",
+      "samples": [
+        2660598.0,
+        2535348.6666666665,
+        2550146.6666666665,
+        2622614.3333333335,
+        2657124.3333333335
+      ],
+      "median": 2622614.3333333335,
+      "mad": 37983.66666666651
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "property_key_churn",
+      "unit": "ns/call",
+      "source_sha256": "57613dfd002eb9b211dfaf37dba82b5a9023c5eb9a9fcb5712b3224f5bfe9d13",
+      "samples": [
+        359026.6666666667,
+        352705.6666666667,
+        363077.3333333333,
+        344007.0,
+        355433.3333333333
+      ],
+      "median": 355433.3333333333,
+      "mad": 3593.333333333372
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "exception_catch",
+      "unit": "ns/call",
+      "source_sha256": "33c6bc84fdcc236634b50bb8795e062bff815336eef8e5f4b01e86d15a36dd13",
+      "samples": [
+        4635943.666666667,
+        4922684.666666667,
+        4557686.666666667,
+        4873966.333333333,
+        4855782.333333333
+      ],
+      "median": 4855782.333333333,
+      "mad": 66902.33333333395
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "exception_catch",
+      "unit": "ns/call",
+      "source_sha256": "33c6bc84fdcc236634b50bb8795e062bff815336eef8e5f4b01e86d15a36dd13",
+      "samples": [
+        675743.6666666666,
+        630658.3333333334,
+        685126.3333333334,
+        633017.0,
+        680223.0
+      ],
+      "median": 675743.6666666666,
+      "mad": 9382.666666666744
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "exception_catch",
+      "unit": "ns/call",
+      "source_sha256": "33c6bc84fdcc236634b50bb8795e062bff815336eef8e5f4b01e86d15a36dd13",
+      "samples": [
+        115616.33333333333,
+        126496.66666666667,
+        115435.33333333333,
+        118325.33333333333,
+        117393.66666666667
+      ],
+      "median": 117393.66666666667,
+      "mad": 1777.333333333343
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "exception_catch",
+      "unit": "ns/call",
+      "source_sha256": "33c6bc84fdcc236634b50bb8795e062bff815336eef8e5f4b01e86d15a36dd13",
+      "samples": [
+        464006.3333333333,
+        470238.3333333333,
+        458883.0,
+        460127.0,
+        463479.6666666667
+      ],
+      "median": 463479.6666666667,
+      "mad": 3352.666666666686
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "exception_catch",
+      "unit": "ns/call",
+      "source_sha256": "33c6bc84fdcc236634b50bb8795e062bff815336eef8e5f4b01e86d15a36dd13",
+      "samples": [
+        113843.66666666667,
+        114712.0,
+        114504.66666666667,
+        114558.0,
+        116481.66666666667
+      ],
+      "median": 114558.0,
+      "mad": 154.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "exception_catch",
+      "unit": "ns/call",
+      "source_sha256": "33c6bc84fdcc236634b50bb8795e062bff815336eef8e5f4b01e86d15a36dd13",
+      "samples": [
+        318904.3333333333,
+        322821.6666666667,
+        319617.6666666667,
+        323166.0,
+        321346.6666666667
+      ],
+      "median": 321346.6666666667,
+      "mad": 1729.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "spread_destructure",
+      "unit": "ns/call",
+      "source_sha256": "ed54d3b47ffe782819e028379fe0534dd1d891b20389a77cf3a293b500855a75",
+      "samples": [
+        14164940.333333334,
+        16129801.333333334,
+        14394417.333333334,
+        15470942.0,
+        14256702.0
+      ],
+      "median": 14394417.333333334,
+      "mad": 229477.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "spread_destructure",
+      "unit": "ns/call",
+      "source_sha256": "ed54d3b47ffe782819e028379fe0534dd1d891b20389a77cf3a293b500855a75",
+      "samples": [
+        853593.0,
+        817620.0,
+        867832.3333333334,
+        826854.3333333334,
+        869520.0
+      ],
+      "median": 853593.0,
+      "mad": 15927.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "spread_destructure",
+      "unit": "ns/call",
+      "source_sha256": "ed54d3b47ffe782819e028379fe0534dd1d891b20389a77cf3a293b500855a75",
+      "samples": [
+        9099848.0,
+        9098903.666666666,
+        8972816.0,
+        8996818.666666666,
+        8993291.666666666
+      ],
+      "median": 8996818.666666666,
+      "mad": 24002.666666666046
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "spread_destructure",
+      "unit": "ns/call",
+      "source_sha256": "ed54d3b47ffe782819e028379fe0534dd1d891b20389a77cf3a293b500855a75",
+      "samples": [
+        633751.0,
+        634854.3333333334,
+        654323.0,
+        632535.6666666666,
+        644969.6666666666
+      ],
+      "median": 634854.3333333334,
+      "mad": 2318.6666666667443
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "spread_destructure",
+      "unit": "ns/call",
+      "source_sha256": "ed54d3b47ffe782819e028379fe0534dd1d891b20389a77cf3a293b500855a75",
+      "samples": [
+        8922703.333333334,
+        8793117.666666666,
+        8984496.0,
+        8924202.0,
+        8864668.666666666
+      ],
+      "median": 8922703.333333334,
+      "mad": 58034.66666666791
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "spread_destructure",
+      "unit": "ns/call",
+      "source_sha256": "ed54d3b47ffe782819e028379fe0534dd1d891b20389a77cf3a293b500855a75",
+      "samples": [
+        575621.3333333334,
+        574406.6666666666,
+        581028.0,
+        575972.0,
+        581292.6666666666
+      ],
+      "median": 575972.0,
+      "mad": 1565.3333333333721
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "math_builtins",
+      "unit": "ns/call",
+      "source_sha256": "473bb396e36a128eaa038516a9c98788746a8bae04a9960bda9923709c74649d",
+      "samples": [
+        6285064.333333333,
+        5937520.333333333,
+        6001159.333333333,
+        6040053.0,
+        6039682.0
+      ],
+      "median": 6039682.0,
+      "mad": 38522.66666666698
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "math_builtins",
+      "unit": "ns/call",
+      "source_sha256": "473bb396e36a128eaa038516a9c98788746a8bae04a9960bda9923709c74649d",
+      "samples": [
+        451222.6666666667,
+        404731.0,
+        447258.3333333333,
+        404204.3333333333,
+        449295.6666666667
+      ],
+      "median": 447258.3333333333,
+      "mad": 3964.333333333372
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "math_builtins",
+      "unit": "ns/call",
+      "source_sha256": "473bb396e36a128eaa038516a9c98788746a8bae04a9960bda9923709c74649d",
+      "samples": [
+        1134960.6666666667,
+        1329391.3333333333,
+        1317926.6666666667,
+        1319424.3333333333,
+        1313464.3333333333
+      ],
+      "median": 1317926.6666666667,
+      "mad": 4462.333333333489
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "math_builtins",
+      "unit": "ns/call",
+      "source_sha256": "473bb396e36a128eaa038516a9c98788746a8bae04a9960bda9923709c74649d",
+      "samples": [
+        227747.66666666666,
+        232221.66666666666,
+        233841.33333333334,
+        230677.0,
+        232359.0
+      ],
+      "median": 232221.66666666666,
+      "mad": 1544.666666666657
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "math_builtins",
+      "unit": "ns/call",
+      "source_sha256": "473bb396e36a128eaa038516a9c98788746a8bae04a9960bda9923709c74649d",
+      "samples": [
+        1321807.6666666667,
+        1336132.0,
+        1331649.0,
+        1330583.6666666667,
+        1324729.3333333333
+      ],
+      "median": 1330583.6666666667,
+      "mad": 5548.333333333256
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "math_builtins",
+      "unit": "ns/call",
+      "source_sha256": "473bb396e36a128eaa038516a9c98788746a8bae04a9960bda9923709c74649d",
+      "samples": [
+        231559.66666666666,
+        231594.66666666666,
+        229718.33333333334,
+        231536.66666666666,
+        232896.66666666666
+      ],
+      "median": 231559.66666666666,
+      "mad": 35.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "bigint_arithmetic",
+      "unit": "ns/call",
+      "source_sha256": "6c5bd5cb9a01f842eee6718f669a9b96b67d2020df97518fe72738e8895fb05a",
+      "samples": [
+        5271679.333333333,
+        5605097.666666667,
+        5192027.0,
+        5099979.333333333,
+        5265618.666666667
+      ],
+      "median": 5265618.666666667,
+      "mad": 73591.66666666698
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "bigint_arithmetic",
+      "unit": "ns/call",
+      "source_sha256": "6c5bd5cb9a01f842eee6718f669a9b96b67d2020df97518fe72738e8895fb05a",
+      "samples": [
+        250637.0,
+        206558.0,
+        252353.33333333334,
+        204854.33333333334,
+        250096.0
+      ],
+      "median": 250096.0,
+      "mad": 2257.333333333343
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "bigint_arithmetic",
+      "unit": "ns/call",
+      "source_sha256": "6c5bd5cb9a01f842eee6718f669a9b96b67d2020df97518fe72738e8895fb05a",
+      "samples": [
+        374053.6666666667,
+        388399.0,
+        374422.3333333333,
+        373034.3333333333,
+        374476.3333333333
+      ],
+      "median": 374422.3333333333,
+      "mad": 368.66666666662786
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "bigint_arithmetic",
+      "unit": "ns/call",
+      "source_sha256": "6c5bd5cb9a01f842eee6718f669a9b96b67d2020df97518fe72738e8895fb05a",
+      "samples": [
+        40546.333333333336,
+        43995.333333333336,
+        44510.333333333336,
+        42743.333333333336,
+        43094.0
+      ],
+      "median": 43094.0,
+      "mad": 901.3333333333358
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "bigint_arithmetic",
+      "unit": "ns/call",
+      "source_sha256": "6c5bd5cb9a01f842eee6718f669a9b96b67d2020df97518fe72738e8895fb05a",
+      "samples": [
+        372081.3333333333,
+        374311.6666666667,
+        379784.0,
+        378916.3333333333,
+        374853.0
+      ],
+      "median": 374853.0,
+      "mad": 2771.666666666686
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "bigint_arithmetic",
+      "unit": "ns/call",
+      "source_sha256": "6c5bd5cb9a01f842eee6718f669a9b96b67d2020df97518fe72738e8895fb05a",
+      "samples": [
+        37596.666666666664,
+        38177.333333333336,
+        39019.0,
+        38641.333333333336,
+        38282.333333333336
+      ],
+      "median": 38282.333333333336,
+      "mad": 359.0
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "fresh_source",
+      "workload": "cyclic_allocations",
+      "unit": "ns/call",
+      "source_sha256": "cdba3ae7ab0fd1042650b31b366a61dad6c4b5f7e3ad2efeaf4a5bbf9a8ecdd2",
+      "samples": [
+        7375966.666666667,
+        6937898.333333333,
+        6967154.333333333,
+        6872136.333333333,
+        7139403.333333333
+      ],
+      "median": 6967154.333333333,
+      "mad": 95018.0
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "fresh_source",
+      "workload": "cyclic_allocations",
+      "unit": "ns/call",
+      "source_sha256": "cdba3ae7ab0fd1042650b31b366a61dad6c4b5f7e3ad2efeaf4a5bbf9a8ecdd2",
+      "samples": [
+        316520.0,
+        272367.0,
+        319953.6666666667,
+        274942.0,
+        315732.0
+      ],
+      "median": 315732.0,
+      "mad": 4221.666666666686
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_source",
+      "workload": "cyclic_allocations",
+      "unit": "ns/call",
+      "source_sha256": "cdba3ae7ab0fd1042650b31b366a61dad6c4b5f7e3ad2efeaf4a5bbf9a8ecdd2",
+      "samples": [
+        1762520.0,
+        1509031.3333333333,
+        1455873.3333333333,
+        1452852.3333333333,
+        1443709.0
+      ],
+      "median": 1455873.3333333333,
+      "mad": 12164.333333333256
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_source",
+      "workload": "cyclic_allocations",
+      "unit": "ns/call",
+      "source_sha256": "cdba3ae7ab0fd1042650b31b366a61dad6c4b5f7e3ad2efeaf4a5bbf9a8ecdd2",
+      "samples": [
+        137358.66666666666,
+        118774.33333333333,
+        119567.66666666667,
+        112956.0,
+        121474.0
+      ],
+      "median": 119567.66666666667,
+      "mad": 1906.3333333333285
+    },
+    {
+      "engine": "napi-vm",
+      "mode": "warm_call",
+      "workload": "cyclic_allocations",
+      "unit": "ns/call",
+      "source_sha256": "cdba3ae7ab0fd1042650b31b366a61dad6c4b5f7e3ad2efeaf4a5bbf9a8ecdd2",
+      "samples": [
+        1538910.6666666667,
+        1478848.3333333333,
+        1463891.0,
+        1605623.0,
+        1681376.6666666667
+      ],
+      "median": 1538910.6666666667,
+      "mad": 66712.33333333326
+    },
+    {
+      "engine": "rquickjs",
+      "mode": "warm_call",
+      "workload": "cyclic_allocations",
+      "unit": "ns/call",
+      "source_sha256": "cdba3ae7ab0fd1042650b31b366a61dad6c4b5f7e3ad2efeaf4a5bbf9a8ecdd2",
+      "samples": [
+        120337.33333333333,
+        105472.0,
+        111642.33333333333,
+        104717.0,
+        164871.66666666666
+      ],
+      "median": 111642.33333333333,
+      "mad": 6925.3333333333285
+    }
+  ],
+  "metadata": {
+    "build": {
+      "utc": "2026-11-07T07:04:54.160712+00:00",
+      "git_head": "15f5b9de55b1820aa64cddc410334aab8e5e5c47",
+      "git_status": "M bench/BASELINE.md\n M bench/rquickjs/README.md\n M bench/rquickjs/src/main.rs\n M benches/vm.rs\n M crates/napi-vm-core/src/builtins/array.rs\n M crates/napi-vm-core/src/lang/service.rs\n M docs/performance.md\n?? bench/baselines/operations-2026-11-07/\n?? tests/array_result_fast_path.rs",
+      "inputs": {
+        "sha256": "faf7a0b4810d70cfe8c0928f0c3e8ac0de914f896d5fac6fc1bb58e067d14abd",
+        "files": {
+          ".cargo/config.toml": "e0467f8da54758c7f9e24bced8485f4c1799699fe81416dccd1f52fe09863279",
+          "bench/rquickjs/Cargo.lock": "1e1f8244ff016741571569b195563335eacb888acf2f4f9add3e7a15d1b02a68",
+          "bench/rquickjs/Cargo.toml": "3038a750a502a1a86a385e8435a9e96d211da83d2dc99161a55d09f94265e363",
+          "bench/rquickjs/src/main.rs": "6c61f0f5751153fe4fc1cde7282f92d09798f25fdc547171a78b30b5c55a31cf",
+          "bench/rquickjs.py": "055a96f4a3dcb7b4575491bc8540c0c1a6ef214d216694cbf6715622f16f8832",
+          "crates/napi-vm-core/Cargo.toml": "07efb6e8626e1633e21931eaa6213e24259fd37cd540d3a6bca17f3f4d4de0b5",
+          "crates/napi-vm-core/build.rs": "12dabaa2e00c4d079c664613282bfc0ec7df057cf4dbcbd1d17a61f18bb1ef88",
+          "crates/napi-vm-core/native/node_api_shim.c": "d99e984c3e0fb9042ded59467c664d09deea8297c380243bc12f80027ab6d922",
+          "crates/napi-vm-core/src/bigint.rs": "a7e6d634b79896c7a885621ff73ada799683073c53893413d34c8ce5ce0aed0e",
+          "crates/napi-vm-core/src/builtins/array/from_async.rs": "8a525051c9188175b7363810b8b344f20d45b38a90ded8ab4210dbb84cb3b878",
+          "crates/napi-vm-core/src/builtins/array.rs": "27ad9615a35a39db9f7e62d155e3c6a066327512a52e9ba41d3e6bd18da025eb",
+          "crates/napi-vm-core/src/builtins/bigint.rs": "0c4cfebafe971840db9212edf99d1207b1653629cabd5bb4c57bf9c9f5d2c7c9",
+          "crates/napi-vm-core/src/builtins/collections.rs": "1e9e8e9f1575304c97c44e785aa39ece3046efdd26c2c03f33f6d85cb93730cf",
+          "crates/napi-vm-core/src/builtins/date.rs": "013285a14d017a4e3164c1fa87bf55264bab7edadac9af22a0e61501bff74ece",
+          "crates/napi-vm-core/src/builtins/disposable.rs": "52c9fa0d3270e2c4b1f1aca24ffaf072fb328eafd125dbce37a71c53fe58e4f5",
+          "crates/napi-vm-core/src/builtins/error.rs": "b5def5c342b7fda0c8c2fa3f5ea49937af183fe714edfc949fe0f74e3df498ae",
+          "crates/napi-vm-core/src/builtins/function.rs": "d53a596504b925c6a4a0142f2c33af62b30725fad1198aecbc90650a6d8ade54",
+          "crates/napi-vm-core/src/builtins/intl/cldr/LICENSE-CLDR.txt": "b4c0ae8ef04f7059f96ce5bbe0467f9fe6f6d81bbe13517701dfeb961fb4d0b6",
+          "crates/napi-vm-core/src/builtins/intl/cldr/number-pattern-index.rs": "703f6a8bc1e287aa7c2f181c45cbdd44bbb1316691f99f1b9b144a4236e7473f",
+          "crates/napi-vm-core/src/builtins/intl/cldr/number-pattern-sources.json": "cfd23284164f16933ae50116cceaf45d0209958eac63efcfbf58cc8fb4f06dab",
+          "crates/napi-vm-core/src/builtins/intl/cldr/number-patterns.bin": "c46b014bfca84fafa805cc4cdccb2c47564e915611b88704d280a2adf5d6d1ab",
+          "crates/napi-vm-core/src/builtins/intl/cldr/timezone-names.rs": "56db82208b2b2f33ad89c2b603bfe276e594427347689cacc64f85fc039384b7",
+          "crates/napi-vm-core/src/builtins/intl/collator.rs": "cce945ca21ee211259c6fad80b92d7f92c67ad81eff3f1a6e52ee0ca556b6f7b",
+          "crates/napi-vm-core/src/builtins/intl/data.rs": "7aa6e15ad684495e8e4bf63c70a29a2905c86c7f9f1e0fe0836a82e48e9a9436",
+          "crates/napi-vm-core/src/builtins/intl/datetime.rs": "5a2be5d649c48dea6a8c15b3dbb1766c200df46c646b08a4f6ef4f4b6eed6651",
+          "crates/napi-vm-core/src/builtins/intl/displaynames.rs": "df34e10ed5ce235d00a47c82de2ea702aa4acc562e7b75be6310be9a6a191343",
+          "crates/napi-vm-core/src/builtins/intl/duration.rs": "7cd95a91b091507a4c74a6b0aac9dea5940ab5d5dd785fa460cf06a71c473d8c",
+          "crates/napi-vm-core/src/builtins/intl/list.rs": "1bd464c4536d481ee441b12695108298871c93618cc6d94bb7bc152e6935b469",
+          "crates/napi-vm-core/src/builtins/intl/number/data.rs": "55b3fd26997a6e2109c5ed23e18ca8cb63105a5d36f2077445851592139ccbb0",
+          "crates/napi-vm-core/src/builtins/intl/number/digits.rs": "e112947431effef3c17e57776a760824aa70718909ef3db983dd8f24baca2dd0",
+          "crates/napi-vm-core/src/builtins/intl/number.rs": "0e651aafc916d5897ceb3a1a64546e4219874ebb0ff7127b97f1509c277c4724",
+          "crates/napi-vm-core/src/builtins/intl/plurals.rs": "40d7eb2a7f16c1e44d0659eb12e591ab2cdf01b1e8f570dd61ed9c65492a690b",
+          "crates/napi-vm-core/src/builtins/intl/relative.rs": "18c4fe017c09de4056099c7c1969e89bd043d2076313998ddb4288848be67dc5",
+          "crates/napi-vm-core/src/builtins/intl/segmenter.rs": "26ac901c834c92e1c1ad7e7e5432ae347a65be35ac34bc7d4b2cdf450511407b",
+          "crates/napi-vm-core/src/builtins/intl/supported.rs": "5b504e7f96d1ae149189c51fa46c9083e0a68893f1644349da81a267d8dbf901",
+          "crates/napi-vm-core/src/builtins/intl.rs": "7dd9a8ede59fd97b0711a48cc5b6199e808fdd83e49cd3b9dcb556dea60ae7e8",
+          "crates/napi-vm-core/src/builtins/iterator/helpers.rs": "ccb1063fe6446a37c21ffbfcced748550745a0c3aea94189f78ac9873d749940",
+          "crates/napi-vm-core/src/builtins/iterator.rs": "0e9d9ba56d95cd64e7f0827c2b68469d5aba67db9a84483eed1d1f6c121c4f7c",
+          "crates/napi-vm-core/src/builtins/json.rs": "03e471a6e467d8a6c995a0cd4ffff57dd3be0dfda98073a585aa7fc36c1a6541",
+          "crates/napi-vm-core/src/builtins/math.rs": "22540f712d5a063b15fb5c1b032805e4f6ada42617e51fffd1e0832a1229d789",
+          "crates/napi-vm-core/src/builtins/mod.rs": "e646aa27b2bb6635652db705cb80553fa54e7b6807eddc45079480b8a5f4bac5",
+          "crates/napi-vm-core/src/builtins/module_source.rs": "cd4558a61e46d55513d1a1d3df95ebca77e327f986f426eeee15ad53e9379987",
+          "crates/napi-vm-core/src/builtins/number.rs": "5ff8292df4e814edbe0803386e4956399f1ca841edd3023b0cb87a0b455141a8",
+          "crates/napi-vm-core/src/builtins/object.rs": "6aa68c35aa491d8463ab41d56f9a00eab05e636d2f34447769e760751f3e0823",
+          "crates/napi-vm-core/src/builtins/promise.rs": "055fe19e58054a72f4d42a4612c3e750986b2f462a0bd4e75c97640745cfa476",
+          "crates/napi-vm-core/src/builtins/proxy.rs": "2be5020bfae0bbda74153d2b4f5131763b11f54b332798a1f6f146d2fd10f270",
+          "crates/napi-vm-core/src/builtins/reflect.rs": "314fd6290de9f1c8d51383730f1b5756ef0a575c2c169d36a18c246dbb8d2ecc",
+          "crates/napi-vm-core/src/builtins/regexp/protocol.rs": "0d07420dfb019d5cb5c2723fefe51726f7111299df024c2906e50d15dc9ef924",
+          "crates/napi-vm-core/src/builtins/regexp.rs": "d2d96cfbec99f739431898a58c6feff7b112470730373b8f70017e8a2f03a464",
+          "crates/napi-vm-core/src/builtins/shadow_realm.rs": "3380d8db626479dceeedef0ed908a608d667491df493d54fe823216b653cac47",
+          "crates/napi-vm-core/src/builtins/string.rs": "59c43085c7662d9e9529e926ca01aafd12d0a7aa7ffa753da85efbe23870d1e2",
+          "crates/napi-vm-core/src/builtins/symbol.rs": "8523e43ee2d8a6fb8a8f38823e73274646f530e734c3279ffb6dac0c4e4c6c6c",
+          "crates/napi-vm-core/src/builtins/temporal.rs": "db02090f2300617da5d93aa4be2c76de23ad9aa311cd593a2f429a9186f9d4a9",
+          "crates/napi-vm-core/src/builtins/typedarray/encoding.rs": "6532f46c6d7d44f7bcd9c053f044edf453cc7cbacba4ad6478a8deed6ddc8305",
+          "crates/napi-vm-core/src/builtins/typedarray.rs": "ae77408105d1df5da25d39b971f380a267dc95c61f6a7f9c25912c5c9e9f849b",
+          "crates/napi-vm-core/src/builtins/weak.rs": "ac744237f33f97ac02565675f2bebf26fd41b42dd4ecf9c27d7e50c37db9b9d0",
+          "crates/napi-vm-core/src/bytecode/compiler.rs": "089c2fb1e72a89c166c1376ef04242041aa6d531f57505eb832e9b8ed7d1fe02",
+          "crates/napi-vm-core/src/bytecode/constants.rs": "5cd7238bc9806da5cc83a87270992f1b5971ce95af07eece5455cc7a99c418b7",
+          "crates/napi-vm-core/src/bytecode/function.rs": "9679d45bbb91e0f0599703bf13a7512eb417b7df3547d7340706423e21fd87f3",
+          "crates/napi-vm-core/src/bytecode/mod.rs": "75b0b8944e1874144edbefc4551f9edac48dc5bc9a00596828cef33847232507",
+          "crates/napi-vm-core/src/bytecode/module.rs": "9a964c6eecbdd211eeb816de25007d7ec7be2fd88304a14b978056950d1752ed",
+          "crates/napi-vm-core/src/bytecode/opcode.rs": "b4956697fa61240421f4f2071aad126a0a971cffb0c614dbcd6cb78729ad7b76",
+          "crates/napi-vm-core/src/bytecode/parity_tests.rs": "1f950f977a4dc013290297fb1687ed8f8a8d7a0fdf484722c0603934146f9932",
+          "crates/napi-vm-core/src/bytecode/verify.rs": "ee9ec2477e18cf68a3a6a11d033dda3ae3d6af0799557119b42e64fcc09d207c",
+          "crates/napi-vm-core/src/bytecode/vm.rs": "c25092fa405017529d026dea7f8b2d4513a2e587a2fbdebf82790f93409a7bd7",
+          "crates/napi-vm-core/src/convert.rs": "1cd8d24e4759fb35f296ae43f71415879dcf029a3b559393bb3a25cf1051529b",
+          "crates/napi-vm-core/src/error.rs": "1aacf523efc6b0b82a1fb7df4aa900b44697343c167e5bdfe16f4e2bf47790e5",
+          "crates/napi-vm-core/src/format.rs": "6b70c8c78a330715543fb232e8ba063e6df496d09b3499562bf2b9b7af9c13de",
+          "crates/napi-vm-core/src/heap.rs": "5e360f452e3bffb9d6c999efec2be5b6de91e8949e0495e4a52b8cb65b6eaf4c",
+          "crates/napi-vm-core/src/host.rs": "c6233aedb074ee13b165b0846228ce3728523d9d9b78dbe9749cc99ac532145a",
+          "crates/napi-vm-core/src/interpreter/annex.rs": "cc0eac714cad753cc4a2d5d7b4253cc7916ed4cf3c09a359286d3c468e535b5d",
+          "crates/napi-vm-core/src/interpreter/async_fn.rs": "0dd573eb87dd7a6653f5c3fe086fdbba216e1194547d74534cc62b92cf094ee0",
+          "crates/napi-vm-core/src/interpreter/async_from_sync.rs": "748feeffba5f6da6fc9f35f9e1eadb5591968a9e6853a1b0e7b8e1205f548f80",
+          "crates/napi-vm-core/src/interpreter/async_generator.rs": "2e7f8192d691bcbb0b0cb4eb11afd0f11151a9c911dece1b51b863c18e073a1c",
+          "crates/napi-vm-core/src/interpreter/call.rs": "54a5e4777c98cff2aa4f4081f0b605a390f9c295ed502ee0c1f59f9079356f45",
+          "crates/napi-vm-core/src/interpreter/commonjs/exports.rs": "df38249b404e974f7a9e01a29ec5a5c41655eea082b43d65a3e50a67fd5a5b1d",
+          "crates/napi-vm-core/src/interpreter/commonjs/node_gyp_build.rs": "8a8fe658a244b3256b3f16e8fc10e967ef7b1dae32efe8346611370ac05cddaf",
+          "crates/napi-vm-core/src/interpreter/commonjs/prebuild.rs": "59d28070967e36ac173260372a7dc885b582f69342728faf0838a0afdc82e899",
+          "crates/napi-vm-core/src/interpreter/commonjs/tests.rs": "4121eab71b43478938e54672e3a9dfe59ac1b1a5ff91d618e767a216245d3637",
+          "crates/napi-vm-core/src/interpreter/commonjs.rs": "00e724ccc8d4fc139c7cb488c8b2d487696b80f68ad699bb29d04d3531041d30",
+          "crates/napi-vm-core/src/interpreter/decorators.rs": "a737fa015cebf30c5eece8f2defeb1fdb0d4146c15eb9cd54f5ce60d35971169",
+          "crates/napi-vm-core/src/interpreter/env.rs": "f5e1a7517df3ac41f5b8f7bed33ba8a53bc499ca0cb433aa67072f7904caaaba",
+          "crates/napi-vm-core/src/interpreter/eval.rs": "96f8d3d7c629e6d79b7df838b64d9eb634e341f10320a80166f1d38de7a732e3",
+          "crates/napi-vm-core/src/interpreter/for_in.rs": "cedb186b9f4857c5f90817109f6321573a9c01099ce50a12649f13fe9ea5bc4a",
+          "crates/napi-vm-core/src/interpreter/jobs.rs": "f5852f5548f30a264b15274e7c4f7bae79388401404843cf67df89af58ce6d9e",
+          "crates/napi-vm-core/src/interpreter/mod.rs": "137d30238d003139ddbf12aa48c394b86f71a487dd437c3d7799ee59bf9586a0",
+          "crates/napi-vm-core/src/interpreter/module_link/asynchronous.rs": "efd6f7f295c0f42e461f43510d79c7176d9cec343fa26d8098970888c1f69bca",
+          "crates/napi-vm-core/src/interpreter/module_link.rs": "09bec0c45b76b12b424bf6bd90ce16f38c597e9e9ff1b88c663989d0ceb5bff5",
+          "crates/napi-vm-core/src/interpreter/module_realm.rs": "e8e549738ca8a2a5ec10b267cb65b1c8f0e8955be782af214ff026bc686bc54e",
+          "crates/napi-vm-core/src/interpreter/native_addon.rs": "775d6ae2b2514e04f49ccdd73b80d26ee839b4829c851b72a82d479796c6d25e",
+          "crates/napi-vm-core/src/interpreter/native_addon_binary.rs": "cfe85fa009cc9b2adf3a8b2afe2ce956d0fc607ec9e400a0a29e3401c45e4b42",
+          "crates/napi-vm-core/src/interpreter/node_addon/bridge_script.rs": "27de62d451b1221ba9eb5b186da199a94db4f5edbcbaee3ff9649c6739e2683b",
+          "crates/napi-vm-core/src/interpreter/node_addon/tests.rs": "b029fa4df0c4861020743291565a3bd3d7e410921472727a2e84ae493db8eed2",
+          "crates/napi-vm-core/src/interpreter/node_addon/wire.rs": "8f249e7710b358e0dd055bbb25f43c24672701acad579fcaf2ec94ebe76ceb31",
+          "crates/napi-vm-core/src/interpreter/node_addon/wire_apply.rs": "559048e90fd0a373f62065772b3196ccdf9e611df0e4c937b7957147eb9992ef",
+          "crates/napi-vm-core/src/interpreter/node_addon.rs": "cdd744402bf63b250e58dd55000af144407a7701c072639db936369775d01be1",
+          "crates/napi-vm-core/src/interpreter/ops.rs": "e5a1caf2523d2beddfea7fd9056525e5569e34d6cd5b377c6944e808cd57d73d",
+          "crates/napi-vm-core/src/interpreter/promise.rs": "11b152b2093d9eb889f8be8e0638d51b44b2232a9da1812b2ca31fb7ba06c4ab",
+          "crates/napi-vm-core/src/interpreter/realm.rs": "a8260c093340046929bcf761f793cd956956834275ca106d07d3058594e4768d",
+          "crates/napi-vm-core/src/interpreter/resolve.rs": "1ba0aeff164490196614891465fcadbb2d98cb8d92f46c63abe803b512407651",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/api/arrays.rs": "d9b6532a1b7271714f91d81cd019b475e6ec6fc2b67e35ff4aa659a1088e103f",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/api/async.rs": "57ce3a9dee539bec3a6f9515f827a990fa8b1fd9a99002f78039208b5fc18c0e",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/api/binary.rs": "11da211fac0ad80e323a79e9ee2cf87805b7f3ab7b30553b0dab104990c950f6",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/api/callbacks.rs": "1c697298a57f32f7887afcaf2b40f5a15e3d22fe087225ee373c96fd5dd299eb",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/api/errors_references.rs": "a085a8b2794ca3e589f61438470c6bd370b615f1150cf63dd26ebf1c74463252",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/api/mod.rs": "99bcf5757ab45310a591b89d38bd7f0341b0b5fa66f1b54a4724eff0477dd055",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/api/properties.rs": "c38d0218e3708de61e61a736855950c236682c29dbcd8a6b4a57c798e283c796",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/api/values.rs": "17443e1078d9ea082bb65d453feca858adfc435b7d7263685a1087c0f5a7b96e",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/api_table.rs": "7458a495553c6f97894147df0bf4e793fbbe9df1cf4fe119105e3909bf05dd86",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/async_work.rs": "f1f867f86a27379dc11760be2f4546e5e17c6c2e115af403cc928b40b1533071",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/guest.rs": "307bad482aa72c5b86f4f4437e79aa909882c838019b16a8e598320a3d6e904f",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/lifecycle.rs": "8db3c855d9666f06ba34486c0a29f5ef1ef6c69924c75124ff07aa6e233b17b7",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/shim.rs": "473001ad483b0ee8993656a18fdd3786391d192c07edad8097ea748e16d3b2a3",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/state.rs": "898f308b10b0740297de697c60fad862f58cd481e7c79a98ed89286e9b2c7531",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/tests/cases_01.rs": "3a9a795084a03d01810571f08d221b9c3fd7bf62a9537bea7c73ad445c2ddadc",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/tests/cases_02.rs": "e43afc5e519cfed550d3ce55a7ce8d9bdde1cc2dc4012613c01d7025ea90402b",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/tests/fixtures/real_napi_v7.c": "ff038d90fcfecc2682e738aa4db4cb5d5a0c6db22253c51f02690d088c3165f8",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/tests/fixtures/real_napi_v7_instanceof.cjs": "e61414f49b889274fdc0e6281b11e1b6c1f0f2b71f485532a2039b205d8e5810",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/tests/fixtures/real_napi_v7_main.cjs": "afad62cde47df6dec051b2bff82dd828f5d092b4c5c8bf9eb4cae18ad4943992",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/tests/macos.rs": "80e161a1717dbca861e393db8faaaf0cf5eddfd24b0561b5f943aa58c6c7c022",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/tests/mod.rs": "d4cecaff0c7de785477de9cdb2731ca0b82025efbe773cc86e0344c6fc4b57ba",
+          "crates/napi-vm-core/src/interpreter/rust_node_api/tests/windows.rs": "5e54d6bb1c2f6fb472960ec5e69acaaccf89348c66d1b2ebd59f8bfdcad480ac",
+          "crates/napi-vm-core/src/interpreter/rust_node_api.rs": "958141cd88987c9d5611fe9a89911c48abad5d4bbacf8798707057f5f37bc7fb",
+          "crates/napi-vm-core/src/interpreter/scheduler.rs": "a816f8948900d347c44e4a48063d6a6b2c5249cf8b857324d29dbc4a38845873",
+          "crates/napi-vm-core/src/jit.rs": "ed8d8df807b67db82d0a725fa8568e325234ebeb3b5511ddd7cb3b668c9cbf40",
+          "crates/napi-vm-core/src/js_string.rs": "2d0217e5e06747b1faa907e8761127df6623534b924a605b75761fa221437e62",
+          "crates/napi-vm-core/src/lang/actions.rs": "56481848bc20c1941da1a0d8a3fb504676300240cc974a6085ef4197fafe9583",
+          "crates/napi-vm-core/src/lang/catalog.rs": "7b4ed335c9910e51462194ee67e53d502ed0baa3609dd20f7ea44170355d7d14",
+          "crates/napi-vm-core/src/lang/complete.rs": "ee2e2fcd199ab2bf05ba900256d38a95de702ee866fdac1c6bf31f5550d29e5c",
+          "crates/napi-vm-core/src/lang/diagnostics.rs": "e8799705803e0f82dd2d22d5820c61a15ef2ea0e31b938134f11a082f4d1b03a",
+          "crates/napi-vm-core/src/lang/document.rs": "6a8d920f1de7217dbc3b8cba5063c2693e769e1d1193975b11fc20aa4558a45d",
+          "crates/napi-vm-core/src/lang/format_source.rs": "590d839d065a0290143fefd4717d37d16311865f2d6ff243fb3cc41a4b224993",
+          "crates/napi-vm-core/src/lang/metadata.rs": "2b7203319af133a48f61b3c5703b461c78698487cf529b199f6d476f922f10aa",
+          "crates/napi-vm-core/src/lang/mod.rs": "d7bfbcdb11f7ec2d4fdec1167aa24872ea4eaedb7eff5e4709d1b10ca43e7a60",
+          "crates/napi-vm-core/src/lang/navigation.rs": "f7fa3e8cff2cbab461d6605f3731539bcdbeb8b115602751782a30bc2e351c51",
+          "crates/napi-vm-core/src/lang/scope.rs": "ff346693ee8c2346cd1749fa03d82a554227992e1b3957801c58582d2196b06f",
+          "crates/napi-vm-core/src/lang/semantic.rs": "42e7940164fb1c8ef545b9d4f81f20e287bdc80eb8b95453c0bdb9d80ea1aa05",
+          "crates/napi-vm-core/src/lang/service.rs": "43d99252bcc416501243ef387eac26b64177eded0b96c28fbad236eca20938c7",
+          "crates/napi-vm-core/src/lang/symbols.rs": "cb110eae76ddee17074ddbbcb1babc755e5655a3b24f95a9693921ae3cbacccf",
+          "crates/napi-vm-core/src/lazy_collections.rs": "13bf344e87e5056cabbc26d67ea1b0515d189a2a2702325e0a0f35978a168428",
+          "crates/napi-vm-core/src/lexer.rs": "44441df23aa555654233a522382408fc0bc6a37865eb276666087187aa803454",
+          "crates/napi-vm-core/src/lib.rs": "045b8a375ec15e25eebc2c4cd1db081cc0c9c3605714274dbe1019d97c99d444",
+          "crates/napi-vm-core/src/module_loader.rs": "4e79c143243dd25eb638d0c0e83788a55fec88f5a8eab9b9b69c953fbf68eabe",
+          "crates/napi-vm-core/src/parser/ast.rs": "e201125da5456557c98ba04d0f879a22015be281cbd1bb0f8a1203314c062259",
+          "crates/napi-vm-core/src/parser/cache.rs": "5b2d0da7b32bd4dd2c42ae1ee594603bfa4860537d83200646e7bf20c87feb9d",
+          "crates/napi-vm-core/src/parser/compound.rs": "3ca11ec40c74c28d00f23023cdabf6870cde77a87dc86e2f540914ebc613664c",
+          "crates/napi-vm-core/src/parser/expr.rs": "4088cbbf65bf145056c3a3317029d953677f37980995bd237f4cd309499f71db",
+          "crates/napi-vm-core/src/parser/index.rs": "55008bceac65aa929d758460f3b39a2e586e3622aab6da7a0f3b3df02c614fc1",
+          "crates/napi-vm-core/src/parser/mod.rs": "815d6734b8a754cfe5df58d6d6a569138d58e328aeea6faa936241fa8b4862f4",
+          "crates/napi-vm-core/src/parser/primary.rs": "d82c5461a82294c9f283adeba3a1b6412033455c736bc0f906b1f449c4da8df5",
+          "crates/napi-vm-core/src/parser/stmt.rs": "4cbd67f1564a675ad0b91bbe8ec427a1d43845bd40a4d3178c637bba7e8b16c1",
+          "crates/napi-vm-core/src/parser/validate.rs": "25096772020babea74a07a97c899b9a702835db98bda2600dc4ccbc1bf73592a",
+          "crates/napi-vm-core/src/regex/emoji_tables.rs": "c8f14138bf66b950b4aec1aee4d6f3ca9079c332fae871292986d1a6f9f6cd41",
+          "crates/napi-vm-core/src/regex/mod.rs": "33670af63fb28d8aa430b6ccf92ab0bc639fac1babfd529f8688254d9bfb0ac9",
+          "crates/napi-vm-core/src/regex/parse.rs": "bb5e6a759cf285ee955b5be56a2fbbcbfccbdeffe6b35f1a428e97d57004c5e8",
+          "crates/napi-vm-core/src/regex/unicode.rs": "8ad35c16066774622a21cea1d9f4b5dc317ecb0b9acb742a8ae66a1a1d59fa72",
+          "crates/napi-vm-core/src/runtime.rs": "6ffe586b1e26b59c84fc3a6210a345c2c81aa1d419a800f0272c352a7d57c271",
+          "crates/napi-vm-core/src/shape.rs": "7cb3002ff22c6a3f343bece1b29b9b8c07c89109af6c0343dcbbdcf7cbdad6e2",
+          "crates/napi-vm-core/src/span.rs": "ac770741669f555e7c20ba1522f637e130f680f647a8558c329462f04ce2eac7",
+          "crates/napi-vm-core/src/test_support/buffer.rs": "2b5b7948ca74f48a0ef742ada1c11637e719ba07900aea354bc77db527157f67",
+          "crates/napi-vm-core/src/test_support/web.rs": "af1f69c3d2619d104196e30d617d6f325e43a28c3b6ba6f9ac50a421484d2830",
+          "crates/napi-vm-core/src/test_support.rs": "60b2b3c10f9e733a61bd811971acacf3a523937a7665c911e3424c59f973cf63",
+          "crates/napi-vm-core/src/value/shared.rs": "7192f78b3c76c724d4dbac7ffcd4818d01e0388791960b5d181da7968c2fbc0c",
+          "crates/napi-vm-core/src/value/weak.rs": "8143ed798b5ee518251e45ae8f801d14b85ca3ad55c35bca05c517861a4f6afa",
+          "crates/napi-vm-core/src/value.rs": "994bb75cdf9ba53b9c23861931a04aab7e5b1d9f59fa12e674624dc7dec30292",
+          "crates/napi-vm-core/tests/allocation_registry.rs": "8c037bf728967c4cab85fce5f7c894d7d2d7ee670fa93e90ba2e73e786a82ce8",
+          "crates/napi-vm-core/tests/annex_runtime_semantics.rs": "efda6fbb1903f6c56203b60806749ddfe347c2410db91731ae7fd53d0235af98",
+          "crates/napi-vm-core/tests/array_logical_lengths.rs": "5fc7b1b0df4a77e68140178584d617fc680b5597d2fdf63842e16b344cf9e018",
+          "crates/napi-vm-core/tests/array_sparse_indices.rs": "5f6f8d9564fa53e481883536dd23706bf860f8c41e15e1656cd3c0c2f70589da",
+          "crates/napi-vm-core/tests/array_to_string_invocation.rs": "157e9362195d98cb895aa2b9fc1572293241eae023808f61b971966628fa354c",
+          "crates/napi-vm-core/tests/async_bytecode.rs": "e6e3c9bbb4f1d9455351835b7c47d37a9790c4f17f065ce2dc0406513de5e072",
+          "crates/napi-vm-core/tests/async_from_sync_rejection.rs": "97257cd7958bf62d314ecaf2858ba0d28cafa9dfa6ccbd683a6808f39163c12c",
+          "crates/napi-vm-core/tests/async_iterator_dispose.rs": "57bf2c5be8150aeaf3530f17f9a9c1e4a7d9bba00ed4b929ab0666336122522f",
+          "crates/napi-vm-core/tests/bound_function_chains.rs": "ef7e55ae8cb527eb0bb28623c6ec251a220a0faa6e054ddfdff6a4b5e5eaf0e6",
+          "crates/napi-vm-core/tests/byte_modules.rs": "6dae734b54ba510da9f3bfbe4453edbd06fb033185ff3c21c3a40cad10c69412",
+          "crates/napi-vm-core/tests/class_home_keys.rs": "fbca2f389590bdb1fb9d0a12f61817e32bbefd34a0cf44587e86c57d77d94769",
+          "crates/napi-vm-core/tests/collection_conformance.rs": "526c3230154de2a1b68f119a37baf95d92a436d7abbf5fff3725f57bc0801695",
+          "crates/napi-vm-core/tests/core_constructor_metadata.rs": "b4ee8fb2e2c9811f53356d6151dd0b6dce7255bd0100dd32c10fd7d269ca39f6",
+          "crates/napi-vm-core/tests/date_descriptor_conformance.rs": "6c125c45b1112ceb6b443c04e282abee434646a9be57c2449286fe5ff8957eef",
+          "crates/napi-vm-core/tests/function_binding_semantics.rs": "27da7dfef080affeb246c95b0c98f72912802fac6f17023c7234433617618b6a",
+          "crates/napi-vm-core/tests/function_proxy_metadata.rs": "9326aebd880fac504b0b92434786ab9ed2457e439da1b6c013f346f4c0d676e2",
+          "crates/napi-vm-core/tests/function_source_text.rs": "415af5366df16fd8db0e6a978fab30e6cc1033cf7d9a20211dadaec6a3023bb7",
+          "crates/napi-vm-core/tests/generator_result_identity.rs": "82a3b1e690622381ea5147a51aee16433eb6f181709b69cc56ddfee034f379ef",
+          "crates/napi-vm-core/tests/grammar_contexts.rs": "7b7ea292511e2e1b9bb9f5c79e2fea1319997d91d3cadd86d5ff1a0a15632190",
+          "crates/napi-vm-core/tests/html_dda.rs": "a96dfdb09df954b817828ea4d1c3efb4a9420d1cf890913c7b85ac17e64275f9",
+          "crates/napi-vm-core/tests/import_meta_identity.rs": "e91068275f9d0f641a183fc0adebc8e941a0030911f99a2c873718b346bae61f",
+          "crates/napi-vm-core/tests/instanceof_primitive_order.rs": "9c840b640b66548fba23bc92d6a183832e61ac7269b1fcedc6852e312459f058",
+          "crates/napi-vm-core/tests/json_semantics.rs": "24c880e5a4b9eac40a60f0e1cb953774878abea5da406d41696eaf9629871025",
+          "crates/napi-vm-core/tests/math_sum_precise.rs": "d1b9a9496a9c656e456e5dc9795baab29fede12997d309ce6bfd36b600ab7bfc",
+          "crates/napi-vm-core/tests/module_execution.rs": "dfe325429902a3c00bb0bc1f6687ce41967ece4d094904ed879da115c2846ff6",
+          "crates/napi-vm-core/tests/numeric_rounding.rs": "1e78728e46f49cb04d755334df58c3819aea1b6acafea11b8e7bb72f86ef1039",
+          "crates/napi-vm-core/tests/object_constructor_metadata.rs": "b8e9a8b0c9ce3719adffe5e725ca7f569cb61e5af16c5dc6824ce44a7255e791",
+          "crates/napi-vm-core/tests/object_locale_string.rs": "89165b9b63dcfefb742d2f7de866f8af6272b05045ecbf2501292471f208d21c",
+          "crates/napi-vm-core/tests/private_elements.rs": "87e8879c8aaa50bf850cd8b61b6a979e4043658a7bc3b616a2f4f5f018790639",
+          "crates/napi-vm-core/tests/realm_semantics.rs": "32b68e97fcaef43b53260af058d5f0f0fa857b7bebe1e49231963d5407df50e0",
+          "crates/napi-vm-core/tests/regexp_group_name_escapes.rs": "f935a6175d89ed952afa7872b150e724e34634af17d33967b4ee0e91a27fc871",
+          "crates/napi-vm-core/tests/regexp_legacy.rs": "edb41882021b0311c6da1f4c5fdeb6c4ed4a83bf92fdd3ea8d00eefa14cba966",
+          "crates/napi-vm-core/tests/regexp_lookbehind.rs": "48dce627789a18a40ee73fe3c5d157f189456cd4c05672366aa7a11f246a4afe",
+          "crates/napi-vm-core/tests/regexp_replace_limits.rs": "110ae395a516d1b7ff6824db24d8cb7c5c802b9a22d86224a0a5229cf03d9584",
+          "crates/napi-vm-core/tests/shared_growth.rs": "93dd2b97954e908a9fb8f6674c59ebd622a197fba0cefe46b5af0c4a5dd95300",
+          "crates/napi-vm-core/tests/source_phase_imports.rs": "50ee0c80d6f9e4dee69256266709f022589358d9809cd6cd276f814e4a7c010a",
+          "crates/napi-vm-core/tests/static_semantics.rs": "dd6f7747e78e78745949adcd73742debee0fd542a0ab078a4a63118e8d811fb0",
+          "crates/napi-vm-core/tests/string_semantic_gaps.rs": "28d15eb584f78f52ac88868625d7ca90c4eb55f7a19aed923aca3727d6897049",
+          "crates/napi-vm-core/tests/tagged_template_construction.rs": "5d43a0d467caf48eae7d6ab60de899bf8d88b11ca3caa22b0e1f92ee4c6d89a7",
+          "crates/napi-vm-core/tests/template_object_cache.rs": "a404493abcbf2e5d30203e0b17cdd7d5cdbb156c23009c3232400e4b911c69cc",
+          "crates/napi-vm-core/tests/template_object_integrity.rs": "103a862b02b29d6d35e5348c8d6e82328f1c94d66c2411d9bcac5ac2b2ea1034",
+          "crates/napi-vm-core/tests/temporal_locale.rs": "c575a1bfa64bc24b23ccfb559480fc5bcc05cac7ae18ef0d80a9af6e612274f4",
+          "crates/napi-vm-core/tests/typed_array_buffer_coercion.rs": "b1cd954059bf23f79bb54a0491f0c43a6b24c56670e55394f029a246a882a562",
+          "crates/napi-vm-core/tests/typed_array_constructor_calls.rs": "0d7eefdc59e02bc73c2a0e0e0ffd5af162dc87fc82cf36cfa0ef89e068d05f55",
+          "crates/napi-vm-core/tests/typed_array_method_identity.rs": "1f888dac07cba59106bd577e7934d5c4beb18a6aa92c13601f44cd1cb11b10a9",
+          "crates/napi-vm-core/tests/typed_array_numeric_keys.rs": "168d3f39cab41963898a4e9ea014f85e417cea7360f3a0ed96cc75a24e9b62aa",
+          "crates/napi-vm-core/tests/typed_array_shared_coercion.rs": "ddce0a274005b727579c8083516796ae0d7f817a53337afaf000a6e068f0e7dd",
+          "crates/napi-vm-core/tests/typed_array_slice_copy.rs": "f2643af628a2ec5509c02ef27168feddaaa9698f597efd99edaf1b35a2b20c64",
+          "crates/napi-vm-core/tests/weak_gc.rs": "f657d5ed8b79c55ee279bce0eaed467173b1c818d33fcb09c28a852d4bf2b632"
+        }
+      },
+      "executable_sha256": "ddd9787f9e79584084b843be8285c395658217dc4bcb2a96defe8e9901808df1",
+      "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)\nbinary: rustc\ncommit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4\ncommit-date: 2026-09-28\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.0\nLLVM version: 23.1.1",
+      "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+      "command": [
+        "cargo",
+        "build",
+        "--locked",
+        "--release",
+        "--jobs",
+        "2",
+        "--manifest-path",
+        "/home/meme/Documentos/Default Project/node-vm/bench/rquickjs/Cargo.toml",
+        "--target-dir",
+        "/home/meme/Documentos/Default Project/node-vm/target/rquickjs-comparison"
+      ],
+      "comparison_dependencies": [
+        {
+          "name": "rquickjs",
+          "version": "0.14.0",
+          "checksum": "a0a22bf72f515cc4189dd7c63d016f6de92a11eee98ddf7dd64794198f6eb34e"
+        },
+        {
+          "name": "rquickjs-core",
+          "version": "0.14.0",
+          "checksum": "6657979a24d543e5fc66f32cef2f47ca82ce8eb55cec5f7d59a12b7b570bbf24"
+        },
+        {
+          "name": "rquickjs-sys",
+          "version": "0.14.0",
+          "checksum": "cee271d0eeba64f0915b846cb7ae02e16faf3dfdffdca91731101d9d30fe3423"
+        }
+      ],
+      "profile": "release: opt-level=3, thin LTO, codegen-units=1",
+      "build_environment": {
+        "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER": "kache test-runner"
+      }
+    },
+    "command": [
+      "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/array-after-build/comparison",
+      "--samples",
+      "5",
+      "--iterations",
+      "3",
+      "--filter",
+      ""
+    ],
+    "utc": "2026-11-07T07:05:49.257625+00:00",
+    "platform": "Linux-7.3.0-4-cachyos-x86_64-with-glibc2.44",
+    "machine": "x86_64",
+    "cpu": "AMD BC-250",
+    "cpu_count": 12,
+    "load_average_start": [
+      7.7470703125,
+      8.49169921875,
+      7.8251953125
+    ],
+    "load_average_end": [
+      6.5595703125,
+      8.18994140625,
+      7.736328125
+    ],
+    "limitations": [
+      "Representative synchronous guest workloads; no Node, WASM, I/O, async or host bridge timing.",
+      "No host isolation or enforced CPU affinity; repeat and interleave before accepting small gains.",
+      "Fresh source includes VM construction, unique-comment source allocation, evaluation, destruction and napi-vm cycle collection.",
+      "Warm source uses each public source-evaluation API; napi-vm caches parsed/prepared source, rquickjs evaluates source afresh.",
+      "Warm call retains each guest function and excludes source compilation, lookup and VM construction.",
+      "Both engines explicitly collect cycles between warm batches, outside the timed interval; fresh collection stays inside the interval.",
+      "Synchronous bodies have no jobs; napi-vm host-call includes its empty job checkpoint, rquickjs Function::call does not drain jobs.",
+      "Each sample is a batch average; medians/MAD are descriptive, not a significance test."
+    ]
+  }
+}

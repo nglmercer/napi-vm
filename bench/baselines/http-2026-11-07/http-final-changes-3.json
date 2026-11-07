@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "results": [
+    {
+      "name": "get_64k",
+      "before_ns": 496471.6,
+      "after_ns": 449945.9,
+      "speedup": 1.1034028757679533
+    },
+    {
+      "name": "get_empty",
+      "before_ns": 159239.5,
+      "after_ns": 220029.7,
+      "speedup": 0.7237182071329461
+    },
+    {
+      "name": "post_4m",
+      "before_ns": 6309786.5,
+      "after_ns": 5593064.5,
+      "speedup": 1.1281447764459
+    },
+    {
+      "name": "post_4m_redirect_3",
+      "before_ns": 20001312.1,
+      "after_ns": 20362387.6,
+      "speedup": 0.982267526427009
+    }
+  ],
+  "changed_build_inputs": [
+    "crates/napi-vm-runtime/src/runtime/network.rs"
+  ],
+  "warning": "Descriptive ratios only; inspect raw samples/MAD and repeat interleaved measurements."
+}

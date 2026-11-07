@@ -1,0 +1,32 @@
+Gnuplot not found, using plotters backend
+Benchmarking language_metadata/1_documents_unchanged
+Benchmarking language_metadata/1_documents_unchanged: Warming up for 200.00 ms
+Benchmarking language_metadata/1_documents_unchanged: Collecting 10 samples in estimated 500.00 ms (1.9M iterations)
+Benchmarking language_metadata/1_documents_unchanged: Analyzing
+language_metadata/1_documents_unchanged
+                        time:   [247.43 ns 261.01 ns 271.50 ns]
+Benchmarking language_metadata/1_documents_changed
+Benchmarking language_metadata/1_documents_changed: Warming up for 200.00 ms
+Benchmarking language_metadata/1_documents_changed: Collecting 10 samples in estimated 507.49 ms (3135 iterations)
+Benchmarking language_metadata/1_documents_changed: Analyzing
+language_metadata/1_documents_changed
+                        time:   [141.47 µs 145.86 µs 152.00 µs]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+Benchmarking language_metadata/20_documents_unchanged
+Benchmarking language_metadata/20_documents_unchanged: Warming up for 200.00 ms
+Benchmarking language_metadata/20_documents_unchanged: Collecting 10 samples in estimated 500.00 ms (2.0M iterations)
+Benchmarking language_metadata/20_documents_unchanged: Analyzing
+language_metadata/20_documents_unchanged
+                        time:   [245.36 ns 252.20 ns 261.85 ns]
+Found 2 outliers among 10 measurements (20.00%)
+  2 (20.00%) high mild
+Benchmarking language_metadata/20_documents_changed
+Benchmarking language_metadata/20_documents_changed: Warming up for 200.00 ms
+Benchmarking language_metadata/20_documents_changed: Collecting 10 samples in estimated 613.08 ms (220 iterations)
+Benchmarking language_metadata/20_documents_changed: Analyzing
+language_metadata/20_documents_changed
+                        time:   [2.4676 ms 2.5734 ms 2.6569 ms]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+

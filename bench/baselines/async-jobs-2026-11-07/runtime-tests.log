@@ -1,0 +1,79 @@
+   Compiling napi-vm v0.1.5 (/home/meme/Documentos/Default Project/node-vm)
+   Compiling napi-vm-runtime v0.1.5 (/home/meme/Documentos/Default Project/node-vm/crates/napi-vm-runtime)
+    Finished `ci` profile [unoptimized] target(s) in 3.38s
+     Running tests/async_generator_foundation.rs (target/ci/deps/async_generator_foundation-40a947defcb414d1)
+
+running 23 tests
+test ordinary_nested_function_return_is_not_awaited ... ok
+test async_generators_are_async_iterable_and_reject_wrong_brands ... ok
+test await_reads_promise_constructor_once ... ok
+test async_delegation_preserves_promise_valued_steps ... ok
+test async_delegation_awaits_return_before_getting_the_method ... ok
+test for_await_waits_for_generator_cleanup_before_leaving ... ok
+test asynchronous_delegation_forwards_return_completion ... ok
+test real_async_iterator_preserves_a_promise_valued_step ... ok
+test borrowed_async_next_allocates_its_promise_and_result_in_the_method_realm ... ok
+test pending_sync_adapter_continuations_survive_collection ... ok
+test borrowed_async_next_preserves_the_generators_module_realm ... ok
+test return_before_start_awaits_without_executing_body ... ok
+test rejected_delegation_return_is_caught_before_method_lookup ... ok
+test rejected_return_expression_is_catchable_inside_body ... ok
+test requests_wait_for_await_and_preserve_order ... ok
+test return_promise_constructor_error_is_caught_at_the_yield ... ok
+test return_rejects_abrupt_promise_constructor_access_without_starting_body ... ok
+test sync_adapter_closes_when_promise_constructor_access_throws ... ok
+test sync_adapter_awaits_completed_iterator_values ... ok
+test return_request_runs_yielding_cleanup_and_awaits_values ... ok
+test sync_adapter_return_uses_promise_resolution_for_its_result ... ok
+test sync_adapter_closes_on_rejected_values_and_preserves_the_reason ... ok
+test sync_adapter_reads_results_before_await_and_omits_next_arguments ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/promise_semantics.rs (target/ci/deps/promise_semantics-60cc0991b79119fd)
+
+running 11 tests
+test keyed_combinators_and_try_preserve_symbols_null_prototypes_and_arguments ... ok
+test from_async_waits_sequentially_and_awaits_iterator_cleanup ... ok
+test async_disposal_sync_fallback_ignores_return_and_rejects_wrong_brand ... ok
+test finally_waits_for_returned_thenables_and_preserves_or_replaces_settlement ... ok
+test async_disposal_moves_and_waits_in_reverse_order_while_nesting_errors ... ok
+test combinators_interleave_iteration_resolve_and_then_and_close_abruptly ... ok
+test from_async_distinguishes_async_values_from_sync_values_and_checks_lengths ... ok
+test rejected_species_result_survives_collection_and_forwards_the_reason ... ok
+test native_species_results_survive_collection_without_direct_guest_references ... ok
+test synchronous_thenables_cannot_complete_combinators_early_or_repeat_slots ... ok
+test then_species_capabilities_survive_collection_with_their_closures ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/scheduler.rs (target/ci/deps/scheduler-1a581e88b85d062a)
+
+running 24 tests
+test hard_limits_survive_soft_yields ... ok
+test cancellation_between_readiness_check_and_wait_is_latched ... ok
+test future_timer_wait_is_capped_by_execution_deadline ... ok
+test hard_job_boundary_keeps_next_job ... ok
+test blocking_only_bridge_is_polled_before_the_full_timeout ... ok
+test future_await_resumes_before_another_due_timer ... ok
+test collection_refuses_while_dequeued_native_job_values_are_on_the_stack ... ok
+test cancellation_and_deadlines_interrupt_long_callbacks_and_coroutine_bodies ... ok
+test last_throwing_microtask_clears_checkpoint ... ok
+test host_is_sampled_at_checkpoints_not_per_microtask ... ok
+test nested_await_checkpoints_share_the_hard_job_budget ... ok
+test notifier_delivery_between_poll_and_sleep_is_latched ... ok
+test nested_timers_and_recursive_microtasks_keep_order ... ok
+test opt_in_alternation_prevents_timer_starvation_under_host_flood ... ok
+test oversized_legacy_ingress_reports_backpressure_without_losing_work ... ok
+test published_gc_roots_do_not_retain_a_cancelled_timer ... ok
+test throwing_checkpoint_reconciles_state_without_refilling_jobs ... ok
+test virtual_deadlines_and_nested_timers_are_absolute ... ok
+test soft_yields_do_not_refill_guest_fuel ... ok
+test soft_yield_resumes_microtasks_before_timers_or_new_evaluation ... ok
+test queued_work_counts_as_progress_without_waiting ... ok
+test zero_and_time_budgets_keep_the_next_job ... ok
+test real_time_waits_only_for_due_timers_and_reports_progress ... ok
+test blocking_only_waits_bound_cancellation_deadlines_timeouts_and_shutdown ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+

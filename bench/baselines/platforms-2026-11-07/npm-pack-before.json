@@ -1,0 +1,41 @@
+{
+  "napi-vm": {
+    "id": "napi-vm@0.1.5",
+    "name": "napi-vm",
+    "version": "0.1.5",
+    "size": 8988566,
+    "unpackedSize": 19184846,
+    "shasum": "60071d319df7154f0a56e6def58569f733907928",
+    "integrity": "sha512-6QYDj4t3P8fEvYQ4X4krmGBq7kx0wAujZe0jHEqsUXt3eYvFx70nENBfxd8p1BEwWDIiRUzBXXG/pfSD0i6vcw==",
+    "filename": "napi-vm-0.1.5.tgz",
+    "files": [
+      {
+        "path": "README.md",
+        "size": 2863,
+        "mode": 420
+      },
+      {
+        "path": "napi_vm_bg.wasm",
+        "size": 19151931,
+        "mode": 420
+      },
+      {
+        "path": "napi_vm.d.ts",
+        "size": 6462,
+        "mode": 420
+      },
+      {
+        "path": "napi_vm.js",
+        "size": 23352,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 238,
+        "mode": 420
+      }
+    ],
+    "entryCount": 5,
+    "bundled": []
+  }
+}

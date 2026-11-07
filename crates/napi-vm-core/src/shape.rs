@@ -16,9 +16,11 @@
 //! the shape-maintaining methods only costs a rebuild, never a wrong value.
 //!
 //! The tree is thread-local. Transitions memoize on the parent node, so the
-//! same add sequence from the root always reaches the same node no matter
+//! same cached add sequence from the root reaches the same node no matter
 //! which interpreter or realm built it; deletes rebuild by replaying the
 //! surviving keys from the root, which canonicalizes them the same way.
+//! A bounded owner-local cache evicts only unused branches; live layouts keep
+//! their shared identity. New layouts still work when the cache is full.
 //! Shape ids come from a thread-local counter and are never reused, so an
 //! inline-cache guard comparing them cannot alias across layouts.
 //!
@@ -27,21 +29,57 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
+
+// Bound the complete owner-local transition tree, not each node independently.
+// A per-node limit still permits exponential retention across key prefixes.
+const MAX_CACHED_TRANSITIONS: usize = 4096;
+const PRUNE_MISS_INTERVAL: usize = 1024;
+
+#[derive(Debug, Default)]
+struct TransitionBudget {
+    entries: Cell<usize>,
+    misses_until_prune: Cell<usize>,
+    root: RefCell<Weak<Shape>>,
+}
+
+impl TransitionBudget {
+    fn can_cache(&self) -> bool {
+        if self.entries.get() < MAX_CACHED_TRANSITIONS {
+            return true;
+        }
+        let remaining = self.misses_until_prune.get();
+        if remaining == 0 {
+            // Upgrade outside the RefCell borrow: pruning can drop whole trees.
+            let root = self.root.borrow().upgrade();
+            if let Some(root) = root {
+                root.prune_unused_transitions();
+            }
+            self.misses_until_prune.set(PRUNE_MISS_INTERVAL);
+        } else {
+            self.misses_until_prune.set(remaining - 1);
+        }
+        self.entries.get() < MAX_CACHED_TRANSITIONS
+    }
+}
 
 /// Canonical descriptor of one object key layout: insertion-ordered keys
 /// plus a key-to-slot index, with memoized add transitions to children.
+// Group the hot inline-cache ID and slot index before the cold layout keys
+// and transition policy. Rc's counters precede this header in its allocation.
+#[repr(C)]
 #[derive(Debug)]
 pub(crate) struct Shape {
     /// Unique within this thread; never reused. Inline caches guard on it.
     pub id: u32,
-    /// Own keys in insertion order, parallel to the object's slot vector.
-    keys: Vec<Rc<str>>,
     /// Key to slot index. First occurrence wins, matching linear search.
     index: HashMap<Rc<str>, u32>,
+    /// Own keys in insertion order, parallel to the object's slot vector.
+    keys: Vec<Rc<str>>,
     /// Memoized `add(key)` children: the same sequence always lands on the
     /// same node, which is what makes shapes canonical and shared.
     transitions: RefCell<HashMap<Rc<str>, Rc<Shape>>>,
+    budget: Rc<TransitionBudget>,
 }
 
 thread_local! {
@@ -63,12 +101,15 @@ impl Default for ShapeContext {
     fn default() -> Self {
         // Constructing a detached owner must not consume the active owner's
         // shape IDs. Its counter starts independently when it is leased.
+        let budget = Rc::new(TransitionBudget::default());
         let root = Rc::new(Shape {
             id: 1,
             keys: Vec::new(),
             index: HashMap::new(),
             transitions: RefCell::new(HashMap::new()),
+            budget: budget.clone(),
         });
+        *budget.root.borrow_mut() = Rc::downgrade(&root);
         Self { root, next: 2 }
     }
 }
@@ -85,6 +126,17 @@ impl ShapeContext {
 
 impl Shape {
     fn fresh(keys: Vec<Rc<str>>) -> Rc<Shape> {
+        let budget = Rc::new(TransitionBudget::default());
+        let root = Self::fresh_in(keys, budget.clone());
+        // Only the canonical root needs a back-reference. Detached dictionary
+        // shapes must remain weak-free so Rc::get_mut can extend them in place.
+        if root.keys.is_empty() {
+            *budget.root.borrow_mut() = Rc::downgrade(&root);
+        }
+        root
+    }
+
+    fn fresh_in(keys: Vec<Rc<str>>, budget: Rc<TransitionBudget>) -> Rc<Shape> {
         let id = NEXT_SHAPE_ID.with(|next| {
             let id = next.get();
             next.set(id.wrapping_add(1).max(1));
@@ -102,6 +154,7 @@ impl Shape {
             keys,
             index,
             transitions: RefCell::new(HashMap::new()),
+            budget,
         })
     }
 
@@ -126,13 +179,36 @@ impl Shape {
         let mut keys = self.keys.clone();
         let key: Rc<str> = Rc::from(key);
         keys.push(key.clone());
-        let child = Self::fresh(keys);
+        let cache = self.keys.len() < 128 && self.budget.can_cache();
+        let child = Self::fresh_in(keys, self.budget.clone());
         // Dictionary-sized layouts must not retain every prefix's full key
         // vector and index. Keep canonical transitions for small objects.
-        if self.keys.len() < 128 {
+        if cache {
             self.transitions.borrow_mut().insert(key, child.clone());
+            self.budget.entries.set(self.budget.entries.get() + 1);
         }
         child
+    }
+
+    /// Remove cache-only leaves bottom-up. An ancestor of a live layout stays
+    /// canonical even when only its descendant has an external Rc owner.
+    /// Cached paths have at most 128 keys, bounding recursion depth.
+    fn prune_unused_transitions(&self) {
+        let mut transitions = self.transitions.borrow_mut();
+        transitions.retain(|_, child| {
+            child.prune_unused_transitions();
+            let unused = Rc::strong_count(child) == 1 && child.transitions.borrow().is_empty();
+            if unused {
+                self.budget.entries.set(self.budget.entries.get() - 1);
+            }
+            !unused
+        });
+        // Live prefixes must not retain large empty hash tables after pruning.
+        // Keep a small reserve to avoid reallocating for ordinary hot layouts.
+        let reserve = transitions.len().max(64);
+        if transitions.capacity() > reserve * 4 {
+            transitions.shrink_to(reserve);
+        }
     }
 
     /// Dictionary-sized layouts are detached from the canonical transition
@@ -185,6 +261,16 @@ impl Shape {
             shape = shape.add(key);
         }
         shape
+    }
+}
+
+impl Drop for Shape {
+    fn drop(&mut self) {
+        // Detached/live layouts can outlive their root or a pruned prefix.
+        // Account their own outgoing edges before recursive field destruction.
+        self.budget
+            .entries
+            .set(self.budget.entries.get() - self.transitions.get_mut().len());
     }
 }
 
@@ -350,6 +436,101 @@ mod tests {
         cell.own_index(key);
         cell.own_index(key);
         cell.shape_id().expect("two reads build the layout")
+    }
+
+    #[test]
+    fn cache_budget_preserves_live_descendants_and_evicts_unused_layouts() {
+        let root = Shape::fresh(Vec::new());
+        // Keep only the leaf externally: its prefix must survive pruning too.
+        let live = root.add("hot").add("value");
+        let old = root.add("evict");
+        let old_id = old.id;
+        let weak = Rc::downgrade(&old);
+        let cache = PropCache::empty();
+        cache.fill(old_id, 0);
+        drop(old);
+        for i in 0..MAX_CACHED_TRANSITIONS * 4 {
+            root.add(&format!("unique_{i}"));
+            assert!(root.budget.entries.get() <= MAX_CACHED_TRANSITIONS);
+        }
+        assert!(
+            weak.upgrade().is_none(),
+            "unused cached layout was retained"
+        );
+        assert!(Rc::ptr_eq(&live, &root.add("hot").add("value")));
+        let replacement = root.add("evict");
+        assert_ne!(replacement.id, old_id);
+        assert_eq!(cache.probe(Some(replacement.id)), None);
+        assert_eq!(replacement.slot_of("evict"), Some(0));
+    }
+
+    #[test]
+    fn budget_bounds_the_entire_tree_even_when_every_layout_is_live() {
+        let root = Shape::fresh(Vec::new());
+        let mut layouts = Vec::new();
+        for i in 0..MAX_CACHED_TRANSITIONS * 2 {
+            let prefix = root.add(&format!("prefix_{}", i % 32));
+            let key = format!("key_{i}");
+            let layout = prefix.add(&key);
+            assert_eq!(layout.slot_of(&key), Some(1));
+            layouts.push(layout);
+            assert!(root.budget.entries.get() <= MAX_CACHED_TRANSITIONS);
+        }
+        assert_eq!(root.budget.entries.get(), MAX_CACHED_TRANSITIONS);
+        drop(layouts);
+        root.prune_unused_transitions();
+        assert_eq!(root.budget.entries.get(), 0);
+        assert!(root.transitions.borrow().is_empty());
+    }
+
+    #[test]
+    fn pruning_releases_bucket_storage_on_a_live_prefix() {
+        let root = Shape::fresh(Vec::new());
+        let prefix = root.add("prefix");
+        for i in 0..MAX_CACHED_TRANSITIONS - 1 {
+            prefix.add(&format!("temporary_{i}"));
+        }
+        let capacity = prefix.transitions.borrow().capacity();
+        root.prune_unused_transitions();
+        assert!(prefix.transitions.borrow().is_empty());
+        assert!(prefix.transitions.borrow().capacity() < capacity / 2);
+        assert!(Rc::ptr_eq(&prefix, &root.add("prefix")));
+    }
+
+    #[test]
+    fn detached_layout_accounting_survives_root_destruction() {
+        let root = Shape::fresh(Vec::new());
+        let budget = root.budget.clone();
+        let parent = root.add("parent");
+        let leaf = parent.add("leaf");
+        assert_eq!(budget.entries.get(), 2);
+        drop(root);
+        assert_eq!(budget.entries.get(), 1);
+        assert!(budget.root.borrow().upgrade().is_none());
+        drop(parent);
+        assert_eq!(budget.entries.get(), 0);
+        assert_eq!(leaf.slot_of("leaf"), Some(1));
+        drop(leaf);
+        assert_eq!(budget.entries.get(), 0);
+    }
+
+    #[cfg(feature = "napi")]
+    #[test]
+    fn owner_context_keeps_its_budget_and_counter_isolated() {
+        let active = Shape::root();
+        let before = Shape::created_count();
+        let mut owner = ShapeContext::default();
+        assert_eq!(Shape::created_count(), before);
+        assert!(!Rc::ptr_eq(&active.budget, &owner.root.budget));
+        owner.swap_active();
+        let root = Shape::root();
+        let layout = root.add("owner_key");
+        assert_eq!(root.budget.entries.get(), 1);
+        owner.swap_active();
+        assert!(Rc::ptr_eq(&Shape::root(), &active));
+        assert_eq!(Shape::created_count(), before);
+        assert_eq!(owner.root.budget.entries.get(), 1);
+        assert_eq!(layout.slot_of("owner_key"), Some(0));
     }
 
     #[test]

@@ -208,7 +208,7 @@ pub struct ObjectMeta {
     pub(crate) shadow_realm_wrapped: Option<Box<ShadowRealmWrappedSlots>>,
     pub(crate) disposable_stack: Option<Rc<RefCell<crate::builtins::disposable::Slots>>>,
     pub(crate) collection_kind: Option<CollectionKind>,
-    pub(crate) collection_entries: Option<Rc<ArrayCell>>,
+    pub(crate) collection_entries: Option<Rc<crate::builtins::CollectionData>>,
     pub(crate) collection_iterator: Option<Box<crate::builtins::CollectionIteratorSlots>>,
     /// Prototype link. `None` means either a null prototype or the runtime's
     /// default prototype, distinguished by `uses_default_prototype`.
@@ -977,7 +977,11 @@ impl ArrayCell {
             if let Some(slots) = &meta.disposable_stack {
                 out.extend(slots.borrow().values());
             }
-            out.extend(meta.collection_entries.iter().cloned().map(Value::Array));
+            out.extend(
+                meta.collection_entries
+                    .iter()
+                    .map(|data| Value::Array(data.entries.clone())),
+            );
             if let Some(slots) = &meta.collection_iterator {
                 out.extend(slots.values());
             }
@@ -1180,7 +1184,11 @@ impl ObjectCell {
             if let Some(slots) = &meta.disposable_stack {
                 out.extend(slots.borrow().values());
             }
-            out.extend(meta.collection_entries.iter().cloned().map(Value::Array));
+            out.extend(
+                meta.collection_entries
+                    .iter()
+                    .map(|data| Value::Array(data.entries.clone())),
+            );
             if let Some(slots) = &meta.collection_iterator {
                 out.extend(slots.values());
             }
@@ -4362,7 +4370,11 @@ fn drain_prototype(meta: &RefCell<ObjectMeta>, work: &mut Vec<Value>) {
                 .flat_map(|(_, element)| element.into_values()),
         );
         work.extend(meta.revocable_proxy.take().map(Value::Proxy));
-        work.extend(meta.collection_entries.take().map(Value::Array));
+        work.extend(
+            meta.collection_entries
+                .take()
+                .map(|data| Value::Array(data.entries.clone())),
+        );
         if let Some(slots) = meta.collection_iterator.take() {
             work.extend(slots.into_values());
         }

@@ -1,0 +1,352 @@
+{
+  "schema": 1,
+  "status": "complete",
+  "all_groups_complete": true,
+  "selected_groups": [
+    "engines",
+    "memory",
+    "http",
+    "host",
+    "platforms",
+    "async",
+    "international"
+  ],
+  "unselected_groups": [],
+  "started_utc": "2026-11-07T13:07:17.227673+00:00",
+  "driver_sha256": "7f8f3ddacd9876f792fb70a0dbf6a6b4cec4b3f03bac579aac6aa6482acf3c48",
+  "steps": [
+    {
+      "name": "engine-build",
+      "command": [
+        "/usr/bin/python3",
+        "bench/rquickjs.py",
+        "build",
+        "--output",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/engine-build"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "http-build",
+      "command": [
+        "/usr/bin/python3",
+        "bench/http.py",
+        "build",
+        "--output",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/http-build"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "platform-build",
+      "command": [
+        "/usr/bin/python3",
+        "bench/platforms.py",
+        "build",
+        "--engine-build",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/engine-build",
+        "--output",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/platform-build"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "async-build",
+      "command": [
+        "/usr/bin/python3",
+        "bench/async_jobs.py",
+        "build",
+        "--output",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/async-build"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "international-build",
+      "command": [
+        "/usr/bin/python3",
+        "bench/international.py",
+        "build",
+        "--output",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/international-build"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "host",
+      "command": [
+        "/usr/bin/python3",
+        "bench/performance.py",
+        "run",
+        "--output",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/host"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "engines",
+      "command": [
+        "/usr/bin/python3",
+        "bench/rquickjs.py",
+        "run",
+        "--build",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/engine-build",
+        "--output",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/engines.json",
+        "--samples",
+        "7",
+        "--iterations",
+        "3"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "engine-ratios",
+      "command": [
+        "/usr/bin/python3",
+        "bench/rquickjs-compare.py",
+        "engines",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/engines.json"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "memory",
+      "command": [
+        "/usr/bin/python3",
+        "bench/rquickjs.py",
+        "memory",
+        "--build",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/engine-build",
+        "--output",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/memory.json",
+        "--samples",
+        "3",
+        "--iterations",
+        "8",
+        "--objects",
+        "2000"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "memory-validate",
+      "command": [
+        "/usr/bin/python3",
+        "bench/memory_report.py",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/memory.json",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/memory.json"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "http",
+      "command": [
+        "/usr/bin/python3",
+        "bench/http.py",
+        "run",
+        "--build",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/http-build",
+        "--output",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/http.json",
+        "--samples",
+        "7",
+        "--iterations",
+        "3"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "http-validate",
+      "command": [
+        "/usr/bin/python3",
+        "bench/http.py",
+        "compare",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/http.json",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/http.json"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "platforms",
+      "command": [
+        "/usr/bin/python3",
+        "bench/platforms.py",
+        "run",
+        "--build",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/platform-build",
+        "--output",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/platforms.json",
+        "--samples",
+        "7",
+        "--iterations",
+        "3",
+        "--processes",
+        "3"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "platform-validate",
+      "command": [
+        "/usr/bin/python3",
+        "bench/platforms.py",
+        "compare",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/platforms.json",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/platforms.json"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "async",
+      "command": [
+        "/usr/bin/python3",
+        "bench/async_jobs.py",
+        "run",
+        "--build",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/async-build",
+        "--output",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/async.json",
+        "--samples",
+        "7",
+        "--iterations",
+        "3",
+        "--processes",
+        "3"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "async-validate",
+      "command": [
+        "/usr/bin/python3",
+        "bench/async_jobs.py",
+        "compare",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/async.json",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/async.json"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "async-ratios",
+      "command": [
+        "/usr/bin/python3",
+        "bench/async_jobs.py",
+        "ratios",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/async.json"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "international",
+      "command": [
+        "/usr/bin/python3",
+        "bench/international.py",
+        "run",
+        "--build",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/international-build",
+        "--output",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/international.json",
+        "--samples",
+        "7",
+        "--iterations",
+        "3",
+        "--processes",
+        "3"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "international-validate",
+      "command": [
+        "/usr/bin/python3",
+        "bench/international.py",
+        "compare",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/international.json",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/international.json"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    },
+    {
+      "name": "international-ratios",
+      "command": [
+        "/usr/bin/python3",
+        "bench/international.py",
+        "ratios",
+        "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-intl-getters-suite/international.json"
+      ],
+      "status": "passed",
+      "exit_code": 0
+    }
+  ],
+  "reports": [
+    {
+      "group": "host",
+      "path": "host/baseline.json",
+      "sha256": "01fe765a48df7dc99d886c3c12f237733a59a5436efbba6e054bbda38ced26a8",
+      "result_rows": 81
+    },
+    {
+      "group": "engines",
+      "path": "engines.json",
+      "sha256": "efb84e7658bd5069af68701d0aa1cdad18cd84a0c31f099d06c6497418db1064",
+      "result_rows": 390
+    },
+    {
+      "group": "memory",
+      "path": "memory.json",
+      "sha256": "04c209001a1d17520b01e20045e6d49f31f0fff747ae427b86d8ec7b292ea789",
+      "result_rows": 8
+    },
+    {
+      "group": "http",
+      "path": "http.json",
+      "sha256": "004c1ade1ed8a6239e616b0b41276348ee2c2a394a344f16b37bcf6f15059c00",
+      "result_rows": 4
+    },
+    {
+      "group": "platforms",
+      "path": "platforms.json",
+      "sha256": "6c91080849774913dd36f82e0988caf62c960be86fba04dc5ee523235199b174",
+      "result_rows": 398
+    },
+    {
+      "group": "async",
+      "path": "async.json",
+      "sha256": "e971c305c5623a59eb6ff6ef7a9392c1936f09d8f69ee3cd5333eadfcf4f79ff",
+      "result_rows": 104
+    },
+    {
+      "group": "international",
+      "path": "international.json",
+      "sha256": "aa9ed5d46b70b9abfb6af173a60a1823fe6bab550caab90414de539bc0361919",
+      "result_rows": 243
+    }
+  ],
+  "limitations": [
+    "Finite representative operation coverage; see docs/performance.md for unmeasured families.",
+    "Each layer has its own units and timed boundary; no aggregate runtime score is computed.",
+    "Drivers run sequentially, so suite compilation does not overlap suite measurements.",
+    "External host activity is not isolated; retain samples/MAD and repeat comparisons."
+  ],
+  "finished_utc": "2026-11-07T13:24:18.914086+00:00"
+}

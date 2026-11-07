@@ -1,0 +1,1452 @@
+{
+  "schema": 1,
+  "kind": "node_collection_memory",
+  "samples": 3,
+  "metadata": {
+    "addon_path": "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/full-async-suite/host/raw/napi-vm.node",
+    "addon_sha256": "34280f5088cd808e0260b6ef2db80f95a6f75dcef048582d7882ddb5479b9139",
+    "script_sha256": "164ea7070d553528652231c38c6150b6bfcfb825a8e801416f3db20effc72d33",
+    "helper_sha256": "993307944035989e9bd5283f032fb6c60081b4a98c4655a9206e2119ff4ff9da",
+    "node": "v26.13.0",
+    "platform": "Linux-7.3.0-4-cachyos-x86_64-with-glibc2.44",
+    "machine": "x86_64",
+    "cpu": "AMD BC-250"
+  },
+  "limitations": [
+    "Linux process RSS includes Node, builtins, native/V8 allocator retention and probe buffers.",
+    "No host/CPU isolation; medians/MAD are descriptive; small differences may be noise.",
+    "VmRSS and VmHWM are approximate. Use maximum observed high-water reading, without assuming monotonicity.",
+    "Separate owner per process; three replacement rounds, explicit collection, root release, then disposal.",
+    "Heap counters are native tracked containers, not a complete allocation census or a rquickjs object count."
+  ],
+  "results": [
+    {
+      "name": "map_small",
+      "runs": [
+        {
+          "schema": 1,
+          "kind": "Map",
+          "collections": 1000,
+          "entries": 8,
+          "rounds": 3,
+          "source_sha256": "d6aa6558b0d8ffd6595e99b2d20b8546bbb1a99b7c625594044e9f0ecacb0b10",
+          "addon_sha256": "34280f5088cd808e0260b6ef2db80f95a6f75dcef048582d7882ddb5479b9139",
+          "script_sha256": "164ea7070d553528652231c38c6150b6bfcfb825a8e801416f3db20effc72d33",
+          "snapshots": [
+            {
+              "phase": "baseline",
+              "round": 0,
+              "rss_bytes": 49905664,
+              "high_water_bytes": 49905664,
+              "engine_stats": null
+            },
+            {
+              "phase": "ready",
+              "round": 0,
+              "rss_bytes": 66445312,
+              "high_water_bytes": 66445312,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 1,
+              "rss_bytes": 76619776,
+              "high_water_bytes": 76619776,
+              "engine_stats": {
+                "tracked": 12529,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 1,
+              "rss_bytes": 77017088,
+              "high_water_bytes": 77017088,
+              "engine_stats": {
+                "tracked": 11116,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 2,
+              "rss_bytes": 77017088,
+              "high_water_bytes": 77017088,
+              "engine_stats": {
+                "tracked": 12067,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 2,
+              "rss_bytes": 77025280,
+              "high_water_bytes": 77025280,
+              "engine_stats": {
+                "tracked": 11116,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 3,
+              "rss_bytes": 77848576,
+              "high_water_bytes": 77848576,
+              "engine_stats": {
+                "tracked": 12286,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 3,
+              "rss_bytes": 78225408,
+              "high_water_bytes": 78225408,
+              "engine_stats": {
+                "tracked": 11116,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "released",
+              "round": 3,
+              "rss_bytes": 77950976,
+              "high_water_bytes": 77950976,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "disposed",
+              "round": 3,
+              "rss_bytes": 77950976,
+              "high_water_bytes": 77950976,
+              "engine_stats": null
+            }
+          ]
+        },
+        {
+          "schema": 1,
+          "kind": "Map",
+          "collections": 1000,
+          "entries": 8,
+          "rounds": 3,
+          "source_sha256": "d6aa6558b0d8ffd6595e99b2d20b8546bbb1a99b7c625594044e9f0ecacb0b10",
+          "addon_sha256": "34280f5088cd808e0260b6ef2db80f95a6f75dcef048582d7882ddb5479b9139",
+          "script_sha256": "164ea7070d553528652231c38c6150b6bfcfb825a8e801416f3db20effc72d33",
+          "snapshots": [
+            {
+              "phase": "baseline",
+              "round": 0,
+              "rss_bytes": 49807360,
+              "high_water_bytes": 49807360,
+              "engine_stats": null
+            },
+            {
+              "phase": "ready",
+              "round": 0,
+              "rss_bytes": 66404352,
+              "high_water_bytes": 66404352,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 1,
+              "rss_bytes": 76636160,
+              "high_water_bytes": 76636160,
+              "engine_stats": {
+                "tracked": 12529,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 1,
+              "rss_bytes": 77029376,
+              "high_water_bytes": 77029376,
+              "engine_stats": {
+                "tracked": 11116,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 2,
+              "rss_bytes": 77037568,
+              "high_water_bytes": 77037568,
+              "engine_stats": {
+                "tracked": 12067,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 2,
+              "rss_bytes": 77058048,
+              "high_water_bytes": 77058048,
+              "engine_stats": {
+                "tracked": 11116,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 3,
+              "rss_bytes": 77901824,
+              "high_water_bytes": 77901824,
+              "engine_stats": {
+                "tracked": 12286,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 3,
+              "rss_bytes": 78274560,
+              "high_water_bytes": 78274560,
+              "engine_stats": {
+                "tracked": 11116,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "released",
+              "round": 3,
+              "rss_bytes": 78004224,
+              "high_water_bytes": 78004224,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "disposed",
+              "round": 3,
+              "rss_bytes": 78004224,
+              "high_water_bytes": 78004224,
+              "engine_stats": null
+            }
+          ]
+        },
+        {
+          "schema": 1,
+          "kind": "Map",
+          "collections": 1000,
+          "entries": 8,
+          "rounds": 3,
+          "source_sha256": "d6aa6558b0d8ffd6595e99b2d20b8546bbb1a99b7c625594044e9f0ecacb0b10",
+          "addon_sha256": "34280f5088cd808e0260b6ef2db80f95a6f75dcef048582d7882ddb5479b9139",
+          "script_sha256": "164ea7070d553528652231c38c6150b6bfcfb825a8e801416f3db20effc72d33",
+          "snapshots": [
+            {
+              "phase": "baseline",
+              "round": 0,
+              "rss_bytes": 50040832,
+              "high_water_bytes": 50040832,
+              "engine_stats": null
+            },
+            {
+              "phase": "ready",
+              "round": 0,
+              "rss_bytes": 66740224,
+              "high_water_bytes": 66740224,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 1,
+              "rss_bytes": 77049856,
+              "high_water_bytes": 77049856,
+              "engine_stats": {
+                "tracked": 12529,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 1,
+              "rss_bytes": 77520896,
+              "high_water_bytes": 77520896,
+              "engine_stats": {
+                "tracked": 11116,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 2,
+              "rss_bytes": 77520896,
+              "high_water_bytes": 77520896,
+              "engine_stats": {
+                "tracked": 12067,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 2,
+              "rss_bytes": 77529088,
+              "high_water_bytes": 77529088,
+              "engine_stats": {
+                "tracked": 11116,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 3,
+              "rss_bytes": 78286848,
+              "high_water_bytes": 78286848,
+              "engine_stats": {
+                "tracked": 12286,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 3,
+              "rss_bytes": 78659584,
+              "high_water_bytes": 78659584,
+              "engine_stats": {
+                "tracked": 11116,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "released",
+              "round": 3,
+              "rss_bytes": 78389248,
+              "high_water_bytes": 78389248,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "disposed",
+              "round": 3,
+              "rss_bytes": 78389248,
+              "high_water_bytes": 78389248,
+              "engine_stats": null
+            }
+          ]
+        }
+      ],
+      "summary": {
+        "ready_rss_bytes": {
+          "median": 66445312,
+          "mad": 40960
+        },
+        "last_collected_rss_bytes": {
+          "median": 78274560,
+          "mad": 49152
+        },
+        "collected_growth_bytes": {
+          "median": 11870208,
+          "mad": 49152
+        },
+        "released_rss_bytes": {
+          "median": 78004224,
+          "mad": 53248
+        },
+        "disposed_rss_bytes": {
+          "median": 78004224,
+          "mad": 53248
+        },
+        "peak_rss_bytes": {
+          "median": 78274560,
+          "mad": 49152
+        },
+        "ready_tracked": {
+          "median": 1115,
+          "mad": 0
+        },
+        "released_tracked": {
+          "median": 1115,
+          "mad": 0
+        }
+      }
+    },
+    {
+      "name": "map_large",
+      "runs": [
+        {
+          "schema": 1,
+          "kind": "Map",
+          "collections": 4,
+          "entries": 4096,
+          "rounds": 3,
+          "source_sha256": "e0ab4266dd492a87f7466e060830361c43dbe0a84c2dfad3eeede5715277fd61",
+          "addon_sha256": "34280f5088cd808e0260b6ef2db80f95a6f75dcef048582d7882ddb5479b9139",
+          "script_sha256": "164ea7070d553528652231c38c6150b6bfcfb825a8e801416f3db20effc72d33",
+          "snapshots": [
+            {
+              "phase": "baseline",
+              "round": 0,
+              "rss_bytes": 49967104,
+              "high_water_bytes": 49967104,
+              "engine_stats": null
+            },
+            {
+              "phase": "ready",
+              "round": 0,
+              "rss_bytes": 66433024,
+              "high_water_bytes": 66433024,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 1,
+              "rss_bytes": 82714624,
+              "high_water_bytes": 82714624,
+              "engine_stats": {
+                "tracked": 17511,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 1,
+              "rss_bytes": 82849792,
+              "high_water_bytes": 83177472,
+              "engine_stats": {
+                "tracked": 17508,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 2,
+              "rss_bytes": 91877376,
+              "high_water_bytes": 91877376,
+              "engine_stats": {
+                "tracked": 17511,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 2,
+              "rss_bytes": 91885568,
+              "high_water_bytes": 91885568,
+              "engine_stats": {
+                "tracked": 17508,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 3,
+              "rss_bytes": 91889664,
+              "high_water_bytes": 91889664,
+              "engine_stats": {
+                "tracked": 17511,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 3,
+              "rss_bytes": 91889664,
+              "high_water_bytes": 91889664,
+              "engine_stats": {
+                "tracked": 17508,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "released",
+              "round": 3,
+              "rss_bytes": 90669056,
+              "high_water_bytes": 91463680,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "disposed",
+              "round": 3,
+              "rss_bytes": 90669056,
+              "high_water_bytes": 91463680,
+              "engine_stats": null
+            }
+          ]
+        },
+        {
+          "schema": 1,
+          "kind": "Map",
+          "collections": 4,
+          "entries": 4096,
+          "rounds": 3,
+          "source_sha256": "e0ab4266dd492a87f7466e060830361c43dbe0a84c2dfad3eeede5715277fd61",
+          "addon_sha256": "34280f5088cd808e0260b6ef2db80f95a6f75dcef048582d7882ddb5479b9139",
+          "script_sha256": "164ea7070d553528652231c38c6150b6bfcfb825a8e801416f3db20effc72d33",
+          "snapshots": [
+            {
+              "phase": "baseline",
+              "round": 0,
+              "rss_bytes": 49893376,
+              "high_water_bytes": 49893376,
+              "engine_stats": null
+            },
+            {
+              "phase": "ready",
+              "round": 0,
+              "rss_bytes": 66449408,
+              "high_water_bytes": 66449408,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 1,
+              "rss_bytes": 82862080,
+              "high_water_bytes": 82862080,
+              "engine_stats": {
+                "tracked": 17511,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 1,
+              "rss_bytes": 82997248,
+              "high_water_bytes": 83365888,
+              "engine_stats": {
+                "tracked": 17508,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 2,
+              "rss_bytes": 92028928,
+              "high_water_bytes": 92028928,
+              "engine_stats": {
+                "tracked": 17511,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 2,
+              "rss_bytes": 92033024,
+              "high_water_bytes": 92033024,
+              "engine_stats": {
+                "tracked": 17508,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 3,
+              "rss_bytes": 92037120,
+              "high_water_bytes": 92037120,
+              "engine_stats": {
+                "tracked": 17511,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 3,
+              "rss_bytes": 92037120,
+              "high_water_bytes": 92037120,
+              "engine_stats": {
+                "tracked": 17508,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "released",
+              "round": 3,
+              "rss_bytes": 90816512,
+              "high_water_bytes": 91623424,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "disposed",
+              "round": 3,
+              "rss_bytes": 90816512,
+              "high_water_bytes": 91623424,
+              "engine_stats": null
+            }
+          ]
+        },
+        {
+          "schema": 1,
+          "kind": "Map",
+          "collections": 4,
+          "entries": 4096,
+          "rounds": 3,
+          "source_sha256": "e0ab4266dd492a87f7466e060830361c43dbe0a84c2dfad3eeede5715277fd61",
+          "addon_sha256": "34280f5088cd808e0260b6ef2db80f95a6f75dcef048582d7882ddb5479b9139",
+          "script_sha256": "164ea7070d553528652231c38c6150b6bfcfb825a8e801416f3db20effc72d33",
+          "snapshots": [
+            {
+              "phase": "baseline",
+              "round": 0,
+              "rss_bytes": 50032640,
+              "high_water_bytes": 50032640,
+              "engine_stats": null
+            },
+            {
+              "phase": "ready",
+              "round": 0,
+              "rss_bytes": 66625536,
+              "high_water_bytes": 66625536,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 1,
+              "rss_bytes": 83034112,
+              "high_water_bytes": 83034112,
+              "engine_stats": {
+                "tracked": 17511,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 1,
+              "rss_bytes": 83169280,
+              "high_water_bytes": 83431424,
+              "engine_stats": {
+                "tracked": 17508,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 2,
+              "rss_bytes": 92205056,
+              "high_water_bytes": 92205056,
+              "engine_stats": {
+                "tracked": 17511,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 2,
+              "rss_bytes": 92209152,
+              "high_water_bytes": 92209152,
+              "engine_stats": {
+                "tracked": 17508,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 3,
+              "rss_bytes": 92213248,
+              "high_water_bytes": 92213248,
+              "engine_stats": {
+                "tracked": 17511,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 3,
+              "rss_bytes": 92213248,
+              "high_water_bytes": 92213248,
+              "engine_stats": {
+                "tracked": 17508,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "released",
+              "round": 3,
+              "rss_bytes": 90992640,
+              "high_water_bytes": 91594752,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "disposed",
+              "round": 3,
+              "rss_bytes": 90992640,
+              "high_water_bytes": 91594752,
+              "engine_stats": null
+            }
+          ]
+        }
+      ],
+      "summary": {
+        "ready_rss_bytes": {
+          "median": 66449408,
+          "mad": 16384
+        },
+        "last_collected_rss_bytes": {
+          "median": 92037120,
+          "mad": 147456
+        },
+        "collected_growth_bytes": {
+          "median": 25587712,
+          "mad": 0
+        },
+        "released_rss_bytes": {
+          "median": 90816512,
+          "mad": 147456
+        },
+        "disposed_rss_bytes": {
+          "median": 90816512,
+          "mad": 147456
+        },
+        "peak_rss_bytes": {
+          "median": 92037120,
+          "mad": 147456
+        },
+        "ready_tracked": {
+          "median": 1115,
+          "mad": 0
+        },
+        "released_tracked": {
+          "median": 1115,
+          "mad": 0
+        }
+      }
+    },
+    {
+      "name": "set_small",
+      "runs": [
+        {
+          "schema": 1,
+          "kind": "Set",
+          "collections": 1000,
+          "entries": 8,
+          "rounds": 3,
+          "source_sha256": "376fddaf39b0c9622b4d02ba150e48076aa3be5e91572959a068ef34637bd368",
+          "addon_sha256": "34280f5088cd808e0260b6ef2db80f95a6f75dcef048582d7882ddb5479b9139",
+          "script_sha256": "164ea7070d553528652231c38c6150b6bfcfb825a8e801416f3db20effc72d33",
+          "snapshots": [
+            {
+              "phase": "baseline",
+              "round": 0,
+              "rss_bytes": 50524160,
+              "high_water_bytes": 50524160,
+              "engine_stats": null
+            },
+            {
+              "phase": "ready",
+              "round": 0,
+              "rss_bytes": 67022848,
+              "high_water_bytes": 67022848,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 1,
+              "rss_bytes": 77185024,
+              "high_water_bytes": 77185024,
+              "engine_stats": {
+                "tracked": 12529,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 1,
+              "rss_bytes": 77664256,
+              "high_water_bytes": 77664256,
+              "engine_stats": {
+                "tracked": 11116,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 2,
+              "rss_bytes": 77668352,
+              "high_water_bytes": 77668352,
+              "engine_stats": {
+                "tracked": 12067,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 2,
+              "rss_bytes": 77676544,
+              "high_water_bytes": 77676544,
+              "engine_stats": {
+                "tracked": 11116,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 3,
+              "rss_bytes": 78426112,
+              "high_water_bytes": 78426112,
+              "engine_stats": {
+                "tracked": 12286,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 3,
+              "rss_bytes": 78802944,
+              "high_water_bytes": 78802944,
+              "engine_stats": {
+                "tracked": 11116,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "released",
+              "round": 3,
+              "rss_bytes": 78528512,
+              "high_water_bytes": 78565376,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "disposed",
+              "round": 3,
+              "rss_bytes": 78528512,
+              "high_water_bytes": 78565376,
+              "engine_stats": null
+            }
+          ]
+        },
+        {
+          "schema": 1,
+          "kind": "Set",
+          "collections": 1000,
+          "entries": 8,
+          "rounds": 3,
+          "source_sha256": "376fddaf39b0c9622b4d02ba150e48076aa3be5e91572959a068ef34637bd368",
+          "addon_sha256": "34280f5088cd808e0260b6ef2db80f95a6f75dcef048582d7882ddb5479b9139",
+          "script_sha256": "164ea7070d553528652231c38c6150b6bfcfb825a8e801416f3db20effc72d33",
+          "snapshots": [
+            {
+              "phase": "baseline",
+              "round": 0,
+              "rss_bytes": 49938432,
+              "high_water_bytes": 49938432,
+              "engine_stats": null
+            },
+            {
+              "phase": "ready",
+              "round": 0,
+              "rss_bytes": 66514944,
+              "high_water_bytes": 66514944,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 1,
+              "rss_bytes": 76812288,
+              "high_water_bytes": 76812288,
+              "engine_stats": {
+                "tracked": 12529,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 1,
+              "rss_bytes": 77287424,
+              "high_water_bytes": 77287424,
+              "engine_stats": {
+                "tracked": 11116,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 2,
+              "rss_bytes": 77291520,
+              "high_water_bytes": 77291520,
+              "engine_stats": {
+                "tracked": 12067,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 2,
+              "rss_bytes": 77299712,
+              "high_water_bytes": 77299712,
+              "engine_stats": {
+                "tracked": 11116,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 3,
+              "rss_bytes": 78061568,
+              "high_water_bytes": 78061568,
+              "engine_stats": {
+                "tracked": 12286,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 3,
+              "rss_bytes": 78438400,
+              "high_water_bytes": 78438400,
+              "engine_stats": {
+                "tracked": 11116,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "released",
+              "round": 3,
+              "rss_bytes": 78163968,
+              "high_water_bytes": 78163968,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "disposed",
+              "round": 3,
+              "rss_bytes": 78163968,
+              "high_water_bytes": 78163968,
+              "engine_stats": null
+            }
+          ]
+        },
+        {
+          "schema": 1,
+          "kind": "Set",
+          "collections": 1000,
+          "entries": 8,
+          "rounds": 3,
+          "source_sha256": "376fddaf39b0c9622b4d02ba150e48076aa3be5e91572959a068ef34637bd368",
+          "addon_sha256": "34280f5088cd808e0260b6ef2db80f95a6f75dcef048582d7882ddb5479b9139",
+          "script_sha256": "164ea7070d553528652231c38c6150b6bfcfb825a8e801416f3db20effc72d33",
+          "snapshots": [
+            {
+              "phase": "baseline",
+              "round": 0,
+              "rss_bytes": 50155520,
+              "high_water_bytes": 50155520,
+              "engine_stats": null
+            },
+            {
+              "phase": "ready",
+              "round": 0,
+              "rss_bytes": 67002368,
+              "high_water_bytes": 67002368,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 1,
+              "rss_bytes": 77152256,
+              "high_water_bytes": 77152256,
+              "engine_stats": {
+                "tracked": 12529,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 1,
+              "rss_bytes": 77549568,
+              "high_water_bytes": 77549568,
+              "engine_stats": {
+                "tracked": 11116,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 2,
+              "rss_bytes": 77553664,
+              "high_water_bytes": 77553664,
+              "engine_stats": {
+                "tracked": 12067,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 2,
+              "rss_bytes": 77561856,
+              "high_water_bytes": 77561856,
+              "engine_stats": {
+                "tracked": 11116,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 3,
+              "rss_bytes": 78401536,
+              "high_water_bytes": 78401536,
+              "engine_stats": {
+                "tracked": 12286,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 3,
+              "rss_bytes": 78774272,
+              "high_water_bytes": 78774272,
+              "engine_stats": {
+                "tracked": 11116,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "released",
+              "round": 3,
+              "rss_bytes": 78503936,
+              "high_water_bytes": 78503936,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "disposed",
+              "round": 3,
+              "rss_bytes": 78503936,
+              "high_water_bytes": 78503936,
+              "engine_stats": null
+            }
+          ]
+        }
+      ],
+      "summary": {
+        "ready_rss_bytes": {
+          "median": 67002368,
+          "mad": 20480
+        },
+        "last_collected_rss_bytes": {
+          "median": 78774272,
+          "mad": 28672
+        },
+        "collected_growth_bytes": {
+          "median": 11780096,
+          "mad": 8192
+        },
+        "released_rss_bytes": {
+          "median": 78503936,
+          "mad": 24576
+        },
+        "disposed_rss_bytes": {
+          "median": 78503936,
+          "mad": 24576
+        },
+        "peak_rss_bytes": {
+          "median": 78774272,
+          "mad": 28672
+        },
+        "ready_tracked": {
+          "median": 1115,
+          "mad": 0
+        },
+        "released_tracked": {
+          "median": 1115,
+          "mad": 0
+        }
+      }
+    },
+    {
+      "name": "set_large",
+      "runs": [
+        {
+          "schema": 1,
+          "kind": "Set",
+          "collections": 4,
+          "entries": 4096,
+          "rounds": 3,
+          "source_sha256": "d753f4a6214971b430b15097bd2e073c3166e9ae733c409fa98e293e723131e4",
+          "addon_sha256": "34280f5088cd808e0260b6ef2db80f95a6f75dcef048582d7882ddb5479b9139",
+          "script_sha256": "164ea7070d553528652231c38c6150b6bfcfb825a8e801416f3db20effc72d33",
+          "snapshots": [
+            {
+              "phase": "baseline",
+              "round": 0,
+              "rss_bytes": 50302976,
+              "high_water_bytes": 50302976,
+              "engine_stats": null
+            },
+            {
+              "phase": "ready",
+              "round": 0,
+              "rss_bytes": 66924544,
+              "high_water_bytes": 66924544,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 1,
+              "rss_bytes": 83456000,
+              "high_water_bytes": 83456000,
+              "engine_stats": {
+                "tracked": 17511,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 1,
+              "rss_bytes": 83591168,
+              "high_water_bytes": 83865600,
+              "engine_stats": {
+                "tracked": 17508,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 2,
+              "rss_bytes": 92618752,
+              "high_water_bytes": 92618752,
+              "engine_stats": {
+                "tracked": 17511,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 2,
+              "rss_bytes": 92647424,
+              "high_water_bytes": 92647424,
+              "engine_stats": {
+                "tracked": 17508,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 3,
+              "rss_bytes": 92651520,
+              "high_water_bytes": 92651520,
+              "engine_stats": {
+                "tracked": 17511,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 3,
+              "rss_bytes": 92651520,
+              "high_water_bytes": 92651520,
+              "engine_stats": {
+                "tracked": 17508,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "released",
+              "round": 3,
+              "rss_bytes": 92655616,
+              "high_water_bytes": 92655616,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "disposed",
+              "round": 3,
+              "rss_bytes": 92655616,
+              "high_water_bytes": 92655616,
+              "engine_stats": null
+            }
+          ]
+        },
+        {
+          "schema": 1,
+          "kind": "Set",
+          "collections": 4,
+          "entries": 4096,
+          "rounds": 3,
+          "source_sha256": "d753f4a6214971b430b15097bd2e073c3166e9ae733c409fa98e293e723131e4",
+          "addon_sha256": "34280f5088cd808e0260b6ef2db80f95a6f75dcef048582d7882ddb5479b9139",
+          "script_sha256": "164ea7070d553528652231c38c6150b6bfcfb825a8e801416f3db20effc72d33",
+          "snapshots": [
+            {
+              "phase": "baseline",
+              "round": 0,
+              "rss_bytes": 50511872,
+              "high_water_bytes": 50511872,
+              "engine_stats": null
+            },
+            {
+              "phase": "ready",
+              "round": 0,
+              "rss_bytes": 67203072,
+              "high_water_bytes": 67203072,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 1,
+              "rss_bytes": 83464192,
+              "high_water_bytes": 83464192,
+              "engine_stats": {
+                "tracked": 17511,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 1,
+              "rss_bytes": 83599360,
+              "high_water_bytes": 83910656,
+              "engine_stats": {
+                "tracked": 17508,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 2,
+              "rss_bytes": 92631040,
+              "high_water_bytes": 92631040,
+              "engine_stats": {
+                "tracked": 17511,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 2,
+              "rss_bytes": 92639232,
+              "high_water_bytes": 92639232,
+              "engine_stats": {
+                "tracked": 17508,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 3,
+              "rss_bytes": 92643328,
+              "high_water_bytes": 92643328,
+              "engine_stats": {
+                "tracked": 17511,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 3,
+              "rss_bytes": 92643328,
+              "high_water_bytes": 92643328,
+              "engine_stats": {
+                "tracked": 17508,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "released",
+              "round": 3,
+              "rss_bytes": 91422720,
+              "high_water_bytes": 92196864,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "disposed",
+              "round": 3,
+              "rss_bytes": 91422720,
+              "high_water_bytes": 92196864,
+              "engine_stats": null
+            }
+          ]
+        },
+        {
+          "schema": 1,
+          "kind": "Set",
+          "collections": 4,
+          "entries": 4096,
+          "rounds": 3,
+          "source_sha256": "d753f4a6214971b430b15097bd2e073c3166e9ae733c409fa98e293e723131e4",
+          "addon_sha256": "34280f5088cd808e0260b6ef2db80f95a6f75dcef048582d7882ddb5479b9139",
+          "script_sha256": "164ea7070d553528652231c38c6150b6bfcfb825a8e801416f3db20effc72d33",
+          "snapshots": [
+            {
+              "phase": "baseline",
+              "round": 0,
+              "rss_bytes": 50548736,
+              "high_water_bytes": 50548736,
+              "engine_stats": null
+            },
+            {
+              "phase": "ready",
+              "round": 0,
+              "rss_bytes": 67026944,
+              "high_water_bytes": 67026944,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 1,
+              "rss_bytes": 83304448,
+              "high_water_bytes": 83304448,
+              "engine_stats": {
+                "tracked": 17511,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 1,
+              "rss_bytes": 83439616,
+              "high_water_bytes": 83845120,
+              "engine_stats": {
+                "tracked": 17508,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 2,
+              "rss_bytes": 92463104,
+              "high_water_bytes": 92463104,
+              "engine_stats": {
+                "tracked": 17511,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 2,
+              "rss_bytes": 92471296,
+              "high_water_bytes": 92471296,
+              "engine_stats": {
+                "tracked": 17508,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "allocated",
+              "round": 3,
+              "rss_bytes": 92475392,
+              "high_water_bytes": 92475392,
+              "engine_stats": {
+                "tracked": 17511,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "collected",
+              "round": 3,
+              "rss_bytes": 92475392,
+              "high_water_bytes": 92475392,
+              "engine_stats": {
+                "tracked": 17508,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "released",
+              "round": 3,
+              "rss_bytes": 92479488,
+              "high_water_bytes": 92479488,
+              "engine_stats": {
+                "tracked": 1115,
+                "collectedTotal": 1
+              }
+            },
+            {
+              "phase": "disposed",
+              "round": 3,
+              "rss_bytes": 92479488,
+              "high_water_bytes": 92479488,
+              "engine_stats": null
+            }
+          ]
+        }
+      ],
+      "summary": {
+        "ready_rss_bytes": {
+          "median": 67026944,
+          "mad": 102400
+        },
+        "last_collected_rss_bytes": {
+          "median": 92643328,
+          "mad": 8192
+        },
+        "collected_growth_bytes": {
+          "median": 25448448,
+          "mad": 8192
+        },
+        "released_rss_bytes": {
+          "median": 92479488,
+          "mad": 176128
+        },
+        "disposed_rss_bytes": {
+          "median": 92479488,
+          "mad": 176128
+        },
+        "peak_rss_bytes": {
+          "median": 92643328,
+          "mad": 12288
+        },
+        "ready_tracked": {
+          "median": 1115,
+          "mad": 0
+        },
+        "released_tracked": {
+          "median": 1115,
+          "mad": 0
+        }
+      }
+    }
+  ]
+}

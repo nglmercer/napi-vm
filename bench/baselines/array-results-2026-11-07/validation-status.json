@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "changed_build_inputs": [
+    "crates/napi-vm-core/src/builtins/array.rs"
+  ],
+  "focused_tests_passed": 35,
+  "node_oracle_cases_passed": 8,
+  "gate_status": "passed complete reviewed-5112 corpus",
+  "gate_report": "bench/baselines/array-results-2026-11-07/test262-report.json.gz",
+  "gate_log": "bench/baselines/array-results-2026-11-07/test262-full.log",
+  "gate_checkpoint": "artifacts/performance/array-validation/test262-full.checkpoint",
+  "gate_tool_session": 88183,
+  "limitations": [
+    "No CPU isolation; descriptive ratios only.",
+    "Array-chain pairs have 15 samples and 10 iterations; full-suite smoke reports have 5 samples and 3 iterations.",
+    "Full-suite control variations are not attributed as additional optimization gains.",
+    "No Node bridge, WASM, I/O or async throughput timing in this embedded comparison."
+  ],
+  "gate_last_observation": {
+    "utc": "2026-11-07T07:31:39.050725+00:00",
+    "completed_files": 53615,
+    "outcomes": {
+      "pass": 102992,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "terminal": true
+  },
+  "gate_verification": {
+    "total_variants": 102992,
+    "all_pass": true,
+    "exact_variant_set_matches_previous_full": true,
+    "corpus_and_selection_settings_match_previous_full": true,
+    "worker_digest_matches_immutable_artifact": true,
+    "array_source_matches_worker_build_record": true,
+    "core_inputs_unchanged_between_array_and_memory_builds": true,
+    "engine_sha256": "2bd90019922692b45de30ad5ce942b582cb1856ca95fbe1f08e29e5e1b090ca2",
+    "variant_set_sha256": "659371b6ac462a777048b6f4ec4c71ebc54a064c2549773f3f4d733d4baab3c8"
+  }
+}

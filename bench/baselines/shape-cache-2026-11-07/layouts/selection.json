@@ -1,0 +1,123 @@
+{
+  "schema": 1,
+  "selection": "hot-index: repr(C), id then slot index before keys and transition policy",
+  "counterbalanced_process_medians": {
+    "class_methods": {
+      "before": {
+        "process_medians_ns": [
+          9444902.6,
+          9435837.2
+        ],
+        "median_ns": 9440369.899999999,
+        "over_original": 1.0
+      },
+      "id-first": {
+        "process_medians_ns": [
+          9708176.4,
+          9805705.3
+        ],
+        "median_ns": 9756940.850000001,
+        "over_original": 1.0335337442656778
+      },
+      "hot-index": {
+        "process_medians_ns": [
+          9754980.3,
+          9430698.9
+        ],
+        "median_ns": 9592839.600000001,
+        "over_original": 1.016150818412317
+      }
+    },
+    "property_key_churn": {
+      "before": {
+        "process_medians_ns": [
+          2523056.5,
+          2555745.2
+        ],
+        "median_ns": 2539400.85,
+        "over_original": 1.0
+      },
+      "id-first": {
+        "process_medians_ns": [
+          2547071.2,
+          2539365.0
+        ],
+        "median_ns": 2543218.1,
+        "over_original": 1.0015032089163867
+      },
+      "hot-index": {
+        "process_medians_ns": [
+          2550697.1,
+          2539997.9
+        ],
+        "median_ns": 2545347.5,
+        "over_original": 1.002341753173785
+      }
+    },
+    "property_reads": {
+      "before": {
+        "process_medians_ns": [
+          1639511.3,
+          1704874.6
+        ],
+        "median_ns": 1672192.9500000002,
+        "over_original": 1.0
+      },
+      "id-first": {
+        "process_medians_ns": [
+          1716508.5,
+          1701121.6
+        ],
+        "median_ns": 1708815.05,
+        "over_original": 1.0219006425065957
+      },
+      "hot-index": {
+        "process_medians_ns": [
+          1707394.3,
+          1706893.6
+        ],
+        "median_ns": 1707143.9500000002,
+        "over_original": 1.0209012961093993
+      }
+    },
+    "property_updates": {
+      "before": {
+        "process_medians_ns": [
+          2262073.5,
+          2352045.9
+        ],
+        "median_ns": 2307059.7,
+        "over_original": 1.0
+      },
+      "id-first": {
+        "process_medians_ns": [
+          2265072.6,
+          2230218.0
+        ],
+        "median_ns": 2247645.3,
+        "over_original": 0.9742467002479388
+      },
+      "hot-index": {
+        "process_medians_ns": [
+          2284500.5,
+          2284596.5
+        ],
+        "median_ns": 2284548.5,
+        "over_original": 0.9902424718354709
+      }
+    }
+  },
+  "core_tests_passed": 452,
+  "node_tests_passed": 34,
+  "node_tests_skipped": 0,
+  "benchmark_validator_tests_passed": 12,
+  "limits": [
+    "Unisolated host; medians of process medians are descriptive and do not establish small speedups.",
+    "Original bounded default layout passed full reviewed corpus; selected hot-header build has a new full gate queued after the all-group suite measurement.",
+    "New source differs only in shape.rs across compared builds; semantic policy and header layout are separate parts of that change."
+  ],
+  "selected_post_gc_growth_mib": 8.73046875,
+  "all_group_suite": "bench/baselines/full-suite-2026-11-07/suite.json",
+  "final_layout_gate": "passed 102992/102992; ../selected-hot-header-test262-report.json.gz",
+  "final_layout_source_checks": "../selected-hot-header-source-checks.json"
+}

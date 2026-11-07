@@ -1,0 +1,288 @@
+{
+  "schema": 1,
+  "node": "v26.13.0",
+  "v8": "14.6.202.34-node.40",
+  "icu": "78.3",
+  "addon_sha256": "34280f5088cd808e0260b6ef2db80f95a6f75dcef048582d7882ddb5479b9139",
+  "script_sha256": "03d0370e7ad9af5179c2c18576ab21875fa5ff89166274b58ce7ef1a8e2effc9",
+  "results": [
+    {
+      "name": "number_parts",
+      "source": "JSON.stringify(new Intl.NumberFormat(\"en-US\").formatToParts(1234.5));",
+      "source_sha256": "139546df1b1d0de97e12df48eca3b9790e33ed8cc57bccd82d767294253d76e1",
+      "native": [
+        {
+          "type": "integer",
+          "value": "1"
+        },
+        {
+          "type": "group",
+          "value": ","
+        },
+        {
+          "type": "integer",
+          "value": "234"
+        },
+        {
+          "type": "decimal",
+          "value": "."
+        },
+        {
+          "type": "fraction",
+          "value": "5"
+        }
+      ],
+      "node": [
+        {
+          "type": "integer",
+          "value": "1"
+        },
+        {
+          "type": "group",
+          "value": ","
+        },
+        {
+          "type": "integer",
+          "value": "234"
+        },
+        {
+          "type": "decimal",
+          "value": "."
+        },
+        {
+          "type": "fraction",
+          "value": "5"
+        }
+      ],
+      "equal": true
+    },
+    {
+      "name": "date_parts",
+      "source": "JSON.stringify(new Intl.DateTimeFormat(\"en-US\",{timeZone:\"UTC\",year:\"numeric\",month:\"2-digit\",day:\"2-digit\"}).formatToParts(1704067200000));",
+      "source_sha256": "3c37acb4cdad35275ff0a644dbe4343cbf35d47d672d9ff042ec5a9c9668ed91",
+      "native": [
+        {
+          "type": "month",
+          "value": "01"
+        },
+        {
+          "type": "literal",
+          "value": "/"
+        },
+        {
+          "type": "day",
+          "value": "01"
+        },
+        {
+          "type": "literal",
+          "value": "/"
+        },
+        {
+          "type": "year",
+          "value": "2024"
+        }
+      ],
+      "node": [
+        {
+          "type": "month",
+          "value": "01"
+        },
+        {
+          "type": "literal",
+          "value": "/"
+        },
+        {
+          "type": "day",
+          "value": "01"
+        },
+        {
+          "type": "literal",
+          "value": "/"
+        },
+        {
+          "type": "year",
+          "value": "2024"
+        }
+      ],
+      "equal": true
+    },
+    {
+      "name": "duration_parts",
+      "source": "JSON.stringify(new Intl.DurationFormat(\"en-US\",{style:\"long\"}).formatToParts({hours:1,minutes:2}));",
+      "source_sha256": "3c3d1d5fc5f96571125d2a98828cae3d143f20f0255994405da997d61e6db8fa",
+      "native": [
+        {
+          "type": "integer",
+          "value": "1",
+          "unit": "hour"
+        },
+        {
+          "type": "literal",
+          "value": " ",
+          "unit": "hour"
+        },
+        {
+          "type": "unit",
+          "value": "hour",
+          "unit": "hour"
+        },
+        {
+          "type": "literal",
+          "value": ", "
+        },
+        {
+          "type": "integer",
+          "value": "2",
+          "unit": "minute"
+        },
+        {
+          "type": "literal",
+          "value": " ",
+          "unit": "minute"
+        },
+        {
+          "type": "unit",
+          "value": "minutes",
+          "unit": "minute"
+        }
+      ],
+      "node": [
+        {
+          "type": "integer",
+          "value": "1",
+          "unit": "hour"
+        },
+        {
+          "type": "literal",
+          "value": " ",
+          "unit": "hour"
+        },
+        {
+          "type": "unit",
+          "value": "hour",
+          "unit": "hour"
+        },
+        {
+          "type": "literal",
+          "value": ", "
+        },
+        {
+          "type": "integer",
+          "value": "2",
+          "unit": "minute"
+        },
+        {
+          "type": "literal",
+          "value": " ",
+          "unit": "minute"
+        },
+        {
+          "type": "unit",
+          "value": "minutes",
+          "unit": "minute"
+        }
+      ],
+      "equal": true
+    },
+    {
+      "name": "segment_words",
+      "source": "JSON.stringify(Array.from(new Intl.Segmenter(\"en-US\",{granularity:\"word\"}).segment(\"one two\")));",
+      "source_sha256": "2e5a83bf4056504fc5e7c86d066fa4bffddcd8468e2467af46c034cda13aab62",
+      "native": [
+        {
+          "segment": "one",
+          "index": 0,
+          "input": "one two",
+          "isWordLike": true
+        },
+        {
+          "segment": " ",
+          "index": 3,
+          "input": "one two",
+          "isWordLike": false
+        },
+        {
+          "segment": "two",
+          "index": 4,
+          "input": "one two",
+          "isWordLike": true
+        }
+      ],
+      "node": [
+        {
+          "segment": "one",
+          "index": 0,
+          "input": "one two",
+          "isWordLike": true
+        },
+        {
+          "segment": " ",
+          "index": 3,
+          "input": "one two",
+          "isWordLike": false
+        },
+        {
+          "segment": "two",
+          "index": 4,
+          "input": "one two",
+          "isWordLike": true
+        }
+      ],
+      "equal": true
+    },
+    {
+      "name": "display_names",
+      "source": "JSON.stringify(new Intl.DisplayNames(\"en-US\",{type:\"region\"}).of(\"US\"));",
+      "source_sha256": "7509839531e068348b7f7b937ecb0b4adfbd28bf9c2efe4acbeb4224bb02874a",
+      "native": "US",
+      "node": "United States",
+      "equal": false
+    },
+    {
+      "name": "temporal_date_add",
+      "source": "JSON.stringify((()=>{var start=Temporal.PlainDate.from(\"2024-01-01\"),d=start;for(var i=0;i<100;i++)d=d.add({days:1});return {date:d.toString(),days:d.since(start).days};})());",
+      "source_sha256": "144bad2eedb42146466098fe97370cf302ab23fd91f48509bb28b1fa2f01e968",
+      "native": {
+        "date": "2024-04-10",
+        "days": 100
+      },
+      "node": {
+        "date": "2024-04-10",
+        "days": 100
+      },
+      "equal": true
+    },
+    {
+      "name": "temporal_datetime_add",
+      "source": "JSON.stringify((()=>{var d=Temporal.PlainDateTime.from(\"2024-01-01T00:00\");for(var i=0;i<100;i++)d=d.add({minutes:1});return d.toString();})());",
+      "source_sha256": "312288b54791239dab6cef4a7f6eff065f7d97abce75290f88ebce2fa3f8963b",
+      "native": "2024-01-01T01:40:00",
+      "node": "2024-01-01T01:40:00",
+      "equal": true
+    },
+    {
+      "name": "temporal_instant_round",
+      "source": "JSON.stringify(Temporal.Instant.from(\"2024-01-01T00:00:00.123456789Z\").round({smallestUnit:\"millisecond\",roundingMode:\"halfExpand\"}).toString());",
+      "source_sha256": "d7cf6925f521e8fdba45ea4f2a7942107f1f3a30c8e7d67b775ed1e577b90d06",
+      "native": "2024-01-01T00:00:00.123Z",
+      "node": "2024-01-01T00:00:00.123Z",
+      "equal": true
+    },
+    {
+      "name": "temporal_zoned_utc",
+      "source": "JSON.stringify(Temporal.ZonedDateTime.from(\"2024-02-29T12:34:56+00:00[UTC]\").toString());",
+      "source_sha256": "feddaec3fa7b64bf97428a11fe7e03340251985cf06cb45cedd5ad5e312d30a9",
+      "native": "2024-02-29T12:34:56+00:00[UTC]",
+      "node": "2024-02-29T12:34:56+00:00[UTC]",
+      "equal": true
+    },
+    {
+      "name": "temporal_duration_round",
+      "source": "JSON.stringify(Temporal.Duration.from(\"PT90M\").round({largestUnit:\"hour\",smallestUnit:\"minute\"}).toString());",
+      "source_sha256": "13c6d9223c8797b233f031d62e3885f7deacf2875558f7dd7fa1706171c3e352",
+      "native": "PT1H30M",
+      "node": "PT1H30M",
+      "equal": true
+    }
+  ]
+}

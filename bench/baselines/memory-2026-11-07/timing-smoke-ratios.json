@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "rquickjs_version": "0.14.0",
+  "results": [
+    {
+      "workload": "startup_dominated",
+      "mode": "fresh_source",
+      "unit": "ns/call",
+      "napi_vm_median": 3389224.0,
+      "rquickjs_median": 259576.0,
+      "napi_vm_over_rquickjs": 13.056769501032452
+    },
+    {
+      "workload": "startup_dominated",
+      "mode": "warm_call",
+      "unit": "ns/call",
+      "napi_vm_median": 11672.0,
+      "rquickjs_median": 1364.0,
+      "napi_vm_over_rquickjs": 8.557184750733137
+    },
+    {
+      "workload": "startup_dominated",
+      "mode": "warm_source",
+      "unit": "ns/call",
+      "napi_vm_median": 10992.0,
+      "rquickjs_median": 17599.0,
+      "napi_vm_over_rquickjs": 0.6245809420989828
+    }
+  ]
+}

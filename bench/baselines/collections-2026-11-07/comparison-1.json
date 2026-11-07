@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "before_addon_sha256": "02b155b05c95eb2dfc31de46ecfa76b0ca382d88b9054c3aca0442a2f904f168",
+  "after_addon_sha256": "b98ae3af7214458f0987a7d7d611050a924a2b0e5caeb1c645578e4b644d28a2",
+  "results": [
+    {
+      "name": "map_1_references",
+      "unit": "ns/call",
+      "before_median_ns": 164917.1,
+      "after_median_ns": 81464.2,
+      "before_mad_ns": 6888.100000000006,
+      "after_mad_ns": 14793.899999999994,
+      "speedup": 2.0244119502800006,
+      "identity_before": true,
+      "identity_after": true
+    },
+    {
+      "name": "map_64_references",
+      "unit": "ns/call",
+      "before_median_ns": 10674233.4,
+      "after_median_ns": 96861.4,
+      "before_mad_ns": 471951.7000000011,
+      "after_mad_ns": 10017.900000000009,
+      "speedup": 110.20110591009423,
+      "identity_before": false,
+      "identity_after": true
+    },
+    {
+      "name": "set_1_references",
+      "unit": "ns/call",
+      "before_median_ns": 83998,
+      "after_median_ns": 74866.4,
+      "before_mad_ns": 419.8999999999942,
+      "after_mad_ns": 819.7999999999884,
+      "speedup": 1.1219719393479586,
+      "identity_before": true,
+      "identity_after": true
+    },
+    {
+      "name": "set_64_references",
+      "unit": "ns/call",
+      "before_median_ns": 5218897.4,
+      "after_median_ns": 89590.1,
+      "before_mad_ns": 51233.10000000056,
+      "after_mad_ns": 1317.2000000000116,
+      "speedup": 58.253059210783334,
+      "identity_before": false,
+      "identity_after": true
+    }
+  ],
+  "limitations": [
+    "Descriptive ratios; no CPU isolation or significance test.",
+    "Identity observations are explicit: a defective before result is not equivalent behavior.",
+    "Compare build provenance separately; the report validates timing boundaries and host settings."
+  ]
+}

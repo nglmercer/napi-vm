@@ -9,7 +9,7 @@ runtime = []
 runtime-cli = ["runtime"]
 runtime-web = ["runtime", "dep:getrandom"]
 runtime-fs = ["runtime"]
-runtime-net = ["runtime", "dep:reqwest", "dep:tungstenite", "dep:tokio"]
+runtime-net = ["runtime", "dep:reqwest", "dep:tungstenite", "dep:tokio", "dep:bytes"]
 runtime-npm = ["runtime", "dep:semver", "dep:tar", "dep:flate2"]
 runtime-node = ["runtime", "runtime-npm"]
 runtime-typescript = ["runtime", "dep:oxc_allocator", "dep:oxc_parser", "dep:oxc_span", "dep:oxc_codegen", "dep:oxc_transformer", "dep:oxc_semantic"]
@@ -37,6 +37,19 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"], optional = true }
 getrandom = { version = "0.3", optional = true }
 tokio = { version = "1", features = ["rt", "time", "net", "macros"], optional = true }
+bytes = { version = "1", optional = true }
+
+[[example]]
+name = "http_bench"
+required-features = ["runtime-net"]
+
+[[example]]
+name = "io_bench"
+required-features = ["runtime-fs", "runtime-npm", "runtime-typescript"]
+
+[[example]]
+name = "io_allocations"
+required-features = ["runtime-fs", "runtime-npm", "runtime-typescript"]
 
 [dev-dependencies]
 static_assertions = "1.1"

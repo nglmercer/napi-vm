@@ -1,0 +1,5 @@
+Test262: 1000/3382 files, 19s elapsed, ~46s left
+Test262: 2000/3382 files, 36s elapsed, ~25s left
+Test262: 3000/3382 files, 55s elapsed, ~7s left
+Test262: 3382/3382 files, 64s elapsed, ~0s left
+/home/meme/Documentos/Default Project/node-vm/artifacts/performance/intl-getters-validation/test262-intl.json: 6764/6764 passed (pass 6764, fail 0, skip 0, timeout 0, crash 0, harness_error 0)

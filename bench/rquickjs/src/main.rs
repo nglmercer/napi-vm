@@ -52,7 +52,209 @@ const WORKLOADS: &[(&str, &str, f64)] = &[
         "class P{constructor(x,y){this.x=x;this.y=y;} sum(){return this.x+this.y;}} let t=0; for(let i=0;i<1000;i++){t+=new P(i,i+1).sum();} return t;",
         1_000_000.0,
     ),
+    (
+        "bitwise_loop",
+        "let s=0; for(let i=0;i<5000;i++){s=(s^i)&65535;} return s;",
+        0.0,
+    ),
+    (
+        "array_index_updates",
+        "let a=new Array(1000).fill(0); for(let i=0;i<5000;i++){a[i%1000]++;} return a.reduce((s,x)=>s+x,0);",
+        5000.0,
+    ),
+    (
+        "array_sort_numeric",
+        "let a=[]; for(let i=999;i>=0;i--){a.push(i);} a.sort((a,b)=>a-b); return a[0]+a[999];",
+        999.0,
+    ),
+    (
+        "map_set_get",
+        "const m=new Map(); for(let i=0;i<1000;i++){m.set(i,i*2);} let s=0; for(let i=0;i<1000;i++){s+=m.get(i);} return s+m.size;",
+        1_000_000.0,
+    ),
+    (
+        "set_add_has_delete",
+        "const s=new Set(); for(let i=0;i<1000;i++){s.add(i);} let n=0; for(let i=0;i<1000;i++){if(s.has(i)){n++;} if(i%2===0){s.delete(i);}} return n+s.size;",
+        1500.0,
+    ),
+    (
+        "typed_array_index",
+        "const a=new Uint32Array(1000); let s=0; for(let i=0;i<1000;i++){a[i]=i*3;s+=a[i];} return s;",
+        1_498_500.0,
+    ),
+    (
+        "regexp_exec",
+        "const re=/item(\\d+)/g; let s=0; for(let i=0;i<500;i++){re.lastIndex=0; const m=re.exec('item123 item456'); s+=Number(m[1]);} return s;",
+        61_500.0,
+    ),
+    (
+        "unicode_strings",
+        "let s=0; for(let i=0;i<1000;i++){s+='A😀é'.length+'A😀é'.codePointAt(1);} return s;",
+        128_516_000.0,
+    ),
+    (
+        "prototype_getter",
+        "const p={get x(){return this.y+1;}}; const o=Object.create(p); o.y=4; let s=0; for(let i=0;i<1000;i++){s+=o.x;} return s;",
+        5000.0,
+    ),
+    (
+        "property_key_churn",
+        "let s=0; for(let i=0;i<300;i++){const o={a:i}; o['k'+i]=i; s+=o.a; delete o.a; s+=Object.keys(o).length;} return s;",
+        45_150.0,
+    ),
+    (
+        "exception_catch",
+        "let s=0; for(let i=0;i<500;i++){try{throw i;}catch(e){s+=e;}} return s;",
+        124_750.0,
+    ),
+    (
+        "spread_destructure",
+        "let s=0; const a=[1,2,3]; for(let i=0;i<500;i++){const [x,...rest]=[...a,4]; s+=x+rest.length;} return s;",
+        2000.0,
+    ),
+    (
+        "math_builtins",
+        "let s=0; for(let i=0;i<1000;i++){s+=Math.floor(Math.sqrt(i*i))+Math.abs(-i);} return s;",
+        999_000.0,
+    ),
+    (
+        "bigint_arithmetic",
+        "let s=0n; for(let i=0n;i<500n;i++){s+=i*2n;} return Number(s);",
+        249_500.0,
+    ),
+    (
+        "cyclic_allocations",
+        "let n=0; for(let i=0;i<300;i++){const a={}; const b={peer:a}; a.peer=b; n+=a.peer.peer===a?1:0;} return n;",
+        300.0,
+    ),
+    (
+        "generator_iteration",
+        "function* values(){for(let i=0;i<200;i++)yield i;}let s=0;for(const n of values())s+=n;return s;",
+        19_900.0,
+    ),
+    (
+        "custom_iterator",
+        "const a={[Symbol.iterator](){let n=0;return{next(){return n<200?{value:n++,done:false}:{done:true};}};}};let s=0;for(const n of a)s+=n;return s;",
+        19_900.0,
+    ),
+    (
+        "proxy_reflect_get",
+        "const p=new Proxy({x:1},{get(t,k,r){return Reflect.get(t,k,r)+1;}});let s=0;for(let i=0;i<1000;i++)s+=p.x;return s;",
+        2000.0,
+    ),
+    (
+        "reflect_define_property",
+        "const o={};let s=0;for(let i=0;i<500;i++){Reflect.defineProperty(o,'k'+i,{value:i,enumerable:true,configurable:true,writable:true});s+=Reflect.get(o,'k'+i);}return s;",
+        124_750.0,
+    ),
+    (
+        "reflect_own_keys",
+        "const o=Object.create(null);for(let i=0;i<100;i++)o['k'+i]=i;Object.defineProperty(o,'hidden',{value:1});let s=0;for(let i=0;i<100;i++)s+=Reflect.ownKeys(o).length+Object.keys(o).length;return s;",
+        20_100.0,
+    ),
+    (
+        "date_utc_fields",
+        "const d=new Date(Date.UTC(2020,0,2,3,4,5));let s=0;for(let i=0;i<500;i++)s+=d.getUTCFullYear()+d.getUTCMonth()+d.getUTCDate()+d.getUTCHours()+d.getUTCMinutes()+d.getUTCSeconds();return s;",
+        1_017_000.0,
+    ),
+    (
+        "date_iso_parse",
+        "const n=Date.UTC(2020,0,2,3,4,5);const text=new Date(n).toISOString();let s=0;for(let i=0;i<200;i++)if(Date.parse(text)===n)s++;return s;",
+        200.0,
+    ),
+    (
+        "bigint_division_modulo",
+        "const n=12345678901234567890n;let s=0n;for(let i=1n;i<=200n;i++)s+=(n/i)%97n;return Number(s);",
+        9320.0,
+    ),
+    (
+        "string_replace_callback",
+        "let s=0;for(let i=0;i<500;i++)if('v1-v2-v3'.replace(/(\\d+)/g,(_,n)=>String(Number(n)+1))==='v2-v3-v4')s++;return s;",
+        500.0,
+    ),
+    (
+        "data_view_read_write",
+        "const d=new DataView(new ArrayBuffer(4096));let s=0;for(let i=0;i<1000;i++){d.setUint32(i*4,i,true);s+=d.getUint32(i*4,true);}return s;",
+        499_500.0,
+    ),
+    (
+        "typed_array_bulk_set",
+        "const a=new Uint8Array(4096).fill(7);const b=new Uint8Array(8192);for(let i=0;i<100;i++)b.set(a,2048);return b[2048]+b[6143]+b[0];",
+        14.0,
+    ),
+    (
+        "weak_map_objects",
+        "const keys=[];const m=new WeakMap();for(let i=0;i<256;i++){const k={id:i};keys.push(k);m.set(k,i);}let s=0;for(let i=0;i<256;i++)s+=m.get(keys[i]);return s;",
+        32_640.0,
+    ),
+    (
+        "weak_set_objects",
+        "const keys=[];const s=new WeakSet();for(let i=0;i<256;i++){const k={id:i};keys.push(k);s.add(k);}let n=0;for(let i=0;i<256;i++){if(s.has(keys[i]))n++;if(i%2===0)s.delete(keys[i]);}for(let i=0;i<256;i++)if(s.has(keys[i]))n++;return n;",
+        384.0,
+    ),
+    (
+        "array_buffer_slice",
+        "const a=new ArrayBuffer(4096);new Uint8Array(a).fill(7);let b;for(let i=0;i<100;i++)b=a.slice(1024,3072);return b.byteLength+new Uint8Array(b)[2047];",
+        2055.0,
+    ),
+    (
+        "string_normalization",
+        "let n=0;for(let i=0;i<500;i++)if('e\\u0301'.normalize('NFC')==='é')n++;return n;",
+        500.0,
+    ),
+    (
+        "sparse_array_map",
+        "const a=new Array(1000);for(let i=0;i<1000;i+=2)a[i]=i;const b=a.map(x=>x+1);let s=0;for(let i=0;i<b.length;i++)if(i in b)s+=b[i];return s;",
+        250_000.0,
+    ),
 ];
+
+fn all_workloads() -> Vec<(String, String, f64, String)> {
+    let mut workloads: Vec<_> = WORKLOADS
+        .iter()
+        .map(|(name, body, expected)| {
+            (name.to_string(), body.to_string(), *expected, String::new())
+        })
+        .collect();
+    // Warm lookup fixtures are populated before timing. Fresh-source mode still
+    // includes that setup, as it does for all source and builtin initialization.
+    for size in [16, 64, 256, 1024] {
+        for kind in ["Map", "Set"] {
+            let insert = if kind == "Map" { "set(i,i)" } else { "add(i)" };
+            workloads.push((
+                format!("collection_{}_construct_{size}", kind.to_lowercase()),
+                format!("const m=new {kind}();for(let i=0;i<{size};i++)m.{insert};return m.size;"),
+                size as f64,
+                String::new(),
+            ));
+        }
+        for (keys, key, prepare) in [
+            ("numbers", "i", String::new()),
+            ("strings", "'key'+i", String::new()),
+            (
+                "objects",
+                "collectionKeys[i]",
+                format!(
+                    "var collectionKeys=[];for(var j=0;j<{size};j++)collectionKeys.push({{id:j}});"
+                ),
+            ),
+        ] {
+            workloads.push((
+                format!("collection_map_lookup_{keys}_{size}"),
+                format!("let s=0;for(let i=0;i<{size};i++)s+=collectionFixture.get({key});return s;"),
+                (size * (size - 1) / 2) as f64,
+                format!("{prepare}var collectionFixture=new Map();for(var i=0;i<{size};i++)collectionFixture.set({key},i);\n"),
+            ));
+        }
+        workloads.push((
+            format!("collection_set_has_{size}"),
+            format!("let s=0;for(let i=0;i<{size};i++){{if(collectionFixture.has(i))s++;if(collectionFixture.has(i+{size}))s++;}}return s;"),
+            size as f64,
+            format!("var collectionFixture=new Set();for(var i=0;i<{size};i++)collectionFixture.add(i);\n"),
+        ));
+    }
+    workloads
+}
 
 fn number(v: Value) -> f64 {
     match v {
@@ -95,6 +297,26 @@ fn row(engine: &str, mode: &str, workload: &str, mut samples: Vec<f64>, hash: &s
 }
 
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--emit-workloads") {
+        let workloads: Vec<_> = all_workloads()
+            .into_iter()
+            .map(|(name, body, expected, prelude)| {
+                let setup = format!("{prelude}function bench(){{{body}}}");
+                let source = format!("{setup}\nbench();");
+                let hash = format!("{:x}", Sha256::digest(source.as_bytes()));
+                json!({"name":name,"setup":setup,"source":source,"invocation":"bench();",
+                       "expected":expected,"source_sha256":hash})
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &json!({"schema":1,"kind":"guest_workloads","workloads":workloads})
+            )
+            .unwrap()
+        );
+        return;
+    }
     let mut samples = 15;
     let mut iterations = 10;
     let mut filter = String::new();
@@ -118,11 +340,11 @@ fn main() {
     );
     let mut results = Vec::new();
     let mut workloads = Vec::new();
-    for &(name, body, expected) in WORKLOADS {
+    for (name, body, expected, prelude) in all_workloads() {
         if !name.contains(&filter) {
             continue;
         }
-        let setup = format!("function bench(){{{body}}}");
+        let setup = format!("{prelude}function bench(){{{body}}}");
         let source = format!("{setup}\nbench();");
         let hash = format!("{:x}", Sha256::digest(source.as_bytes()));
         let prepared = Interpreter::compile(&source).unwrap();
@@ -164,8 +386,8 @@ fn main() {
                 ns.push(measure(&mut fresh_napi, expected, iterations));
             }
         }
-        results.push(row("napi-vm", "fresh_source", name, ns, &hash));
-        results.push(row("rquickjs", "fresh_source", name, qs, &hash));
+        results.push(row("napi-vm", "fresh_source", &name, ns, &hash));
+        results.push(row("rquickjs", "fresh_source", &name, qs, &hash));
 
         let mut vm = Interpreter::with_builtins();
         vm.eval_source(&setup).unwrap();
@@ -226,8 +448,8 @@ fn main() {
                     warm_collector.collect_cycles();
                     ctx.run_gc();
                 }
-                results.push(row("napi-vm", mode, name, ns, &hash));
-                results.push(row("rquickjs", mode, name, qs, &hash));
+                results.push(row("napi-vm", mode, &name, ns, &hash));
+                results.push(row("rquickjs", mode, &name, qs, &hash));
             }
         });
         drop(function);

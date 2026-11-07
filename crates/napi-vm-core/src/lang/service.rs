@@ -60,6 +60,10 @@ impl LanguageService {
 
     /// Register a host function exposed by the live runtime.
     pub fn register_host_function(&mut self, function: HostFunctionInfo) {
+        // Runtime snapshots often repeat declarations already in the service.
+        if self.host_functions.get(&function.name) == Some(&function) {
+            return;
+        }
         self.host_functions.insert(function.name.clone(), function);
         self.rebuild_documents();
     }
@@ -68,6 +72,10 @@ impl LanguageService {
     /// sit below everything the live runtime publishes, so a stale manifest
     /// entry never masks a function the running program actually exposed.
     pub fn register_manifest_host_function(&mut self, function: HostFunctionInfo) {
+        // Runtime snapshots often repeat declarations already in the service.
+        if self.manifest_host_functions.get(&function.name) == Some(&function) {
+            return;
+        }
         self.manifest_host_functions
             .insert(function.name.clone(), function);
         self.rebuild_documents();
@@ -76,12 +84,20 @@ impl LanguageService {
     /// Register a generic global published by the live runtime. Re-registering
     /// a name replaces the previous declaration for that runtime generation.
     pub fn register_runtime_global(&mut self, global: GlobalInfo) {
+        // Runtime snapshots often repeat declarations already in the service.
+        if self.runtime_globals.get(&global.name) == Some(&global) {
+            return;
+        }
         self.runtime_globals.insert(global.name.clone(), global);
         self.rebuild_documents();
     }
 
     /// Register a generic global from the static project manifest.
     pub fn register_manifest_global(&mut self, global: GlobalInfo) {
+        // Runtime snapshots often repeat declarations already in the service.
+        if self.manifest_globals.get(&global.name) == Some(&global) {
+            return;
+        }
         self.manifest_globals.insert(global.name.clone(), global);
         self.rebuild_documents();
     }
@@ -203,13 +219,22 @@ impl LanguageService {
     }
 
     fn rebuild_documents(&mut self) {
-        let sources: Vec<_> = self
-            .documents
-            .iter()
-            .map(|(uri, document)| (uri.clone(), document.source().to_string()))
-            .collect();
-        for (uri, source) in sources {
-            self.documents.insert(uri, self.parse(&source));
+        if self.documents.is_empty() {
+            return;
+        }
+        // Resolve and clone metadata once per refresh, rather than per document.
+        let context = self.context();
+        let globals = context.resolved_globals();
+        let hosts = context.host_functions();
+        for document in self.documents.values_mut() {
+            *document = Document::parse_with_context_and_runtime_and_globals(
+                document.source(),
+                &self.module_sources,
+                &hosts,
+                &self.runtime_handlers,
+                &self.runtime_values,
+                &globals,
+            );
         }
     }
 }
@@ -240,6 +265,44 @@ mod tests {
             ),
             documentation: None,
         }
+    }
+
+    #[test]
+    fn repeated_metadata_preserves_documents_but_replacements_refresh_all() {
+        let mut service = LanguageService::new();
+        let host = host_function("api", "number");
+        let generic = global("settings", vec![("version", Shape::Number, None)]);
+        service.register_manifest_host_function(host.clone());
+        service.register_host_function(host.clone());
+        service.register_manifest_global(generic.clone());
+        service.register_runtime_global(generic.clone());
+        for uri in ["file:///one.js", "file:///two.js"] {
+            service.open(uri, "api; settings.version;");
+        }
+        let sources: Vec<_> = ["file:///one.js", "file:///two.js"]
+            .map(|uri| service.source(uri).unwrap().as_ptr())
+            .into();
+        service.register_manifest_host_function(host.clone());
+        service.register_host_function(host);
+        service.register_manifest_global(generic.clone());
+        service.register_runtime_global(generic);
+        for (i, uri) in ["file:///one.js", "file:///two.js"].iter().enumerate() {
+            assert_eq!(service.source(uri).unwrap().as_ptr(), sources[i]);
+        }
+        service.register_host_function(host_function("api", "string"));
+        service.register_runtime_global(global("settings", vec![("version", Shape::String, None)]));
+        for uri in ["file:///one.js", "file:///two.js"] {
+            assert!(service.hover(uri, 1).unwrap().detail.contains("string"));
+            assert!(service.hover(uri, 16).unwrap().detail.contains("string"));
+        }
+        service.clear_runtime_globals();
+        assert!(
+            service
+                .hover("file:///one.js", 16)
+                .unwrap()
+                .detail
+                .contains("number")
+        );
     }
 
     #[test]

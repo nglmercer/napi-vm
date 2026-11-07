@@ -1,0 +1,44 @@
+   Compiling napi-vm-runtime v0.1.5 (/home/meme/Documentos/Default Project/node-vm/crates/napi-vm-runtime)
+    Finished `ci` profile [unoptimized] target(s) in 1.18s
+     Running tests/optional_runtime.rs (target/ci/deps/optional_runtime-3170e037d6bd499d)
+
+running 13 tests
+test permissions_are_denied_by_default_and_scoped ... ok
+test explicit_filesystem_and_network_grants_combine ... ok
+test queue_backpressure_and_shutdown_are_explicit ... ok
+test cancellation_ignores_late_completion ... ok
+test filesystem_denies_traversal_symlinks_and_ungranted_operations ... ok
+test intervals_repeat_and_can_cancel_inside_callback ... ok
+test executing_intervals_and_atomics_timeouts_share_the_timer_cap ... ok
+test idle_does_not_wait_for_future_timers ... ok
+test runtime_globals_require_builder_opt_in ... ok
+test completion_wakes_sleeping_owner_and_pending_roots_survive_gc ... ok
+test stale_completions_do_not_hide_ready_work_after_a_bounded_batch ... ok
+test worker_completion_settles_on_owner_and_follows_microtasks ... ok
+test timer_and_elapsed_limits_are_enforced ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/runtime_byte_modules.rs (target/ci/deps/runtime_byte_modules-778924c87bfcccfe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/runtime_web.rs (target/ci/deps/runtime_web-1739c178597b4ba4)
+
+running 11 tests
+test headers_bodies_and_abort_work_without_network_grants ... ok
+test denied_redirect_never_reaches_its_target ... ok
+test tcp_read_write_and_eof_are_permission_checked ... ok
+test crypto_digest_random_values_and_uuid_are_runtime_only ... ok
+test fetch_completes_on_owner_and_preserves_response ... ok
+test abort_cancels_an_inflight_response_body_without_waiting_for_timeout ... ok
+test http_server_dispatches_requests_to_guest_and_shuts_down ... ok
+test permission_body_limit_and_preaborted_requests_reject ... ok
+test websocket_events_echo_and_close_on_the_vm_owner ... ok
+test binary_bodies_above_the_js_array_cap_roundtrip_without_number_arrays ... ok
+test upload_redirects_replay_or_discard_body_and_headers ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.06s
+

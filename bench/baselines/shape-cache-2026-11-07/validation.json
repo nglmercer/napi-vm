@@ -1,0 +1,85 @@
+{
+  "schema": 1,
+  "status": "passed: selected bounded hot-header full reviewed ECMAScript gate, core/Node tests and complete finite suite",
+  "changed_build_inputs": [
+    "crates/napi-vm-core/src/shape.rs"
+  ],
+  "core_tests_passed": 452,
+  "benchmark_validator_tests_passed": 10,
+  "clippy": "passed core library and tests with napi feature and -D warnings",
+  "node_default": {
+    "passed": 26,
+    "skipped": 8,
+    "failed": 0,
+    "skip_reason": "timer runtime capabilities disabled in default addon"
+  },
+  "node_runtime_status": "passed",
+  "cache_transition_limit": 4096,
+  "pruning": "periodic bounded-tree sweep; preserves live layouts and their ancestors; shrinks oversized cold hash tables",
+  "stress": {
+    "calls_per_process": 32,
+    "objects_per_call": 4000,
+    "process_repetitions": 3,
+    "before_post_gc_growth_mib": 64.8046875,
+    "after_post_gc_growth_mib": 8.7421875,
+    "reduction_of_growth_percent": 86.50994575045208
+  },
+  "gate": {
+    "status": "passed for bounded cache with original default header layout",
+    "tool_session": 95293,
+    "report": "bench/baselines/shape-cache-2026-11-07/bounded-default-layout-test262-report.json.gz",
+    "checkpoint": "artifacts/performance/shape-validation/test262-full.checkpoint",
+    "log": "artifacts/performance/shape-validation/test262-full.log",
+    "last_observation": {
+      "completed_files": 53615,
+      "outcomes": {
+        "pass": 102992
+      },
+      "terminal": true
+    },
+    "terminal": true,
+    "total_variants": 102992,
+    "exact_previous_variant_set": true,
+    "zero_outcome_changes": true
+  },
+  "limits": [
+    "Bare-engine RSS probe; not a whole-application or NAPI owner-memory measurement.",
+    "RSS includes allocator retention, resident code/data, caches and probe allocations.",
+    "Unisolated host; whole-suite property-read warm-call ratios were 1.049/1.078; focused pairs 1.078/1.041, with varying rquickjs controls. No general speedup or latency-neutral claim.",
+    "Original header and selected hot-header each passed all 102,992 reviewed variants; this correctness gate does not rank performance or cover Node bridge behavior."
+  ],
+  "node_runtime": {
+    "passed": 34,
+    "skipped": 0,
+    "failed": 0,
+    "features": "default napi plus runtime"
+  },
+  "current_source_layout": "repr(C): id, index, keys, transitions, budget",
+  "current_layout_selection": "layouts/selection.json",
+  "current_layout_gate": {
+    "status": "passed for selected hot-header source",
+    "tool_session": 50160,
+    "report": "bench/baselines/shape-cache-2026-11-07/selected-hot-header-test262-report.json.gz",
+    "checkpoint": "artifacts/performance/shape-hot-validation/test262-full.checkpoint",
+    "log": "artifacts/performance/shape-hot-validation/test262-full.log",
+    "last_observation": {
+      "utc": "2026-11-07T09:18:24.854116+00:00",
+      "completed_files": 53615,
+      "outcomes": {
+        "pass": 102992
+      },
+      "terminal": true
+    },
+    "terminal": true,
+    "total_variants": 102992,
+    "exact_previous_variant_set": true,
+    "zero_outcome_changes": true,
+    "source_checks": "bench/baselines/shape-cache-2026-11-07/selected-hot-header-source-checks.json"
+  },
+  "all_group_suite": "bench/baselines/full-suite-2026-11-07/suite.json",
+  "selected_layout_post_gc_growth_mib": 8.73046875,
+  "selected_layout_core_tests_passed": 452,
+  "selected_layout_node_tests_passed": 34,
+  "selected_layout_clippy": "passed",
+  "expanded_all_group_suite": "bench/baselines/full-suite-expanded-2026-11-07/suite.json"
+}

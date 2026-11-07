@@ -1,0 +1,22 @@
+{
+  "before": {
+    "binary_sha256": "c89a267d0db85663f04eeeefe5432e7f66f6cdcf3f155fe01d6afe7e94b9529e",
+    "service_sha256": "f4e60bfaf4eda0b5889576ee9502918d85d5ebd6a5f9397c6b239433009a0926",
+    "benchmark_sha256": "9724313a7d2d0bf0ed8fc04db300ec641eb7a147d80b94b82f45d20e9ab3cd96",
+    "git_head": "15f5b9de55b1820aa64cddc410334aab8e5e5c47",
+    "before_source_matches_head": true
+  },
+  "after": {
+    "binary_sha256": "6810809dd31b545395b750af3efd945704de96c4cbcf93d27f723c2a04d60c12",
+    "service_sha256": "43d99252bcc416501243ef387eac26b64177eded0b96c28fbad236eca20938c7",
+    "benchmark_sha256": "9724313a7d2d0bf0ed8fc04db300ec641eb7a147d80b94b82f45d20e9ab3cd96"
+  },
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)\nbinary: rustc\ncommit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4\ncommit-date: 2026-09-28\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.0\nLLVM version: 23.1.1\n",
+  "profile": "release: opt-level=3, thin LTO, codegen-units=1; no-default-features",
+  "platform": "Linux-7.3.0-4-cachyos-x86_64-with-glibc2.44",
+  "cpu": "AMD BC-250",
+  "lockfile_sha256": "e3aa0f787e35580c95a6159ce2a04bf7f0abed29caf3b019f74f3710d3877cdf",
+  "build_environment": {
+    "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER": "kache test-runner"
+  }
+}

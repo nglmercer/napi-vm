@@ -1,0 +1,83 @@
+   Compiling napi-vm v0.1.5 (/home/meme/Documentos/Default Project/node-vm)
+    Finished `ci` profile [unoptimized] target(s) in 1.94s
+     Running tests/intl_bound_getters.rs (target/ci/deps/intl_bound_getters-aee586ccef2d3236)
+
+running 4 tests
+test all_extracted_bound_methods_keep_receivers_alive_through_collection ... ok
+test proxy_receivers_preserve_legacy_unwrapping_and_direct_brand_checks ... ok
+test legacy_wrappers_keep_per_instance_method_identity_and_descriptors ... ok
+test cached_bound_methods_do_not_bypass_receiver_brand_checks ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/intl_collation_plurals.rs (target/ci/deps/intl_collation_plurals-aebfa576699d64ab)
+
+running 4 tests
+test bound_comparison_survives_collection_and_observes_locale_options ... ok
+test bigint_width_coercion_precedes_value_coercion_and_radix_is_observable ... ok
+test plural_selection_uses_fraction_precision_and_ordinal_rules ... ok
+test stack_accessor_preserves_original_capture_and_uses_proxy_operations ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/intl_collator_resolve.rs (target/ci/deps/intl_collator_resolve-135041d0319aca76)
+
+running 4 tests
+test plurals_manx_cardinal_categories ... ok
+test collator_supported_option_replaces_extension ... ok
+test collator_unsupported_option_falls_back_to_supported_extension ... ok
+test collator_german_search_sorts_like_phonebook ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/intl_constructor_callable.rs (target/ci/deps/intl_constructor_callable-62072dd69ddb96db)
+
+running 3 tests
+test intl_modern_constructors_require_new ... ok
+test intl_sparse_array_length_without_allocation ... ok
+test intl_legacy_constructors_ignore_this_and_call ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/intl_datetime_format.rs (target/ci/deps/intl_datetime_format-318b7176202f122f)
+
+running 25 tests
+test datetime_exposes_chinese_related_year_parts ... ok
+test datetime_collapses_identical_range ... ok
+test datetime_format_defaults_to_now ... ok
+test datetime_call_on_instance_installs_fallback_symbol ... ok
+test datetime_day_period_only_part_type ... ok
+test datetime_call_on_fresh_object_returns_it ... ok
+test date_to_locale_methods_use_intl_defaults ... ok
+test datetime_adapts_bare_default_to_temporal_class ... ok
+test datetime_derives_hour12_from_resolved_cycle ... ok
+test datetime_formats_time_range_edges ... ok
+test datetime_formats_arab_fraction_separator ... ok
+test datetime_formats_h24_midnight_as_24 ... ok
+test datetime_formats_year_month_with_time ... ok
+test datetime_formats_minute_second_without_hour ... ok
+test datetime_formats_full_numeric_year ... ok
+test datetime_fraction_part_type ... ok
+test datetime_hides_hour_cycle_without_time ... ok
+test datetime_formats_day_period_names ... ok
+test datetime_pads_arab_two_digit_hour ... ok
+test datetime_names_day_period_with_hour ... ok
+test datetime_range_rejects_undefined ... ok
+test datetime_range_checks_temporal_pair ... ok
+test datetime_reflects_matching_unicode_extensions ... ok
+test datetime_preserves_time_zone_identifiers ... ok
+test datetime_rejects_mismatched_temporal_fields ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests/intl_number_format.rs (target/ci/deps/intl_number_format-6b405d5aa8995028)
+
+running 5 tests
+test extracted_bound_format_survives_collection ... ok
+test legacy_wrappers_and_range_parts_remain_observable ... ok
+test precision_and_parts_preserve_strings_bigints_and_signed_zero ... ok
+test decimal_rounding_localized_patterns_and_notation_share_both_tiers ... ok
+test exponent_inputs_compact_quotes_and_numbering_systems_are_lossless ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+

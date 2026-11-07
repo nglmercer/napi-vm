@@ -1,0 +1,1231 @@
+{
+  "schema": 1,
+  "source_report_sha256": "3222a10d852fd57f54079c6cc3df12b8222bddda3d7312d5ce5fdb3a562dc34b",
+  "results": [
+    {
+      "workload": "number_construct",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "number_construct",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 4137641.3333333335,
+      "reference_median": 1357646,
+      "napi_vm_over_reference": 3.047658471599617
+    },
+    {
+      "workload": "number_construct",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "number_construct",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 581884.0,
+      "reference_median": 741474.6666666666,
+      "napi_vm_over_reference": 0.7847658539918649
+    },
+    {
+      "workload": "number_construct",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "number_construct",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 568369.3333333334,
+      "reference_median": 651114,
+      "napi_vm_over_reference": 0.8729183112839431
+    },
+    {
+      "workload": "number_format",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "number_format",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 3889923.0,
+      "reference_median": 869428,
+      "napi_vm_over_reference": 4.474117465736093
+    },
+    {
+      "workload": "number_format",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "number_format",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 333272.0,
+      "reference_median": 164578.33333333334,
+      "napi_vm_over_reference": 2.0250053166172135
+    },
+    {
+      "workload": "number_format",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "number_format",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 334363.0,
+      "reference_median": 126123.33333333333,
+      "napi_vm_over_reference": 2.6510796310489733
+    },
+    {
+      "workload": "number_parts",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "number_parts",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 8107602.333333333,
+      "reference_median": 1298655.6666666667,
+      "napi_vm_over_reference": 6.243073157447175
+    },
+    {
+      "workload": "number_parts",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "number_parts",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 3588028.0,
+      "reference_median": 513498.3333333333,
+      "napi_vm_over_reference": 6.987418978964554
+    },
+    {
+      "workload": "number_parts",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "number_parts",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 3580706.0,
+      "reference_median": 485634.3333333333,
+      "napi_vm_over_reference": 7.373255460384116
+    },
+    {
+      "workload": "date_construct",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "date_construct",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 6717667.0,
+      "reference_median": 2201617.3333333335,
+      "napi_vm_over_reference": 3.0512418749125643
+    },
+    {
+      "workload": "date_construct",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "date_construct",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 2105677.6666666665,
+      "reference_median": 1355497.6666666667,
+      "napi_vm_over_reference": 1.5534351098108368
+    },
+    {
+      "workload": "date_construct",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "date_construct",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 2100839.0,
+      "reference_median": 1371099.6666666667,
+      "napi_vm_over_reference": 1.5322292398388737
+    },
+    {
+      "workload": "date_parts",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "date_parts",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 10011535.0,
+      "reference_median": 1463635.3333333333,
+      "napi_vm_over_reference": 6.840184007582946
+    },
+    {
+      "workload": "date_parts",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "date_parts",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 4912652.333333333,
+      "reference_median": 469186.6666666667,
+      "napi_vm_over_reference": 10.470571059137798
+    },
+    {
+      "workload": "date_parts",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "date_parts",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 4972201.333333333,
+      "reference_median": 440335,
+      "napi_vm_over_reference": 11.291860363889613
+    },
+    {
+      "workload": "collator_construct",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "collator_construct",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 5249801.0,
+      "reference_median": 920186,
+      "napi_vm_over_reference": 5.705152001877881
+    },
+    {
+      "workload": "collator_construct",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "collator_construct",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 336035.3333333333,
+      "reference_median": 238629.33333333334,
+      "napi_vm_over_reference": 1.4081895492032273
+    },
+    {
+      "workload": "collator_construct",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "collator_construct",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 341657.0,
+      "reference_median": 196287.66666666666,
+      "napi_vm_over_reference": 1.7405933128758302
+    },
+    {
+      "workload": "collator_compare",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "collator_compare",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 7145653.0,
+      "reference_median": 1145074,
+      "napi_vm_over_reference": 6.24034167224127
+    },
+    {
+      "workload": "collator_compare",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "collator_compare",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 2164725.6666666665,
+      "reference_median": 299712.3333333333,
+      "napi_vm_over_reference": 7.222677967873639
+    },
+    {
+      "workload": "collator_compare",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "collator_compare",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 2151828.0,
+      "reference_median": 258692.66666666666,
+      "napi_vm_over_reference": 8.318086584080467
+    },
+    {
+      "workload": "plural_construct",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "plural_construct",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 5169435.0,
+      "reference_median": 1375065.3333333333,
+      "napi_vm_over_reference": 3.7594104619513837
+    },
+    {
+      "workload": "plural_construct",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "plural_construct",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 304199.3333333333,
+      "reference_median": 780329,
+      "napi_vm_over_reference": 0.3898347150155041
+    },
+    {
+      "workload": "plural_construct",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "plural_construct",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 290223.3333333333,
+      "reference_median": 659205.3333333334,
+      "napi_vm_over_reference": 0.4402624169707364
+    },
+    {
+      "workload": "plural_select",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "plural_select",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 5519631.0,
+      "reference_median": 1037862.6666666666,
+      "napi_vm_over_reference": 5.318267220968221
+    },
+    {
+      "workload": "plural_select",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "plural_select",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 345961.6666666667,
+      "reference_median": 203868.33333333334,
+      "napi_vm_over_reference": 1.6969857996582762
+    },
+    {
+      "workload": "plural_select",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "plural_select",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 345494.6666666667,
+      "reference_median": 155709.66666666666,
+      "napi_vm_over_reference": 2.2188389074538297
+    },
+    {
+      "workload": "segment_words",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "segment_words",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 7107762.0,
+      "reference_median": 1145598,
+      "napi_vm_over_reference": 6.204412018875732
+    },
+    {
+      "workload": "segment_words",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "segment_words",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 1569179.0,
+      "reference_median": 340862.3333333333,
+      "napi_vm_over_reference": 4.603556470011843
+    },
+    {
+      "workload": "segment_words",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "segment_words",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 1573551.0,
+      "reference_median": 286070.3333333333,
+      "napi_vm_over_reference": 5.500573868197915
+    },
+    {
+      "workload": "list_format",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "list_format",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 7048518.333333333,
+      "reference_median": 849680,
+      "napi_vm_over_reference": 8.29549752063522
+    },
+    {
+      "workload": "list_format",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "list_format",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 1255660.0,
+      "reference_median": 156402.66666666666,
+      "napi_vm_over_reference": 8.028379737770882
+    },
+    {
+      "workload": "list_format",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "list_format",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 1253432.0,
+      "reference_median": 116885.66666666667,
+      "napi_vm_over_reference": 10.723573178348072
+    },
+    {
+      "workload": "relative_time",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "relative_time",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 5880581.0,
+      "reference_median": 924420,
+      "napi_vm_over_reference": 6.361373618052401
+    },
+    {
+      "workload": "relative_time",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "relative_time",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 217405.0,
+      "reference_median": 169540,
+      "napi_vm_over_reference": 1.2823227556918722
+    },
+    {
+      "workload": "relative_time",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "relative_time",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 221093.66666666666,
+      "reference_median": 124230.33333333333,
+      "napi_vm_over_reference": 1.7797075861772889
+    },
+    {
+      "workload": "display_names",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "incompatible_result",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "display_names",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "incompatible_result",
+      "reference_status": "measured"
+    },
+    {
+      "workload": "display_names",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "incompatible_result",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "display_names",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "incompatible_result",
+      "reference_status": "measured"
+    },
+    {
+      "workload": "display_names",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "incompatible_result",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "display_names",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "incompatible_result",
+      "reference_status": "measured"
+    },
+    {
+      "workload": "locale_maximize",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "locale_maximize",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 6926956.666666667,
+      "reference_median": 1253764,
+      "napi_vm_over_reference": 5.524928668127867
+    },
+    {
+      "workload": "locale_maximize",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "locale_maximize",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 1096552.3333333333,
+      "reference_median": 636056.3333333334,
+      "napi_vm_over_reference": 1.7239861878062162
+    },
+    {
+      "workload": "locale_maximize",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "locale_maximize",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 1090132.6666666667,
+      "reference_median": 540254,
+      "napi_vm_over_reference": 2.0178150771057073
+    },
+    {
+      "workload": "duration_parts",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "duration_parts",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 11926425.333333334,
+      "reference_median": 7940834.666666667,
+      "napi_vm_over_reference": 1.5019107982939157
+    },
+    {
+      "workload": "duration_parts",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "duration_parts",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 5166272.333333333,
+      "reference_median": 6840246.666666667,
+      "napi_vm_over_reference": 0.755275735670351
+    },
+    {
+      "workload": "duration_parts",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "duration_parts",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 5234990.0,
+      "reference_median": 6731676.666666667,
+      "napi_vm_over_reference": 0.7776650987891575
+    },
+    {
+      "workload": "temporal_date_add",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_date_add",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 7843287.666666667,
+      "reference_median": 1273982,
+      "napi_vm_over_reference": 6.156513723637121
+    },
+    {
+      "workload": "temporal_date_add",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_date_add",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 1464463.3333333333,
+      "reference_median": 190116.33333333334,
+      "napi_vm_over_reference": 7.702985365101016
+    },
+    {
+      "workload": "temporal_date_add",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_date_add",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 1499739.6666666667,
+      "reference_median": 146521.33333333334,
+      "napi_vm_over_reference": 10.235640316313438
+    },
+    {
+      "workload": "temporal_date_parse",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_date_parse",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 6853226.666666667,
+      "reference_median": 1105603.3333333333,
+      "napi_vm_over_reference": 6.198630611943404
+    },
+    {
+      "workload": "temporal_date_parse",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_date_parse",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 479658.0,
+      "reference_median": 138344.33333333334,
+      "napi_vm_over_reference": 3.4671315293000795
+    },
+    {
+      "workload": "temporal_date_parse",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_date_parse",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 492216.6666666667,
+      "reference_median": 101797.66666666667,
+      "napi_vm_over_reference": 4.835245077654039
+    },
+    {
+      "workload": "temporal_date_until",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_date_until",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 6885872.333333333,
+      "reference_median": 1184179.6666666667,
+      "napi_vm_over_reference": 5.814888168715388
+    },
+    {
+      "workload": "temporal_date_until",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_date_until",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 465530.0,
+      "reference_median": 199427.66666666666,
+      "napi_vm_over_reference": 2.3343300745633755
+    },
+    {
+      "workload": "temporal_date_until",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_date_until",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 461698.3333333333,
+      "reference_median": 154453,
+      "napi_vm_over_reference": 2.989248077624477
+    },
+    {
+      "workload": "temporal_datetime_add",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_datetime_add",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 8073020.333333333,
+      "reference_median": 1274458.3333333333,
+      "napi_vm_over_reference": 6.334471769052212
+    },
+    {
+      "workload": "temporal_datetime_add",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_datetime_add",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 1418009.6666666667,
+      "reference_median": 191546.33333333334,
+      "napi_vm_over_reference": 7.402959075175893
+    },
+    {
+      "workload": "temporal_datetime_add",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_datetime_add",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 1435226.6666666667,
+      "reference_median": 142257,
+      "napi_vm_over_reference": 10.088970431449185
+    },
+    {
+      "workload": "temporal_instant_parse",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_instant_parse",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 7147770.0,
+      "reference_median": 1161000,
+      "napi_vm_over_reference": 6.15656330749354
+    },
+    {
+      "workload": "temporal_instant_parse",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_instant_parse",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 296465.6666666667,
+      "reference_median": 131347,
+      "napi_vm_over_reference": 2.2571179141256876
+    },
+    {
+      "workload": "temporal_instant_parse",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_instant_parse",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 291580.0,
+      "reference_median": 95429,
+      "napi_vm_over_reference": 3.055465319766528
+    },
+    {
+      "workload": "temporal_instant_round",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_instant_round",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 7589688.0,
+      "reference_median": 1180288.3333333333,
+      "napi_vm_over_reference": 6.430367720881763
+    },
+    {
+      "workload": "temporal_instant_round",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_instant_round",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 712058.3333333334,
+      "reference_median": 151416.66666666666,
+      "napi_vm_over_reference": 4.702641717116126
+    },
+    {
+      "workload": "temporal_instant_round",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_instant_round",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 707151.3333333334,
+      "reference_median": 101954,
+      "napi_vm_over_reference": 6.93598420202575
+    },
+    {
+      "workload": "temporal_zoned_utc",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_zoned_utc",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 7974209.0,
+      "reference_median": 1260421.6666666667,
+      "napi_vm_over_reference": 6.326620059689019
+    },
+    {
+      "workload": "temporal_zoned_utc",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_zoned_utc",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 631719.6666666666,
+      "reference_median": 228591.66666666666,
+      "napi_vm_over_reference": 2.763528854216033
+    },
+    {
+      "workload": "temporal_zoned_utc",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_zoned_utc",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 644567.3333333334,
+      "reference_median": 183330.66666666666,
+      "napi_vm_over_reference": 3.515872958152119
+    },
+    {
+      "workload": "temporal_duration_round",
+      "mode": "fresh_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_duration_round",
+      "mode": "fresh_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 8391802.666666666,
+      "reference_median": 1221221,
+      "napi_vm_over_reference": 6.871649493962735
+    },
+    {
+      "workload": "temporal_duration_round",
+      "mode": "warm_source",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_duration_round",
+      "mode": "warm_source",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 1073884.6666666667,
+      "reference_median": 194540.33333333334,
+      "napi_vm_over_reference": 5.520113224164312
+    },
+    {
+      "workload": "temporal_duration_round",
+      "mode": "warm_call",
+      "reference": "rquickjs",
+      "napi_status": "measured",
+      "reference_status": "unsupported"
+    },
+    {
+      "workload": "temporal_duration_round",
+      "mode": "warm_call",
+      "reference": "node-v8-context",
+      "napi_status": "measured",
+      "reference_status": "measured",
+      "napi_vm": 1082877.0,
+      "reference_median": 135904,
+      "napi_vm_over_reference": 7.967955321403344
+    }
+  ],
+  "capabilities": {
+    "napi-vm": {
+      "Intl.Collator": true,
+      "Intl.DateTimeFormat": true,
+      "Intl.DisplayNames": true,
+      "Intl.DurationFormat": true,
+      "Intl.ListFormat": true,
+      "Intl.Locale": true,
+      "Intl.NumberFormat": true,
+      "Intl.PluralRules": true,
+      "Intl.RelativeTimeFormat": true,
+      "Intl.Segmenter": true,
+      "Temporal.Duration": true,
+      "Temporal.Instant": true,
+      "Temporal.PlainDate": true,
+      "Temporal.PlainDateTime": true,
+      "Temporal.ZonedDateTime": true
+    },
+    "rquickjs": {
+      "Intl.Collator": false,
+      "Intl.DateTimeFormat": false,
+      "Intl.DisplayNames": false,
+      "Intl.DurationFormat": false,
+      "Intl.ListFormat": false,
+      "Intl.Locale": false,
+      "Intl.NumberFormat": false,
+      "Intl.PluralRules": false,
+      "Intl.RelativeTimeFormat": false,
+      "Intl.Segmenter": false,
+      "Temporal.Duration": false,
+      "Temporal.Instant": false,
+      "Temporal.PlainDate": false,
+      "Temporal.PlainDateTime": false,
+      "Temporal.ZonedDateTime": false
+    },
+    "node-v8-context": {
+      "Intl.Collator": true,
+      "Intl.DateTimeFormat": true,
+      "Intl.DisplayNames": true,
+      "Intl.DurationFormat": true,
+      "Intl.ListFormat": true,
+      "Intl.Locale": true,
+      "Intl.NumberFormat": true,
+      "Intl.PluralRules": true,
+      "Intl.RelativeTimeFormat": true,
+      "Intl.Segmenter": true,
+      "Temporal.Duration": true,
+      "Temporal.Instant": true,
+      "Temporal.PlainDate": true,
+      "Temporal.PlainDateTime": true,
+      "Temporal.ZonedDateTime": true
+    }
+  },
+  "limitations": [
+    "Finite synchronous Intl/Temporal fixtures with explicit en-US/UTC/fixed inputs. API presence alone does not establish equivalent behavior.",
+    "Unsupported and incompatible-result rows retain reasons and have no timing samples; they are not speedups.",
+    "Rust backends and Node run in separate processes. Each result aggregates independent process medians; raw child batches are retained.",
+    "Fresh includes unique-comment source allocation, construction/builtins, evaluation and release. Rust napi-vm includes explicit guest cycle GC; Node releases context references and host GC runs outside batches.",
+    "Warm source preserves napi-vm source caches and uses each engine source API; warm call retains a guest function. Nested tiers are not guaranteed identical.",
+    "Assertions run outside batch timers; numeric result conversion and result summation are timed. Five warmups, no CPU isolation and no universal runtime score."
+  ]
+}

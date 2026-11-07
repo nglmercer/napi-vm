@@ -1171,6 +1171,31 @@ fn create_array_result_element_number(
     index: f64,
     value: Value,
 ) -> Result<(), VmErr> {
+    // CreateDataProperty's complete writable/enumerable/configurable descriptor
+    // can be stored directly in an ordinary dense array. Recheck on every write:
+    // a species constructor may expose the result to a mutating callback.
+    if let Value::Array(array) = result
+        && index >= 0.0
+        && index < crate::value::MAX_ARRAY_LEN as f64
+        && index.fract() == 0.0
+        && array.named.borrow().is_empty()
+    {
+        let dense_index = index as usize;
+        let key = dense_index.to_string();
+        let meta = array.meta.borrow();
+        let ordinary = !meta.has_accessors
+            && !meta.may_have_accessor(&key)
+            && meta.attrs_of(&key) == crate::value::PropAttrs::default()
+            && (!meta.non_extensible || array.has_index(dense_index))
+            && (dense_index < array.array_length() || meta.attrs_of("length").writable);
+        drop(meta);
+        if ordinary {
+            array.store_index(dense_index, value);
+            // Getter-shaped function values must remain data, not accessors.
+            array.meta.borrow_mut().set_explicit_data(&key, true);
+            return Ok(());
+        }
+    }
     let descriptor = Value::descriptor_record(vec![
         ("value".into(), value),
         ("writable".into(), Value::Bool(true)),

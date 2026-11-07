@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "status": "baseline and seven-group suite validated; constructor presence and output equivalence are distinct; DisplayNames fallback excluded from timing",
+  "cases": 23,
+  "matrix_rows": 207,
+  "status_counts": {
+    "measured": 135,
+    "unsupported": 69,
+    "incompatible_result": 3
+  },
+  "samples": 15,
+  "iterations": 10,
+  "processes": 3,
+  "toolchain_node": {
+    "node": "v26.13.0",
+    "v8": "14.6.202.34-node.40",
+    "icu": "78.3",
+    "cpu": "AMD BC-250"
+  },
+  "semantic_output_checks": {
+    "equal": 9,
+    "different": [
+      "display_names"
+    ],
+    "addon_matches_full_suite": true,
+    "note": "Supplemental complete-output checks use the same core inputs through the default native addon; this does not establish all-method or all-locale parity."
+  },
+  "full_suite": "../full-suite-international-2026-11-07/suite.json",
+  "core_gate": "../async-jobs-2026-11-07/source-checks.json",
+  "validator_tests_passed": 28,
+  "clippy": "passed",
+  "sources_consulted": [
+    "https://docs.rs/rquickjs/0.14.0/rquickjs/",
+    "https://nodejs.org/api/vm.html"
+  ],
+  "limits": [
+    "Finite synchronous Intl/Temporal fixtures with explicit en-US/UTC/fixed inputs. API presence alone does not establish equivalent behavior.",
+    "Unsupported and incompatible-result rows retain reasons and have no timing samples; they are not speedups.",
+    "Rust backends and Node run in separate processes. Each result aggregates independent process medians; raw child batches are retained.",
+    "Fresh includes unique-comment source allocation, construction/builtins, evaluation and release. Rust napi-vm includes explicit guest cycle GC; Node releases context references and host GC runs outside batches.",
+    "Warm source preserves napi-vm source caches and uses each engine source API; warm call retains a guest function. Nested tiers are not guaranteed identical.",
+    "Assertions run outside batch timers; numeric result conversion and result summation are timed. Five warmups, no CPU isolation and no universal runtime score.",
+    "The configured rquickjs build has no required Intl/Temporal constructors; it receives no timing or speed ratio for those cases.",
+    "Intl.DisplayNames returns US instead of United States in the selected fixture. Its three rows retain the diagnostic and no timing.",
+    "Slot/options cloning in bound-method getters is a source-identified candidate, not an attributed explanation of the full runtime gap."
+  ],
+  "files": {
+    "baseline.json": "e623cc01c74d5a8205264049ca1c38ac42e4a428bfdd980936514fb5c73b7de9",
+    "build-build.json": "4f6a7847886b00a4711fde903583e699af3c8f7f77cff453e551a817487b5f88",
+    "build-build.log": "5f78dc74d7ebfb3ee1ba6d838399fdb6911f4e5061d0ae19dcbce2923c65d6c2",
+    "build-workloads.json": "0365d5a01d6f2e6f4dd2d3e1261989b65da24147d68442228917e45c3f927d66",
+    "clippy.log": "b83259d005b984c0ecd9c14d72e6cfdd7e1e467554abfcd7850b57d0c175ae20",
+    "output-check.cjs": "03d0370e7ad9af5179c2c18576ab21875fa5ff89166274b58ce7ef1a8e2effc9",
+    "output-check.json": "8c290dc18f8e9de169500bb0c8e04d74d087ecf485705a93b6baf4e74c43fb46",
+    "ratios.json": "fb50c83b7d6db815934542421d91f9a1b6949643c81bc60ae07906b190fa07b4",
+    "self-validation.json": "02ce61a4f54b6ddaaf8514510bd48c1bd95a072c0f0fdb29db9ad1c53b0abc5d",
+    "sources/bench/async_jobs.py": "78763fc25ce9d1dd23c593a6a7690c7d2376c934fbc354e8ee9736f0c8e4422e",
+    "sources/bench/international-workloads.json": "243981e2798a4375e2377c16f2efca4da1747ed8005cd41dfaf329401276abf5",
+    "sources/bench/international.py": "373849c504d4fbcc776fbf7585b69cc8e6bed79a36e783ccf54afa338057667c",
+    "sources/bench/performance/international.cjs": "915cffd4645dde382558798aa2a1cab4abccbe642621956def56c885d46ec194",
+    "sources/bench/rquickjs/src/bin/international.rs": "b4a5f14474744faedde4b674be75134178f2beb84c1765be1f9a397af04f46f2",
+    "sources/bench/suite.py": "7f8f3ddacd9876f792fb70a0dbf6a6b4cec4b3f03bac579aac6aa6482acf3c48",
+    "sources/bench/tests/test_international.py": "07b3d9bc41cefb159561cc95832742bed258c9e532bb45587825ce43b1a8023a",
+    "sources/bench/tests/test_suite.py": "3503bc8a90428e3e46ff230f76d7fc7117a01bfa2a4a992df120553931ccad49",
+    "validator-tests.log": "437987a4d6fad7c5caf9e02f68ebaf822855be0f8e9ef7e6a1f46f3a5d2758aa"
+  }
+}

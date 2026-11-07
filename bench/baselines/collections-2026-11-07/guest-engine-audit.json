@@ -1,0 +1,698 @@
+{
+  "schema": 1,
+  "source_report": "bench/baselines/full-suite-2026-11-07/engines.json",
+  "source_report_sha256": "3c667718cd3ec4e44dc08ab51c677bc23b8ddf7c4f2d3c98bdf1a3c10572802d",
+  "rows": [
+    {
+      "workload": "startup_dominated",
+      "mode": "fresh_source",
+      "napi_median_ns": 2814479.0,
+      "napi_mad_ns": 301151.3999999999,
+      "rquickjs_median_ns": 188226.4,
+      "rquickjs_mad_ns": 4615.0,
+      "napi_over_rquickjs": 14.952626199087907
+    },
+    {
+      "workload": "startup_dominated",
+      "mode": "warm_source",
+      "napi_median_ns": 3628.2,
+      "napi_mad_ns": 734.1999999999998,
+      "rquickjs_median_ns": 6575.8,
+      "rquickjs_mad_ns": 387.1999999999998,
+      "napi_over_rquickjs": 0.5517503573709662
+    },
+    {
+      "workload": "startup_dominated",
+      "mode": "warm_call",
+      "napi_median_ns": 2067.4,
+      "napi_mad_ns": 749.0,
+      "rquickjs_median_ns": 212.0,
+      "rquickjs_mad_ns": 152.0,
+      "napi_over_rquickjs": 9.751886792452831
+    },
+    {
+      "workload": "arithmetic_loop",
+      "mode": "fresh_source",
+      "napi_median_ns": 4758535.0,
+      "napi_mad_ns": 36613.59999999963,
+      "rquickjs_median_ns": 1142229.2,
+      "rquickjs_mad_ns": 14691.0,
+      "napi_over_rquickjs": 4.166007137621767
+    },
+    {
+      "workload": "arithmetic_loop",
+      "mode": "warm_source",
+      "napi_median_ns": 1968697.0,
+      "napi_mad_ns": 24856.199999999953,
+      "rquickjs_median_ns": 953059.0,
+      "rquickjs_mad_ns": 728.8000000000466,
+      "napi_over_rquickjs": 2.0656612025068752
+    },
+    {
+      "workload": "arithmetic_loop",
+      "mode": "warm_call",
+      "napi_median_ns": 1971268.2,
+      "napi_mad_ns": 32583.199999999953,
+      "rquickjs_median_ns": 946910.0,
+      "rquickjs_mad_ns": 1759.1999999999534,
+      "napi_over_rquickjs": 2.0817904552703004
+    },
+    {
+      "workload": "recursion_fib",
+      "mode": "fresh_source",
+      "napi_median_ns": 2951003.6,
+      "napi_mad_ns": 50984.39999999991,
+      "rquickjs_median_ns": 213332.4,
+      "rquickjs_mad_ns": 453.80000000001746,
+      "napi_over_rquickjs": 13.832889893893286
+    },
+    {
+      "workload": "recursion_fib",
+      "mode": "warm_source",
+      "napi_median_ns": 100644.6,
+      "napi_mad_ns": 332.40000000000873,
+      "rquickjs_median_ns": 17492.8,
+      "rquickjs_mad_ns": 90.0,
+      "napi_over_rquickjs": 5.753487148998445
+    },
+    {
+      "workload": "recursion_fib",
+      "mode": "warm_call",
+      "napi_median_ns": 99295.2,
+      "napi_mad_ns": 528.5999999999913,
+      "rquickjs_median_ns": 14457.4,
+      "rquickjs_mad_ns": 49.600000000000364,
+      "napi_over_rquickjs": 6.86812289899982
+    },
+    {
+      "workload": "array_chain",
+      "mode": "fresh_source",
+      "napi_median_ns": 9849399.6,
+      "napi_mad_ns": 38492.0,
+      "rquickjs_median_ns": 487259.2,
+      "rquickjs_mad_ns": 7415.399999999965,
+      "napi_over_rquickjs": 20.213881236105955
+    },
+    {
+      "workload": "array_chain",
+      "mode": "warm_source",
+      "napi_median_ns": 6380757.0,
+      "napi_mad_ns": 156415.0,
+      "rquickjs_median_ns": 282967.6,
+      "rquickjs_mad_ns": 3845.0,
+      "napi_over_rquickjs": 22.54942615338293
+    },
+    {
+      "workload": "array_chain",
+      "mode": "warm_call",
+      "napi_median_ns": 6220143.4,
+      "napi_mad_ns": 3094.4000000003725,
+      "rquickjs_median_ns": 274812.6,
+      "rquickjs_mad_ns": 1434.399999999965,
+      "napi_over_rquickjs": 22.634127401727582
+    },
+    {
+      "workload": "string_ops",
+      "mode": "fresh_source",
+      "napi_median_ns": 10359152.6,
+      "napi_mad_ns": 832130.0,
+      "rquickjs_median_ns": 498779.8,
+      "rquickjs_mad_ns": 15349.400000000023,
+      "napi_over_rquickjs": 20.7689898428124
+    },
+    {
+      "workload": "string_ops",
+      "mode": "warm_source",
+      "napi_median_ns": 6333334.0,
+      "napi_mad_ns": 454292.5999999996,
+      "rquickjs_median_ns": 328938.2,
+      "rquickjs_mad_ns": 32422.400000000023,
+      "napi_over_rquickjs": 19.253872003920492
+    },
+    {
+      "workload": "string_ops",
+      "mode": "warm_call",
+      "napi_median_ns": 6253768.6,
+      "napi_mad_ns": 72367.19999999925,
+      "rquickjs_median_ns": 309139.0,
+      "rquickjs_mad_ns": 11584.200000000012,
+      "napi_over_rquickjs": 20.22963327176448
+    },
+    {
+      "workload": "closures",
+      "mode": "fresh_source",
+      "napi_median_ns": 4544591.8,
+      "napi_mad_ns": 242239.59999999963,
+      "rquickjs_median_ns": 297839.8,
+      "rquickjs_mad_ns": 10751.600000000035,
+      "napi_over_rquickjs": 15.258510783313714
+    },
+    {
+      "workload": "closures",
+      "mode": "warm_source",
+      "napi_median_ns": 461428.8,
+      "napi_mad_ns": 4881.400000000023,
+      "rquickjs_median_ns": 83751.0,
+      "rquickjs_mad_ns": 2758.600000000006,
+      "napi_over_rquickjs": 5.509531826485654
+    },
+    {
+      "workload": "closures",
+      "mode": "warm_call",
+      "napi_median_ns": 460039.8,
+      "napi_mad_ns": 5641.200000000012,
+      "rquickjs_median_ns": 81516.4,
+      "rquickjs_mad_ns": 1096.3999999999942,
+      "napi_over_rquickjs": 5.64352449323081
+    },
+    {
+      "workload": "json_roundtrip",
+      "mode": "fresh_source",
+      "napi_median_ns": 9411964.4,
+      "napi_mad_ns": 312090.5999999996,
+      "rquickjs_median_ns": 1486620.6,
+      "rquickjs_mad_ns": 49335.40000000014,
+      "napi_over_rquickjs": 6.33111393720765
+    },
+    {
+      "workload": "json_roundtrip",
+      "mode": "warm_source",
+      "napi_median_ns": 5042047.6,
+      "napi_mad_ns": 105232.59999999963,
+      "rquickjs_median_ns": 1306579.2,
+      "rquickjs_mad_ns": 22237.600000000093,
+      "napi_over_rquickjs": 3.8589682125660656
+    },
+    {
+      "workload": "json_roundtrip",
+      "mode": "warm_call",
+      "napi_median_ns": 5176413.2,
+      "napi_mad_ns": 65378.39999999944,
+      "rquickjs_median_ns": 1251025.0,
+      "rquickjs_mad_ns": 62165.80000000005,
+      "napi_over_rquickjs": 4.137737615155572
+    },
+    {
+      "workload": "property_reads",
+      "mode": "fresh_source",
+      "napi_median_ns": 7394280.2,
+      "napi_mad_ns": 705297.7999999998,
+      "rquickjs_median_ns": 613825.2,
+      "rquickjs_mad_ns": 34728.79999999993,
+      "napi_over_rquickjs": 12.04623107686032
+    },
+    {
+      "workload": "property_reads",
+      "mode": "warm_source",
+      "napi_median_ns": 1821096.6,
+      "napi_mad_ns": 90068.20000000019,
+      "rquickjs_median_ns": 405859.6,
+      "rquickjs_mad_ns": 12589.399999999965,
+      "napi_over_rquickjs": 4.487011271878256
+    },
+    {
+      "workload": "property_reads",
+      "mode": "warm_call",
+      "napi_median_ns": 1997293.0,
+      "napi_mad_ns": 121303.3999999999,
+      "rquickjs_median_ns": 388128.8,
+      "rquickjs_mad_ns": 8235.599999999977,
+      "napi_over_rquickjs": 5.145954126568294
+    },
+    {
+      "workload": "property_updates",
+      "mode": "fresh_source",
+      "napi_median_ns": 7869929.0,
+      "napi_mad_ns": 366251.4000000004,
+      "rquickjs_median_ns": 456889.4,
+      "rquickjs_mad_ns": 16453.0,
+      "napi_over_rquickjs": 17.225019884462192
+    },
+    {
+      "workload": "property_updates",
+      "mode": "warm_source",
+      "napi_median_ns": 2420411.0,
+      "napi_mad_ns": 66849.0,
+      "rquickjs_median_ns": 276524.2,
+      "rquickjs_mad_ns": 17081.800000000017,
+      "napi_over_rquickjs": 8.75298075177507
+    },
+    {
+      "workload": "property_updates",
+      "mode": "warm_call",
+      "napi_median_ns": 2694166.2,
+      "napi_mad_ns": 124484.80000000028,
+      "rquickjs_median_ns": 266186.6,
+      "rquickjs_mad_ns": 11421.799999999988,
+      "napi_over_rquickjs": 10.121344199895864
+    },
+    {
+      "workload": "class_methods",
+      "mode": "fresh_source",
+      "napi_median_ns": 18743149.6,
+      "napi_mad_ns": 771224.3999999985,
+      "rquickjs_median_ns": 802792.4,
+      "rquickjs_mad_ns": 184756.79999999993,
+      "napi_over_rquickjs": 23.347442751077367
+    },
+    {
+      "workload": "class_methods",
+      "mode": "warm_source",
+      "napi_median_ns": 11984718.8,
+      "napi_mad_ns": 820701.3999999985,
+      "rquickjs_median_ns": 390357.0,
+      "rquickjs_mad_ns": 6147.400000000023,
+      "napi_over_rquickjs": 30.701944117820357
+    },
+    {
+      "workload": "class_methods",
+      "mode": "warm_call",
+      "napi_median_ns": 11356809.6,
+      "napi_mad_ns": 452158.5999999996,
+      "rquickjs_median_ns": 471422.6,
+      "rquickjs_mad_ns": 21881.199999999953,
+      "napi_over_rquickjs": 24.09050732824434
+    },
+    {
+      "workload": "bitwise_loop",
+      "mode": "fresh_source",
+      "napi_median_ns": 7040793.0,
+      "napi_mad_ns": 344591.4000000004,
+      "rquickjs_median_ns": 613603.4,
+      "rquickjs_mad_ns": 26531.20000000007,
+      "napi_over_rquickjs": 11.474501282098501
+    },
+    {
+      "workload": "bitwise_loop",
+      "mode": "warm_source",
+      "napi_median_ns": 1087068.2,
+      "napi_mad_ns": 46038.0,
+      "rquickjs_median_ns": 397612.6,
+      "rquickjs_mad_ns": 3342.2000000000116,
+      "napi_over_rquickjs": 2.733988309223601
+    },
+    {
+      "workload": "bitwise_loop",
+      "mode": "warm_call",
+      "napi_median_ns": 1104937.0,
+      "napi_mad_ns": 78974.0,
+      "rquickjs_median_ns": 381155.8,
+      "rquickjs_mad_ns": 1600.2000000000116,
+      "napi_over_rquickjs": 2.8989116786364004
+    },
+    {
+      "workload": "array_index_updates",
+      "mode": "fresh_source",
+      "napi_median_ns": 12196209.0,
+      "napi_mad_ns": 229351.0,
+      "rquickjs_median_ns": 744006.8,
+      "rquickjs_mad_ns": 101257.0,
+      "napi_over_rquickjs": 16.3926042073809
+    },
+    {
+      "workload": "array_index_updates",
+      "mode": "warm_source",
+      "napi_median_ns": 6098175.2,
+      "napi_mad_ns": 111572.20000000019,
+      "rquickjs_median_ns": 452800.0,
+      "rquickjs_mad_ns": 4942.599999999977,
+      "napi_over_rquickjs": 13.467701413427562
+    },
+    {
+      "workload": "array_index_updates",
+      "mode": "warm_call",
+      "napi_median_ns": 6108486.6,
+      "napi_mad_ns": 352218.60000000056,
+      "rquickjs_median_ns": 457611.6,
+      "rquickjs_mad_ns": 14111.599999999977,
+      "napi_over_rquickjs": 13.348627088998619
+    },
+    {
+      "workload": "array_sort_numeric",
+      "mode": "fresh_source",
+      "napi_median_ns": 14604861.2,
+      "napi_mad_ns": 114904.39999999851,
+      "rquickjs_median_ns": 628725.2,
+      "rquickjs_mad_ns": 7869.599999999977,
+      "napi_over_rquickjs": 23.229323717261533
+    },
+    {
+      "workload": "array_sort_numeric",
+      "mode": "warm_source",
+      "napi_median_ns": 8359884.0,
+      "napi_mad_ns": 47402.799999999814,
+      "rquickjs_median_ns": 424318.8,
+      "rquickjs_mad_ns": 2650.2000000000116,
+      "napi_over_rquickjs": 19.701893953320003
+    },
+    {
+      "workload": "array_sort_numeric",
+      "mode": "warm_call",
+      "napi_median_ns": 8546909.6,
+      "napi_mad_ns": 184336.0,
+      "rquickjs_median_ns": 416810.6,
+      "rquickjs_mad_ns": 5735.600000000035,
+      "napi_over_rquickjs": 20.505499620211193
+    },
+    {
+      "workload": "map_set_get",
+      "mode": "fresh_source",
+      "napi_median_ns": 44356336.0,
+      "napi_mad_ns": 273749.799999997,
+      "rquickjs_median_ns": 3258341.4,
+      "rquickjs_mad_ns": 86130.80000000028,
+      "napi_over_rquickjs": 13.613164047205121
+    },
+    {
+      "workload": "map_set_get",
+      "mode": "warm_source",
+      "napi_median_ns": 37826680.4,
+      "napi_mad_ns": 221276.0,
+      "rquickjs_median_ns": 2996542.2,
+      "rquickjs_mad_ns": 58653.200000000186,
+      "napi_over_rquickjs": 12.623443247353565
+    },
+    {
+      "workload": "map_set_get",
+      "mode": "warm_call",
+      "napi_median_ns": 38629399.8,
+      "napi_mad_ns": 541762.1999999955,
+      "rquickjs_median_ns": 3090584.8,
+      "rquickjs_mad_ns": 101912.40000000037,
+      "napi_over_rquickjs": 12.49905836591185
+    },
+    {
+      "workload": "set_add_has_delete",
+      "mode": "fresh_source",
+      "napi_median_ns": 42657639.2,
+      "napi_mad_ns": 225239.79999999702,
+      "rquickjs_median_ns": 3519067.8,
+      "rquickjs_mad_ns": 273850.0,
+      "napi_over_rquickjs": 12.121857726071662
+    },
+    {
+      "workload": "set_add_has_delete",
+      "mode": "warm_source",
+      "napi_median_ns": 37365583.0,
+      "napi_mad_ns": 483266.0,
+      "rquickjs_median_ns": 2739611.6,
+      "rquickjs_mad_ns": 17116.200000000186,
+      "napi_over_rquickjs": 13.639007441784813
+    },
+    {
+      "workload": "set_add_has_delete",
+      "mode": "warm_call",
+      "napi_median_ns": 36461714.2,
+      "napi_mad_ns": 155792.20000000298,
+      "rquickjs_median_ns": 2762668.8,
+      "rquickjs_mad_ns": 82569.0,
+      "napi_over_rquickjs": 13.19800411833659
+    },
+    {
+      "workload": "typed_array_index",
+      "mode": "fresh_source",
+      "napi_median_ns": 6626299.2,
+      "napi_mad_ns": 115466.20000000019,
+      "rquickjs_median_ns": 320438.2,
+      "rquickjs_mad_ns": 24789.20000000001,
+      "napi_over_rquickjs": 20.678867875303258
+    },
+    {
+      "workload": "typed_array_index",
+      "mode": "warm_source",
+      "napi_median_ns": 448139.0,
+      "napi_mad_ns": 6932.599999999977,
+      "rquickjs_median_ns": 124228.6,
+      "rquickjs_mad_ns": 1130.2000000000116,
+      "napi_over_rquickjs": 3.607373825351006
+    },
+    {
+      "workload": "typed_array_index",
+      "mode": "warm_call",
+      "napi_median_ns": 429941.6,
+      "napi_mad_ns": 8425.0,
+      "rquickjs_median_ns": 115702.6,
+      "rquickjs_mad_ns": 880.2000000000116,
+      "napi_over_rquickjs": 3.7159199533977625
+    },
+    {
+      "workload": "regexp_exec",
+      "mode": "fresh_source",
+      "napi_median_ns": 9814999.2,
+      "napi_mad_ns": 56643.59999999963,
+      "rquickjs_median_ns": 585523.2,
+      "rquickjs_mad_ns": 6753.0,
+      "napi_over_rquickjs": 16.762784463536203
+    },
+    {
+      "workload": "regexp_exec",
+      "mode": "warm_source",
+      "napi_median_ns": 2637836.2,
+      "napi_mad_ns": 60197.80000000028,
+      "rquickjs_median_ns": 364196.2,
+      "rquickjs_mad_ns": 1969.2000000000116,
+      "napi_over_rquickjs": 7.242898745236771
+    },
+    {
+      "workload": "regexp_exec",
+      "mode": "warm_call",
+      "napi_median_ns": 2802211.6,
+      "napi_mad_ns": 65389.39999999991,
+      "rquickjs_median_ns": 361432.2,
+      "rquickjs_mad_ns": 5886.0,
+      "napi_over_rquickjs": 7.753076787292333
+    },
+    {
+      "workload": "unicode_strings",
+      "mode": "fresh_source",
+      "napi_median_ns": 7437816.6,
+      "napi_mad_ns": 135385.39999999944,
+      "rquickjs_median_ns": 337206.6,
+      "rquickjs_mad_ns": 28901.199999999953,
+      "napi_over_rquickjs": 22.05715012695481
+    },
+    {
+      "workload": "unicode_strings",
+      "mode": "warm_source",
+      "napi_median_ns": 778482.0,
+      "napi_mad_ns": 39432.19999999995,
+      "rquickjs_median_ns": 176685.6,
+      "rquickjs_mad_ns": 22681.79999999999,
+      "napi_over_rquickjs": 4.4060296934215355
+    },
+    {
+      "workload": "unicode_strings",
+      "mode": "warm_call",
+      "napi_median_ns": 709966.4,
+      "napi_mad_ns": 5767.0,
+      "rquickjs_median_ns": 130456.0,
+      "rquickjs_mad_ns": 1995.3999999999942,
+      "napi_over_rquickjs": 5.442190470350156
+    },
+    {
+      "workload": "prototype_getter",
+      "mode": "fresh_source",
+      "napi_median_ns": 8908356.6,
+      "napi_mad_ns": 92544.80000000075,
+      "rquickjs_median_ns": 372187.0,
+      "rquickjs_mad_ns": 40866.40000000002,
+      "napi_over_rquickjs": 23.935163237834743
+    },
+    {
+      "workload": "prototype_getter",
+      "mode": "warm_source",
+      "napi_median_ns": 1680674.2,
+      "napi_mad_ns": 37079.59999999986,
+      "rquickjs_median_ns": 147642.0,
+      "rquickjs_mad_ns": 3005.7999999999884,
+      "napi_over_rquickjs": 11.383442380894325
+    },
+    {
+      "workload": "prototype_getter",
+      "mode": "warm_call",
+      "napi_median_ns": 1683210.2,
+      "napi_mad_ns": 39858.59999999986,
+      "rquickjs_median_ns": 143972.0,
+      "rquickjs_mad_ns": 3216.600000000006,
+      "napi_over_rquickjs": 11.691233017531186
+    },
+    {
+      "workload": "property_key_churn",
+      "mode": "fresh_source",
+      "napi_median_ns": 10337473.4,
+      "napi_mad_ns": 129922.40000000037,
+      "rquickjs_median_ns": 586797.4,
+      "rquickjs_mad_ns": 98051.19999999995,
+      "napi_over_rquickjs": 17.616767558956465
+    },
+    {
+      "workload": "property_key_churn",
+      "mode": "warm_source",
+      "napi_median_ns": 2886893.0,
+      "napi_mad_ns": 85923.3999999999,
+      "rquickjs_median_ns": 364349.0,
+      "rquickjs_mad_ns": 3465.5999999999767,
+      "napi_over_rquickjs": 7.923427812344757
+    },
+    {
+      "workload": "property_key_churn",
+      "mode": "warm_call",
+      "napi_median_ns": 2970571.8,
+      "napi_mad_ns": 148998.59999999963,
+      "rquickjs_median_ns": 376906.2,
+      "rquickjs_mad_ns": 8785.0,
+      "napi_over_rquickjs": 7.881461753614029
+    },
+    {
+      "workload": "exception_catch",
+      "mode": "fresh_source",
+      "napi_median_ns": 7244279.2,
+      "napi_mad_ns": 120167.0,
+      "rquickjs_median_ns": 730385.4,
+      "rquickjs_mad_ns": 60054.59999999998,
+      "napi_over_rquickjs": 9.918433747443473
+    },
+    {
+      "workload": "exception_catch",
+      "mode": "warm_source",
+      "napi_median_ns": 122204.8,
+      "napi_mad_ns": 3639.4000000000087,
+      "rquickjs_median_ns": 478481.8,
+      "rquickjs_mad_ns": 16795.600000000035,
+      "napi_over_rquickjs": 0.25540114587430496
+    },
+    {
+      "workload": "exception_catch",
+      "mode": "warm_call",
+      "napi_median_ns": 125505.0,
+      "napi_mad_ns": 1849.3999999999942,
+      "rquickjs_median_ns": 328877.6,
+      "rquickjs_mad_ns": 5051.600000000035,
+      "napi_over_rquickjs": 0.3816161392566718
+    },
+    {
+      "workload": "spread_destructure",
+      "mode": "fresh_source",
+      "napi_median_ns": 17062532.0,
+      "napi_mad_ns": 254142.3999999985,
+      "rquickjs_median_ns": 863321.4,
+      "rquickjs_mad_ns": 8835.0,
+      "napi_over_rquickjs": 19.76382376250606
+    },
+    {
+      "workload": "spread_destructure",
+      "mode": "warm_source",
+      "napi_median_ns": 9283008.8,
+      "napi_mad_ns": 124607.19999999925,
+      "rquickjs_median_ns": 646893.6,
+      "rquickjs_mad_ns": 8991.20000000007,
+      "napi_over_rquickjs": 14.350132386531573
+    },
+    {
+      "workload": "spread_destructure",
+      "mode": "warm_call",
+      "napi_median_ns": 9253149.2,
+      "napi_mad_ns": 54355.79999999888,
+      "rquickjs_median_ns": 584358.2,
+      "rquickjs_mad_ns": 5704.599999999977,
+      "napi_over_rquickjs": 15.834721237761359
+    },
+    {
+      "workload": "math_builtins",
+      "mode": "fresh_source",
+      "napi_median_ns": 9034535.6,
+      "napi_mad_ns": 238953.0,
+      "rquickjs_median_ns": 436277.8,
+      "rquickjs_mad_ns": 12552.400000000023,
+      "napi_over_rquickjs": 20.708217562296316
+    },
+    {
+      "workload": "math_builtins",
+      "mode": "warm_source",
+      "napi_median_ns": 1428461.6,
+      "napi_mad_ns": 41803.799999999814,
+      "rquickjs_median_ns": 246130.8,
+      "rquickjs_mad_ns": 14877.399999999994,
+      "napi_over_rquickjs": 5.803668618474405
+    },
+    {
+      "workload": "math_builtins",
+      "mode": "warm_call",
+      "napi_median_ns": 1406747.2,
+      "napi_mad_ns": 6726.59999999986,
+      "rquickjs_median_ns": 228505.8,
+      "rquickjs_mad_ns": 2234.1999999999825,
+      "napi_over_rquickjs": 6.156286623796857
+    },
+    {
+      "workload": "bigint_arithmetic",
+      "mode": "fresh_source",
+      "napi_median_ns": 8122394.4,
+      "napi_mad_ns": 84592.19999999925,
+      "rquickjs_median_ns": 239999.2,
+      "rquickjs_mad_ns": 21937.20000000001,
+      "napi_over_rquickjs": 33.84342281140937
+    },
+    {
+      "workload": "bigint_arithmetic",
+      "mode": "warm_source",
+      "napi_median_ns": 389816.6,
+      "napi_mad_ns": 4246.199999999953,
+      "rquickjs_median_ns": 49738.6,
+      "rquickjs_mad_ns": 2748.0,
+      "napi_over_rquickjs": 7.837305432802692
+    },
+    {
+      "workload": "bigint_arithmetic",
+      "mode": "warm_call",
+      "napi_median_ns": 403393.6,
+      "napi_mad_ns": 18570.399999999965,
+      "rquickjs_median_ns": 44980.0,
+      "rquickjs_mad_ns": 2091.800000000003,
+      "napi_over_rquickjs": 8.968288128056914
+    },
+    {
+      "workload": "cyclic_allocations",
+      "mode": "fresh_source",
+      "napi_median_ns": 9852858.8,
+      "napi_mad_ns": 38372.0,
+      "rquickjs_median_ns": 311760.4,
+      "rquickjs_mad_ns": 23207.0,
+      "napi_over_rquickjs": 31.603945850723825
+    },
+    {
+      "workload": "cyclic_allocations",
+      "mode": "warm_source",
+      "napi_median_ns": 1665460.0,
+      "napi_mad_ns": 100867.6000000001,
+      "rquickjs_median_ns": 132146.2,
+      "rquickjs_mad_ns": 5963.8000000000175,
+      "napi_over_rquickjs": 12.603162255138626
+    },
+    {
+      "workload": "cyclic_allocations",
+      "mode": "warm_call",
+      "napi_median_ns": 1591656.4,
+      "napi_mad_ns": 26534.59999999986,
+      "rquickjs_median_ns": 115361.6,
+      "rquickjs_mad_ns": 1425.800000000003,
+      "napi_over_rquickjs": 13.797107529715259
+    }
+  ],
+  "candidate_inspection": {
+    "guest_map_set_lookup": "builtins/collections.rs position() scans each insertion-ordered entry and performs a property lookup for its key; index design needs SameValueZero, live iteration, mutation and GC validation. No new core change made.",
+    "largest_retained_ratios": [
+      "class_methods",
+      "array_chain",
+      "array_sort_numeric",
+      "string_ops",
+      "spread_destructure"
+    ]
+  },
+  "limitations": [
+    "Ratios compare configured bare engines; they do not include Node bindings or equivalent builtin sets.",
+    "Workloads perform different operations and counts; a ratio is not an application-weighted priority or profile attribution.",
+    "Seven samples, five iterations; concurrent host load, medians/MAD descriptive.",
+    "The collection bridge fix is outside these bare-engine timings."
+  ]
+}
