@@ -64,3 +64,64 @@ test('resized and detached backing stores preserve exported effective view bound
     assert.equal(vm.callFunction('getData', []).byteLength, 0);
   } finally { vm.dispose(); }
 });
+
+test('empty host buffers and typed arrays import through globals and calls', () => {
+  const vm = new Vm();
+  try {
+    vm.run('function identity(value) { return value; }');
+    const types = [
+      Int8Array, Uint8Array, Uint8ClampedArray, Int16Array, Uint16Array,
+      Int32Array, Uint32Array, Float32Array, Float64Array, BigInt64Array,
+      BigUint64Array,
+    ];
+    if (typeof Float16Array === 'function') types.push(Float16Array);
+    const values = [new ArrayBuffer(0), ...types.map(Type => new Type(0))];
+    // An empty subview can have a nonzero offset into a live backing store.
+    values.push(new Uint16Array(new ArrayBuffer(8), 8, 0));
+    for (const input of values) {
+      vm.setGlobal('input', input);
+      assert.equal(vm.run('input.byteLength'), '0');
+      assert.equal(vm.run('input.constructor.name'), input.constructor.name);
+      const output = vm.callFunction('identity', [input]);
+      assert(output instanceof input.constructor);
+      assert.equal(output.byteLength, 0);
+    }
+  } finally { vm.dispose(); }
+});
+
+test('detached host buffers and typed arrays import as empty owned copies', () => {
+  const vm = new Vm();
+  try {
+    vm.run('function identity(value) { return value; }');
+    const backing = new ArrayBuffer(16);
+    const view = new Uint16Array(backing, 4, 4);
+    structuredClone(backing, { transfer: [backing] });
+    assert.equal(backing.byteLength, 0);
+    assert.equal(view.byteLength, 0);
+    for (const input of [backing, view]) {
+      vm.setGlobal('input', input);
+      assert.equal(vm.run('input.byteLength'), '0');
+      const output = vm.callFunction('identity', [input]);
+      assert(output instanceof input.constructor);
+      assert.equal(output.byteLength, 0);
+    }
+  } finally { vm.dispose(); }
+});
+
+test('host typed arrays over shared backing stores are rejected before copying', () => {
+  const vm = new Vm();
+  try {
+    vm.run('function identity(value) { return value; }');
+    const backing = new SharedArrayBuffer(16);
+    const inputs = [
+      new Uint8Array(backing), new Uint16Array(backing, 4, 2),
+      new BigInt64Array(backing), new Uint8Array(backing, 16, 0),
+      Buffer.from(backing),
+    ];
+    for (const input of inputs) {
+      assert.throws(() => vm.setGlobal('input', input), /SharedArrayBuffer/);
+      assert.throws(() => vm.callFunction('identity', [input]), /SharedArrayBuffer/);
+    }
+    assert.equal(vm.callFunction('identity', [7]), 7, 'rejection leaves the VM usable');
+  } finally { vm.dispose(); }
+});

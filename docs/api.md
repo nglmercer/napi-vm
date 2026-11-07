@@ -23,6 +23,12 @@ and `callFunction` use the host bridge's supported value conversions. Prefer
 explicit host functions for privileged behavior, rather than transferring
 host objects with implicit capabilities.
 
+Native `ArrayBuffer` and typed-array transfers copy bytes into owned storage;
+typed arrays copy only their visible range. Empty and detached host buffers
+and typed arrays import as empty copies. Typed arrays backed by a host
+`SharedArrayBuffer` are rejected because concurrent writes cannot be copied
+safely through this bridge. Guest shared buffers and views are also rejected.
+
 VMs retain state between calls and are isolated from one another. Overlapping
 operations on a `Vm` are rejected by its admission guard. Await `runAsync`
 before calling another operation on that instance. It uses a lazily created

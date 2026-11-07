@@ -530,7 +530,13 @@ fn read_array_buffer(
                 "RangeError: Maximum array length exceeded".to_string(),
             ));
         }
-        let bytes = std::slice::from_raw_parts(data as *const u8, length).to_vec();
+        // N-API may return a null data pointer for an empty or detached
+        // buffer. Rust slices require a non-null pointer even at length zero.
+        let bytes = if length == 0 {
+            Vec::new()
+        } else {
+            std::slice::from_raw_parts(data as *const u8, length).to_vec()
+        };
         Ok(Buffer::owned(bytes))
     }
 }
@@ -553,6 +559,16 @@ fn read_typed_array(env: sys::napi_env, raw: sys::napi_value) -> Result<Value, V
             &mut buffer,
             &mut byte_offset,
         ))?;
+        // The returned backing can also be a SharedArrayBuffer. Another host
+        // thread could mutate it while Rust copies the raw bytes, so require
+        // an ordinary ArrayBuffer before constructing a slice.
+        let mut is_array_buffer = false;
+        chk(sys::napi_is_arraybuffer(env, buffer, &mut is_array_buffer))?;
+        if !is_array_buffer {
+            return Err(VmErr::Msg(
+                "a view over SharedArrayBuffer cannot cross the napi-vm Node-API binding without shared-memory support".into(),
+            ));
+        }
         let kind = match kind {
             sys::TypedarrayType::int8_array => TypedKind::Int8,
             sys::TypedarrayType::uint8_array => TypedKind::Uint8,
@@ -575,7 +591,12 @@ fn read_typed_array(env: sys::napi_env, raw: sys::napi_value) -> Result<Value, V
         // The view's own bytes are copied, so the VM's buffer starts at zero
         // rather than carrying the host's offset.
         let byte_length = length * kind.size();
-        let bytes = std::slice::from_raw_parts(data as *const u8, byte_length).to_vec();
+        // Empty views, including detached views, may have a null data pointer.
+        let bytes = if byte_length == 0 {
+            Vec::new()
+        } else {
+            std::slice::from_raw_parts(data as *const u8, byte_length).to_vec()
+        };
         Ok(Value::TypedArray(std::rc::Rc::new(
             crate::value::TypedArrayData {
                 length_tracking: false,

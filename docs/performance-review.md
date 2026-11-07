@@ -32,9 +32,9 @@ future work can choose a workload and validate the relevant lifecycle first.
 | --- | --- | --- |
 | `crates/napi-vm-runtime/src/runtime/network.rs` | A new reqwest client and Tokio runtime per fetch prevent connection-pool reuse. | Repeated local HTTP requests, permission isolation, cancellation and runtime teardown. |
 | `src/lsp/server.rs` | Rebuilding the service after a runtime snapshot reparses open documents. | Multiple documents and frequent metadata changes, checking invalidation and diagnostics. |
-| `packages/plugin-sdk/src/index.ts`, `packages/plugin-host/src/index.ts` | Event queues serialize messages again when removing them to update byte accounting. | Bounded event fanout with multiple payload sizes and backpressure/error tests. |
+| `packages/plugin-sdk/src/index.ts` | Production and harness event queues serialize messages again when removing them to update byte accounting; the plugin host already retains each entry's byte count. | Bounded event fanout with multiple payload sizes and backpressure/error tests. |
 | `runtime/session.cjs` | Publishing metadata serializes the complete snapshot. | Subscriber count and payload-size latency; retain publication coalescing. |
-| `src/bindings/marshal.rs` | Map/Set entry discovery is repeated before construction. | Large collections plus cycles and identity checks at the host boundary. |
+| `src/bindings/marshal.rs` | Map/Set entry discovery is repeated before construction. Cyclic Maps currently hit the depth guard, and repeated collection references lose identity. | Large collections plus cycles and identity checks at the host boundary. |
 | `crates/napi-vm-core/src/interpreter/call.rs` | Creating missing named properties still uses temporary descriptors; the measured class workload mostly takes this path. | Profile creation/prototype interception before extending the narrower numeric creation fast path. |
 | `crates/napi-vm-core/src/lexer.rs`, `js_string.rs` | Literal/template scanning and case conversion construct temporary strings per character. | Frontend and string workloads including lone surrogates, raw templates and case expansion. |
 
@@ -291,3 +291,42 @@ continued past midnight locally on November 7. Individual reports retain UTC
 timestamps, dirty source state and exact hashes. Raw logs and immutable binaries
 remain in the ignored local `artifacts/performance/` directory; the retained
 JSON/gzip evidence accompanies this review.
+
+## Independent completion review
+
+Three subagents independently reviewed the core changes, the comparison
+method/evidence, and host/runtime/editor/plugin boundaries. Recomputing the
+retained statistics reproduced the published ratios. The complete compressed
+Test262 report contains 102,992 unique passing variants, exactly the baseline
+variant set, and its worker digest matches the retained executable. The frozen
+core inputs and the documented lint/test-only normalization were rechecked.
+
+The comparison validator now rejects missing engine/mode rows, incorrect sample
+counts or statistics, and changes to the timed Rust harness, manifest, lockfile
+or mutually recorded dependency/configuration fingerprints. Its negative
+regressions preserve the existing ratios. The older before report lacks the
+separate dependency list and Cargo configuration fingerprint: matching lockfile
+hashes identify dependencies, while configuration identity remains explicitly
+unverified in the comparator's provenance warnings.
+
+The boundary review also fixed empty/detached host-buffer imports, which could
+construct a Rust slice from a null pointer at length zero. Host typed arrays
+over shared backing stores now fail before raw-byte copying, including empty
+views and Node Buffers. Ordinary buffers retain owned-copy behavior. The
+[Node-API contract](https://nodejs.org/api/n-api.html#napi_get_typedarray_info)
+permits both ordinary and shared backing stores; the bridge requires an
+ordinary ArrayBuffer. These are NAPI-only import changes; core guest execution,
+the timed Rust harness, WASM, LSP conversion and the measured export path are
+unchanged. The original performance captures remain historical evidence for
+their recorded binaries.
+
+The [completion audit](../bench/baselines/performance-review-2026-11-06/completion-audit.json)
+records the rechecked inputs, raw evidence and rebuilt addon. Final checks
+passed: 80 Node tests (8 existing capability skips), 1,427 Bun tests (32 existing
+capability skips), five benchmark-validator tests, workspace Clippy with warnings
+denied, Rust formatting, unchanged generated bindings and local documentation
+links. A fresh correctness smoke exercised all 60 cross-engine rows. A final
+subview run on the rebuilt addon retained microsecond-scale copies at every
+backing size; the original alternating runs remain the repeated speedup
+evidence. Core/WASM production inputs are unchanged, so their complete retained
+conformance and rebuilt WASM evidence remain applicable.

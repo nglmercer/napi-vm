@@ -59,3 +59,14 @@ Rust workloads do not measure Node bindings, WASM, I/O, async scheduling,
 security, language completeness, or every engine path. A ratio is specific
 to its workload and timing boundary; medians/MAD alone are not a statistical
 significance test.
+
+The comparator rejects incomplete engine/mode rows, inconsistent sample
+statistics and changes to the timed Rust harness, its manifest or lockfile.
+It also checks recorded dependency and Cargo configuration fingerprints.
+Legacy reports missing those additional fingerprints emit explicit provenance
+warnings; matching lockfiles still identify their dependency versions.
+Run the validation regressions with:
+
+```sh
+python3 -B -m unittest discover -s bench/tests -v
+```

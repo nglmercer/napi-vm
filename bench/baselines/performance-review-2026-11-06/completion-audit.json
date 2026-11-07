@@ -1,0 +1,137 @@
+{
+  "schema": 1,
+  "utc": "2026-11-07T05:46:56.141564+00:00",
+  "git_head": "977dde866fa69d8876955126b3d909f1a38746da",
+  "review": {
+    "subagents": 3,
+    "scope": [
+      "Core AST/bytecode, keys, descriptors and caches",
+      "rquickjs harness and retained raw evidence",
+      "Node/WASM boundaries, runtime, LSP and plugin queues"
+    ],
+    "limitations": "Architectural performance review with detailed inspection of changed paths; no exhaustive per-line audit or benchmark of every repository path."
+  },
+  "source_equivalence": {
+    "prior_audit": "source-audit.json",
+    "verified_input_files": 260,
+    "unchanged_files": 259,
+    "changes_since_prior_audit": {
+      "src/bindings/marshal.rs": {
+        "frozen": "a22a8e4e21192c25f1bd72fab1c6f175c65d0a785767e165a44e4ac13284d0f4",
+        "current": "365711b09ea0533166317bbdbdfaebd2f024cf14a14ff00cdbf30e8603915b4e"
+      }
+    },
+    "lint_only_normalization_verified": true,
+    "bytecode_production_prefix_verified": true,
+    "core_execution_unchanged": true,
+    "napi_only_change": "Avoid null slices for empty/detached host buffers; reject shared-backed host typed arrays before copying."
+  },
+  "correctness": {
+    "checks": [
+      {
+        "name": "build",
+        "status": "passed",
+        "log": "artifacts/performance/completion-addon-build-2026-11-07.log",
+        "sha256": "9d893b1b1ea6d42a60b214b68b127e40a72ec916a49a4c3ad5669a3f0ce06022"
+      },
+      {
+        "name": "node",
+        "status": "passed",
+        "log": "artifacts/performance/completion-node-2026-11-07.log",
+        "sha256": "79542d0640dd32e12c1a6e979d348df8a3d0afa4a20ca157611664b3517136a8"
+      },
+      {
+        "name": "bun",
+        "status": "passed",
+        "log": "artifacts/performance/completion-bun-2026-11-07.log",
+        "sha256": "30a3ca2a52bc94f1bc48fb341912bad51c22f8207407db51dee0bf0e0da83d21"
+      },
+      {
+        "name": "clippy",
+        "status": "passed",
+        "log": "artifacts/performance/completion-clippy-2026-11-07.log",
+        "sha256": "49dedde445d28f466da941de2ed415114fc0c18411c4dd5466f85a37464131e3"
+      },
+      {
+        "name": "benchmark_validation",
+        "status": "passed",
+        "log": "artifacts/performance/completion-benchmark-tests-2026-11-07.log",
+        "sha256": "cf58f5c744b4bb83e3693c449276cbfaaead9d2250e99757d2be7463b1c3e7ea"
+      }
+    ],
+    "node": {
+      "pass": 80,
+      "skip": 8,
+      "fail": 0
+    },
+    "bun": {
+      "pass": 1427,
+      "skip": 32,
+      "fail": 0
+    },
+    "skip_reason": "Existing optional runtime/capability cases.",
+    "benchmark_validator_tests": 5,
+    "test262_revalidated": {
+      "report": "test262-report.json.gz",
+      "sha256": "fe9f12c76d673dc22162d1549910ca7d26f82c5a9c6f73b9195dff36e5e19192",
+      "unique_passing_variants": 102992,
+      "exact_baseline_variant_set": true,
+      "worker_sha256_matches": true,
+      "fresh_run": false,
+      "reason": "All executable core inputs unchanged; complete report and source-equivalence chain independently revalidated."
+    },
+    "wasm": "Previously rebuilt 18 passing regressions retained; core and WASM adapter inputs unchanged.",
+    "other_checks": [
+      "cargo fmt --all -- --check",
+      "node tools/docs/check.mjs (83 documents, zero errors)",
+      "git diff --check",
+      "generated binding files unchanged"
+    ]
+  },
+  "comparison": {
+    "pinned_rquickjs": "0.14.0",
+    "workloads": 10,
+    "modes": [
+      "fresh_source",
+      "warm_source",
+      "warm_call"
+    ],
+    "retained_rows_per_report": 60,
+    "retained_ratios_unchanged": true,
+    "provenance_warnings": [
+      "Legacy dependency metadata is incomplete; dependency identity uses the matching Cargo.lock digest.",
+      "Legacy Cargo configuration fingerprints are incomplete; configuration identity is unverified."
+    ],
+    "fresh_smoke": {
+      "path": "artifacts/performance/completion-rquickjs-smoke-2026-11-07.json",
+      "sha256": "00b9ab6ff6d25427d6d2f485d5c3614267ed225cb8ce71530ea345881c32d9df",
+      "samples": 3,
+      "iterations_per_sample": 2,
+      "rows": 60,
+      "purpose": "Validate all workload outcomes and retained binary execution; this short run is not new speedup evidence."
+    },
+    "recomputed_repeated_evidence": [
+      "criterion-paired-summary.json (9 workloads)",
+      "typed-array-paired-summary.json (3 workloads)"
+    ],
+    "final_addon_subview_check": {
+      "report": "artifacts/performance/completion-typed-array-2026-11-07.json",
+      "sha256": "229e05b5b47b8d953a4a51be884df3c50e18974e3e387c339c0ec8c596c1ed61",
+      "addon_sha256": "8730c19884a8c8a78a10784e4c41e9e0733c70c5269a9b75a5fe905d6f5ca79b",
+      "medians_ns_per_call": {
+        "64": 3379.96,
+        "8388608": 2775.92,
+        "33554432": 3943.68
+      },
+      "purpose": "Confirm range-only exports on rebuilt addon; original paired captures remain the repeated performance evidence."
+    }
+  },
+  "current_changed_file_hashes": {
+    "src/bindings/marshal.rs": "365711b09ea0533166317bbdbdfaebd2f024cf14a14ff00cdbf30e8603915b4e",
+    "tests/node/typed-array-subviews.test.js": "01af35c353e07dcbb52bfb64ec8d9ad5398e8db9fed3ca672573f43368612131",
+    "bench/rquickjs-compare.py": "5a783b7b02bcc4f9f810f790c2a96bbddbcca8231f67015b6cfb5c311d597566",
+    "bench/tests/test_rquickjs_compare.py": "bd986955b3d16a9143fea59114dc2e82bc36f71d7273ddbcdacfbdf3ba282879",
+    "docs/api.md": "0f0ad430a4186eabe9146c485288192258ddada0e002b7606c574432ca5bcf4b"
+  },
+  "remaining_candidates": "See documented follow-up targets; these are unmeasured future optimizations and existing collection-marshalling limitations, not claimed speedups."
+}
