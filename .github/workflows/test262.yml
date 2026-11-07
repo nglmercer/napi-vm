@@ -2,6 +2,14 @@ name: Full Test262 conformance
 
 on:
   workflow_dispatch:
+    inputs:
+      profile:
+        description: Test262 corpus (reviewed-5112 applies an unmerged one-file correction)
+        type: choice
+        default: original
+        options:
+          - original
+          - reviewed-5112
   schedule:
     - cron: '0 3 * * 1'
 
@@ -9,11 +17,15 @@ permissions:
   contents: read
 
 concurrency:
-  group: test262-${{ github.ref }}
+  group: test262-${{ github.ref }}-${{ inputs.profile || 'original' }}
   cancel-in-progress: true
+
+env:
+  TEST262_PROFILE: ${{ inputs.profile || 'original' }}
 
 jobs:
   conformance:
+    name: Test262 (${{ inputs.profile || 'original' }})
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -30,12 +42,12 @@ jobs:
         run: |
           cargo build --release --locked --no-default-features --bin napi-vm-test262
           cargo build --release --locked -p napi-vm-test262-runner
-      - name: Fetch pinned corpus
-        run: target/release/test262 fetch
+      - name: Fetch selected corpus profile
+        run: target/release/test262 fetch --profile "$TEST262_PROFILE"
       - name: Run all variants without feature skips
         run: |
           mkdir -p artifacts/test262
-          target/release/test262 run --jobs 2 --timeout 10 \
+          target/release/test262 run --profile "$TEST262_PROFILE" --jobs 2 --timeout 10 \
             --output artifacts/test262/full-results.json
       - name: Summarize results
         if: always()
@@ -48,6 +60,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: test262-${{ github.sha }}
+          name: test262-${{ env.TEST262_PROFILE }}-${{ github.sha }}
           path: artifacts/test262/
           if-no-files-found: warn

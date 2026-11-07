@@ -1,0 +1,202 @@
+{
+  "domain": "ECMAScript",
+  "suite": "Test262",
+  "revision": "0b4e0812022b18236b5276d2804948fdd9f71603",
+  "selection": [
+    "retest of tools/test262/evidence/full-interpreter-overhead-2026-10-30/report.json.gz"
+  ],
+  "groups": [],
+  "engine_sha256": "cedda1803516ed6d0b3f9e46b624e36d7dc05aec459ff4561d63dc4b7a8dcad9",
+  "skip_features": [],
+  "denominator": "all selected variants, including skips and errors",
+  "worker_jobs": 2,
+  "timeout_seconds": 10.0,
+  "resumed_files": 0,
+  "total": 17,
+  "counts": {
+    "pass": 16,
+    "fail": 1,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "pass_percentage": 94.11764705882354,
+  "limitations": [
+    "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
+  ],
+  "results": [
+    {
+      "test": "annexB/language/function-code/block-decl-func-skip-arguments.js",
+      "variant": "script",
+      "status": "fail",
+      "engine": {
+        "status": "error",
+        "phase": "runtime",
+        "error_type": "Test262Error",
+        "message": "Expected SameValue(«\"function arguments() {}\"», «\"[object Arguments]\"») to be true"
+      },
+      "seconds": 0.015
+    },
+    {
+      "test": "staging/sm/Date/dst-offset-caching-1-of-8.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      },
+      "seconds": 6.161
+    },
+    {
+      "test": "staging/sm/Date/dst-offset-caching-1-of-8.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      },
+      "seconds": 5.152
+    },
+    {
+      "test": "staging/sm/Date/dst-offset-caching-2-of-8.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      },
+      "seconds": 7.07
+    },
+    {
+      "test": "staging/sm/Date/dst-offset-caching-2-of-8.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      },
+      "seconds": 6.421
+    },
+    {
+      "test": "staging/sm/Date/dst-offset-caching-3-of-8.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      },
+      "seconds": 6.502
+    },
+    {
+      "test": "staging/sm/Date/dst-offset-caching-3-of-8.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      },
+      "seconds": 6.454
+    },
+    {
+      "test": "staging/sm/Date/dst-offset-caching-4-of-8.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      },
+      "seconds": 6.3
+    },
+    {
+      "test": "staging/sm/Date/dst-offset-caching-4-of-8.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      },
+      "seconds": 6.542
+    },
+    {
+      "test": "staging/sm/Date/dst-offset-caching-5-of-8.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      },
+      "seconds": 6.733
+    },
+    {
+      "test": "staging/sm/Date/dst-offset-caching-5-of-8.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      },
+      "seconds": 6.387
+    },
+    {
+      "test": "staging/sm/Date/dst-offset-caching-6-of-8.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      },
+      "seconds": 6.474
+    },
+    {
+      "test": "staging/sm/Date/dst-offset-caching-6-of-8.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      },
+      "seconds": 6.311
+    },
+    {
+      "test": "staging/sm/Date/dst-offset-caching-7-of-8.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      },
+      "seconds": 6.336
+    },
+    {
+      "test": "staging/sm/Date/dst-offset-caching-7-of-8.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      },
+      "seconds": 6.528
+    },
+    {
+      "test": "staging/sm/Date/dst-offset-caching-8-of-8.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      },
+      "seconds": 6.431
+    },
+    {
+      "test": "staging/sm/Date/dst-offset-caching-8-of-8.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      },
+      "seconds": 6.206
+    }
+  ]
+}

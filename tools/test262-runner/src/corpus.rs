@@ -8,6 +8,36 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 const MANIFEST: &str = env!("CARGO_MANIFEST_DIR");
+pub const BASE_REVISION: &str = "0b4e0812022b18236b5276d2804948fdd9f71603";
+pub const REVIEW_REVISION: &str = "cff513bc172b79b97963046e83078e114b2a20ff";
+pub const REVIEW_HEAD: &str = "1f3d994e2658c2934a64781ffbb7a9b3782d3310";
+const REVIEW_BLOB: &str = "33d4c24b0d0479e0c2199f7d629b9cc77ddd2d6d";
+const REVIEW_FILE: &str = "test/annexB/language/function-code/block-decl-func-skip-arguments.js";
+pub const PATCH_SHA256: &str = "49b8274367f0825cd0f09567c869fc8c339a295a5442945126595a31eebd0d2c";
+
+pub fn profile(options: &Options) -> Result<&str, String> {
+    match options.one("profile").unwrap_or("original") {
+        name @ ("original" | "reviewed-5112") => Ok(name),
+        other => Err(format!("unknown corpus profile: {other}")),
+    }
+}
+
+pub fn provenance(profile: &str) -> Json {
+    match profile {
+        "reviewed-5112" => json!({"profile": profile, "base_revision": BASE_REVISION,
+            "upstream_pr": 5112, "upstream_head": REVIEW_HEAD, "overlay_file": REVIEW_FILE,
+            "overlay_blob": REVIEW_BLOB, "patch_sha256": PATCH_SHA256}),
+        _ => json!({"profile": "original"}),
+    }
+}
+
+pub fn profile_path(profile: &str) -> PathBuf {
+    if profile == "reviewed-5112" {
+        repository().join(".napi-vm/test262-reviewed-5112")
+    } else {
+        default_corpus()
+    }
+}
 
 /// Repository root, so every default path works from any directory.
 pub fn repository() -> PathBuf {
@@ -59,6 +89,22 @@ impl Corpus {
             if !git(&root, &["status", "--porcelain", "--untracked-files=all"])?.is_empty() {
                 return Err("corpus has modified or untracked files".into());
             }
+            if !git(
+                &root,
+                &[
+                    "status",
+                    "--porcelain",
+                    "--ignored=matching",
+                    "--untracked-files=all",
+                    "--",
+                    "test",
+                    "harness",
+                ],
+            )?
+            .is_empty()
+            {
+                return Err("corpus test or harness tree contains ignored files".into());
+            }
         }
         let harness_dir = root
             .join("harness")
@@ -75,19 +121,35 @@ impl Corpus {
     /// Open the corpus named by `--corpus` (or the default), checking the pinned
     /// revision from `--revision` or the lock file when `strict` is set.
     pub fn from_options(options: &Options, strict: bool) -> Result<(Self, String), String> {
+        let profile = profile(options)?;
+        if profile == "original" && options.one("revision") == Some(REVIEW_REVISION) {
+            return Err("reviewed-5112 revision requires its matching profile".into());
+        }
         let path = options
             .one("corpus")
             .map(PathBuf::from)
-            .unwrap_or_else(default_corpus);
-        let expected = if strict {
+            .unwrap_or_else(|| profile_path(profile));
+        let expected = if strict || profile == "reviewed-5112" {
+            if profile == "reviewed-5112"
+                && options
+                    .one("revision")
+                    .is_some_and(|r| r != REVIEW_REVISION)
+            {
+                return Err("--revision conflicts with reviewed-5112 profile".into());
+            }
             Some(match options.one("revision") {
                 Some(revision) => revision.to_string(),
+                None if profile == "reviewed-5112" => REVIEW_REVISION.to_string(),
                 None => locked_revision()?,
             })
         } else {
             None
         };
-        Self::open(&path, expected.as_deref())
+        let opened = Self::open(&path, expected.as_deref())?;
+        if profile == "original" && opened.1 == REVIEW_REVISION {
+            return Err("reviewed-5112 revision requires its matching profile".into());
+        }
+        Ok(opened)
     }
 
     pub fn test_dir(&self) -> PathBuf {
@@ -234,6 +296,10 @@ impl Corpus {
 /// revision in `corpus.lock.json`. A checkout already at that revision and
 /// clean is left untouched.
 pub fn fetch(options: &Options) -> Result<(), String> {
+    let profile = profile(options)?;
+    if options.one("revision").is_some() {
+        return Err("fetch uses the locked profile revision; --revision is not accepted".into());
+    }
     let lock = read_json(&lock_path())?;
     let repository = lock["repository"]
         .as_str()
@@ -241,13 +307,44 @@ pub fn fetch(options: &Options) -> Result<(), String> {
     let revision = lock["revision"]
         .as_str()
         .ok_or("corpus.lock.json has no revision")?;
+    if profile == "reviewed-5112" && revision != BASE_REVISION {
+        return Err("reviewed profile base does not match lock".into());
+    }
     let path = options
         .one("corpus")
         .map(PathBuf::from)
-        .unwrap_or_else(default_corpus);
-    if let Ok((_, current)) = Corpus::open(&path, Some(revision)) {
+        .unwrap_or_else(|| profile_path(profile));
+    if profile == "reviewed-5112"
+        && (path == default_corpus()
+            || path
+                .canonicalize()
+                .ok()
+                .zip(default_corpus().canonicalize().ok())
+                .is_some_and(|(a, b)| a == b))
+    {
+        return Err("reviewed profile requires a separate corpus directory".into());
+    }
+    let expected = if profile == "reviewed-5112" {
+        REVIEW_REVISION
+    } else {
+        revision
+    };
+    if let Ok((_, current)) = Corpus::open(&path, Some(expected)) {
         println!("corpus already at {current}");
         return Ok(());
+    }
+    let existing_git = path.join(".git").exists();
+    if profile == "reviewed-5112"
+        && path.exists()
+        && !existing_git
+        && std::fs::read_dir(&path)
+            .map_err(|e| e.to_string())?
+            .next()
+            .is_some()
+    {
+        return Err(
+            "reviewed corpus directory must be empty or an existing managed checkout".into(),
+        );
     }
     std::fs::create_dir_all(&path).map_err(|error| format!("{}: {error}", path.display()))?;
     if !path.join(".git").exists() {
@@ -257,9 +354,108 @@ pub fn fetch(options: &Options) -> Result<(), String> {
         )?;
     }
     let root = path.canonicalize().map_err(|error| error.to_string())?;
+    if profile == "reviewed-5112" && default_corpus().canonicalize().ok().as_ref() == Some(&root) {
+        return Err("reviewed profile requires a separate corpus directory".into());
+    }
+    if profile == "reviewed-5112" && existing_git {
+        if !root.join(".git").is_dir() {
+            return Err("reviewed corpus must be a standalone checkout".into());
+        }
+        let current = git(&root, &["rev-parse", "HEAD"])?;
+        if current != BASE_REVISION && current != REVIEW_REVISION {
+            return Err("reviewed corpus directory is not a managed checkout".into());
+        }
+    }
+    if profile == "original"
+        && existing_git
+        && git(&root, &["rev-parse", "HEAD"]).ok().as_deref() == Some(REVIEW_REVISION)
+    {
+        return Err("reviewed-5112 checkout requires its matching profile".into());
+    }
+    if !git(&root, &["status", "--porcelain", "--untracked-files=all"])?.is_empty() {
+        return Err("corpus has modified or untracked files".into());
+    }
+    if !git(
+        &root,
+        &[
+            "status",
+            "--porcelain",
+            "--ignored=matching",
+            "--untracked-files=all",
+            "--",
+            "test",
+            "harness",
+        ],
+    )?
+    .is_empty()
+    {
+        return Err("corpus test or harness tree contains ignored files".into());
+    }
     git(&root, &["fetch", "-q", "--depth=1", repository, revision])?;
     git(&root, &["checkout", "-q", "--detach", "FETCH_HEAD"])?;
-    let (_, checked_out) = Corpus::open(&root, Some(revision))?;
+    if profile == "reviewed-5112" {
+        git(
+            &root,
+            &["fetch", "-q", "--depth=1", repository, REVIEW_HEAD],
+        )?;
+        let blob = git(
+            &root,
+            &["rev-parse", &format!("{REVIEW_HEAD}:{REVIEW_FILE}")],
+        )?;
+        if blob != REVIEW_BLOB {
+            return Err("reviewed upstream file blob mismatch".into());
+        }
+        let index = root
+            .join(".git")
+            .join(format!("profile-index-{}", std::process::id()));
+        let env = [("GIT_INDEX_FILE", index.to_string_lossy().into_owned())];
+        let result = (|| {
+            git_env(&root, &["read-tree", revision], &env)?;
+            git_env(
+                &root,
+                &[
+                    "update-index",
+                    "--add",
+                    "--cacheinfo",
+                    &format!("100644,{REVIEW_BLOB},{REVIEW_FILE}"),
+                ],
+                &env,
+            )?;
+            let tree = git_env(&root, &["write-tree"], &env)?;
+            let commit_env = [
+                ("GIT_AUTHOR_NAME", "Test262 profile".into()),
+                ("GIT_AUTHOR_EMAIL", "test262-profile@invalid".into()),
+                ("GIT_COMMITTER_NAME", "Test262 profile".into()),
+                ("GIT_COMMITTER_EMAIL", "test262-profile@invalid".into()),
+                ("GIT_AUTHOR_DATE", "2000-01-01T00:00:00+0000".into()),
+                ("GIT_COMMITTER_DATE", "2000-01-01T00:00:00+0000".into()),
+            ];
+            let commit = git_env(
+                &root,
+                &[
+                    "-c",
+                    "i18n.commitEncoding=UTF-8",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "commit-tree",
+                    &tree,
+                    "-p",
+                    revision,
+                    "-m",
+                    "Test262 reviewed-5112 profile",
+                ],
+                &commit_env,
+            )?;
+            if commit != REVIEW_REVISION {
+                return Err(format!("unexpected reviewed profile commit {commit}"));
+            }
+            git(&root, &["checkout", "-q", "--detach", &commit])?;
+            Ok(())
+        })();
+        let _ = std::fs::remove_file(index);
+        result?;
+    }
+    let (_, checked_out) = Corpus::open(&root, Some(expected))?;
     println!("corpus fetched at {checked_out}");
     Ok(())
 }
@@ -279,10 +475,15 @@ fn read_json(path: &Path) -> Result<Json, String> {
 }
 
 fn git(root: &Path, arguments: &[&str]) -> Result<String, String> {
+    git_env(root, arguments, &[])
+}
+
+fn git_env(root: &Path, arguments: &[&str], env: &[(&str, String)]) -> Result<String, String> {
     let output = std::process::Command::new("git")
         .arg("-C")
         .arg(root)
         .args(arguments)
+        .envs(env.iter().map(|(key, value)| (*key, value)))
         .output()
         .map_err(|error| format!("git: {error}"))?;
     if !output.status.success() {
@@ -311,4 +512,110 @@ fn collect_js(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Fixture {
+        root: PathBuf,
+        revision: String,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            static NEXT: AtomicUsize = AtomicUsize::new(0);
+            let root = std::env::temp_dir().join(format!(
+                "test262-corpus-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir_all(root.join("test")).unwrap();
+            std::fs::create_dir_all(root.join("harness")).unwrap();
+            std::fs::write(root.join("test/example.js"), "original").unwrap();
+            std::fs::write(root.join("harness/assert.js"), "original").unwrap();
+            git(&root, &["init", "-q"]).unwrap();
+            git(&root, &["add", "test/example.js", "harness/assert.js"]).unwrap();
+            git(
+                &root,
+                &[
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "-c",
+                    "core.hooksPath=/dev/null",
+                    "commit",
+                    "-q",
+                    "-m",
+                    "fixture",
+                ],
+            )
+            .unwrap();
+            let revision = git(&root, &["rev-parse", "HEAD"]).unwrap();
+            Self { root, revision }
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn strict_open_rejects_modified_untracked_and_ignored_corpus_files() {
+        let fixture = Fixture::new();
+        let check = || Corpus::open(&fixture.root, Some(&fixture.revision));
+        assert!(check().is_ok());
+        for name in ["test/example.js", "harness/assert.js"] {
+            std::fs::write(fixture.root.join(name), "modified").unwrap();
+            assert!(check().is_err(), "accepted modified {name}");
+            std::fs::write(fixture.root.join(name), "original").unwrap();
+        }
+        for name in ["test/injected.js", "harness/injected.js"] {
+            std::fs::write(fixture.root.join(name), "untracked").unwrap();
+            assert!(check().is_err(), "accepted untracked {name}");
+            std::fs::remove_file(fixture.root.join(name)).unwrap();
+        }
+        std::fs::write(
+            fixture.root.join(".git/info/exclude"),
+            "test/injected.js\nharness/injected.js\n",
+        )
+        .unwrap();
+        for name in ["test/injected.js", "harness/injected.js"] {
+            std::fs::write(fixture.root.join(name), "ignored").unwrap();
+            assert!(check().is_err(), "accepted ignored {name}");
+            std::fs::remove_file(fixture.root.join(name)).unwrap();
+        }
+        assert!(check().is_ok());
+    }
+
+    #[test]
+    fn reviewed_profile_is_verified_even_for_non_strict_probe_commands() {
+        let fixture = Fixture::new();
+        let options = |profile: &str, revision: Option<&str>| {
+            let mut args = vec![
+                "--corpus".to_string(),
+                fixture.root.to_string_lossy().into_owned(),
+                "--profile".into(),
+                profile.into(),
+            ];
+            if let Some(revision) = revision {
+                args.extend(["--revision".into(), revision.into()]);
+            }
+            Options::parse(&args, &crate::options::COMMON_VALUES, &[]).unwrap()
+        };
+        assert!(Corpus::from_options(&options("original", None), false).is_ok());
+        assert!(Corpus::from_options(&options("reviewed-5112", None), false).is_err());
+        assert!(
+            Corpus::from_options(&options("reviewed-5112", Some(&fixture.revision)), false)
+                .is_err()
+        );
+        assert!(Corpus::from_options(&options("original", Some(REVIEW_REVISION)), false).is_err());
+    }
 }

@@ -225,6 +225,22 @@ fn date_metadata_receiver_checks_and_default_primitive_hint() {
 }
 
 #[test]
+fn date_set_time_numeric_and_conversion_paths() {
+    assert_tiers(
+        "var d=new Date(NaN), log='';var a=d.setTime(1.9), b=d.getTimezoneOffset();var c=d.setTime({valueOf(){log+='v';return 42}});var threw=false;try{d.setTime({valueOf(){throw 123}})}catch(e){threw=e===123}var unchanged=d.getTime();var e=d.setTime(Infinity), f=d.getTimezoneOffset();var g=d.setTime();var h=d.setTime(undefined);var z=d.setTime(-0, 10);var invalid=false;try{Date.prototype.setTime.call({}, 1)}catch(e){invalid=e instanceof TypeError}d.setTime=function(){return 17};JSON.stringify([a,b,c,log,threw,unchanged,Number.isNaN(e),Number.isNaN(f),Number.isNaN(g),Number.isNaN(h),Object.is(z,0),invalid,d.setTime(3)]);",
+        "[1,0,42,\"v\",true,42,true,true,true,true,true,true,17]",
+    );
+}
+
+#[test]
+fn cached_property_reads_keep_live_bindings_and_replacements() {
+    assert_tiers(
+        "function f(a){var result=[];for(var i=0;i<4;i++){result.push(arguments[0]);a++}return result}var d=new Date(0);function get(){return d.getTimezoneOffset()}get();get();d.getTimezoneOffset=function(){return 9};JSON.stringify([f(2),get()]);",
+        "[[2,3,4,5],9]",
+    );
+}
+
+#[test]
 fn date_formats_and_own_output_roundtrips() {
     assert_tiers(
         "var d=new Date(0);var negative=new Date(-62198755200000);JSON.stringify([d.toDateString(),d.toTimeString(),d.toUTCString(),Date.parse(d.toString()),Date.parse(d.toUTCString()),new Date(NaN).toDateString(),negative.toDateString(),new Date('-000001-01-01T00:00:00.000Z').getUTCFullYear(),Date.prototype.toGMTString===Date.prototype.toUTCString]);",

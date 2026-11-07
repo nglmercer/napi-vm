@@ -88,4 +88,4 @@ impl Options {
 }
 
 /// Options shared by every command that touches the corpus or the worker.
-pub const COMMON_VALUES: [&str; 3] = ["corpus", "revision", "engine"];
+pub const COMMON_VALUES: [&str; 4] = ["corpus", "revision", "engine", "profile"];

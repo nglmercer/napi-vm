@@ -1,6 +1,6 @@
 //! Suite execution: `run` a selection, or `retest` a report's non-passing tests.
 
-use crate::corpus::{Corpus, default_corpus, read_source};
+use crate::corpus::{self, Corpus, read_source};
 use crate::metadata;
 use crate::options::Options;
 use crate::report::{self, Header};
@@ -62,7 +62,7 @@ fn run_file(
                     let (execution, elapsed) = worker::execute(engine, &request, timeout);
                     worker::row(&name, variant, execution, &metadata, elapsed)
                 }
-                Err(message) => json!({"test": name, "variant": "metadata",
+                Err(message) => json!({"test": name, "variant": variant.name(),
                     "status": "harness_error", "message": message}),
             }
         })
@@ -120,17 +120,24 @@ pub fn execute(
             written += 1;
         }
     }
+    let mut panicked = false;
     for handle in handles {
-        let _ = handle.join();
+        panicked |= handle.join().is_err();
     }
     match failure {
         Some(error) => Err(error),
+        None if panicked => Err("Test262 worker thread panicked; run is incomplete".into()),
+        None if written != tests.len() => Err(format!(
+            "Test262 run is incomplete: received {written}/{} files",
+            tests.len()
+        )),
         None => Ok(results),
     }
 }
 
 fn fingerprint(
     revision: &str,
+    provenance: &Json,
     engine_sha256: &str,
     plan: &Plan,
     selection: &[String],
@@ -138,7 +145,7 @@ fn fingerprint(
     names: &[String],
 ) -> Json {
     json!({
-        "revision": revision, "engine_sha256": engine_sha256,
+        "revision": revision, "corpus_provenance": provenance, "engine_sha256": engine_sha256,
         "worker_jobs": plan.jobs, "timeout_seconds": plan.timeout.as_secs_f64(),
         "skip_features": plan.skip, "selection": selection, "groups": groups,
         "selection_sha256": format!("{:x}", Sha256::digest(json!(names).to_string())),
@@ -168,6 +175,7 @@ pub fn run(options: &Options) -> Result<ExitCode, String> {
     }
     let output = PathBuf::from(options.one("output").unwrap_or("test262-results.json"));
     let (corpus, revision) = Corpus::from_options(options, true)?;
+    let provenance = corpus::provenance(corpus::profile(options)?);
     let corpus = Arc::new(corpus);
     let paths = options.all("path");
     let groups = options.all("group");
@@ -181,6 +189,7 @@ pub fn run(options: &Options) -> Result<ExitCode, String> {
     };
     let expected = fingerprint(
         &revision,
+        &provenance,
         &snapshot.sha256,
         &plan,
         &selection,
@@ -235,6 +244,7 @@ pub fn run(options: &Options) -> Result<ExitCode, String> {
 
     let header = Header {
         revision,
+        provenance,
         selection,
         groups,
         engine_sha256: snapshot.sha256.clone(),
@@ -273,10 +283,34 @@ pub fn retest(options: &Options) -> Result<ExitCode, String> {
     if plan.jobs == 0 {
         return Err("--jobs must be positive".into());
     }
+    let base_provenance = report::provenance(&base);
+    let base_profile = base_provenance["profile"]
+        .as_str()
+        .ok_or("base report has invalid corpus profile")?;
+    if let Some(requested) = options.one("profile")
+        && requested != base_profile
+    {
+        return Err("--profile conflicts with base report".into());
+    }
+    if corpus::provenance(base_profile) != base_provenance {
+        return Err("base report has unknown corpus provenance".into());
+    }
+    if base_profile == "reviewed-5112" && revision != corpus::REVIEW_REVISION {
+        return Err("base report revision conflicts with reviewed-5112 profile".into());
+    }
+    if base_profile == "original" && revision == corpus::REVIEW_REVISION {
+        return Err("reviewed-5112 revision conflicts with original profile".into());
+    }
+    if options
+        .one("revision")
+        .is_some_and(|value| value != revision)
+    {
+        return Err("--revision conflicts with base report".into());
+    }
     let path = options
         .one("corpus")
         .map(PathBuf::from)
-        .unwrap_or_else(default_corpus);
+        .unwrap_or_else(|| corpus::profile_path(base_profile));
     let (corpus, _) = Corpus::open(&path, Some(&revision))?;
     let corpus = Arc::new(corpus);
 
@@ -301,6 +335,7 @@ pub fn retest(options: &Options) -> Result<ExitCode, String> {
     let results = execute(&corpus, &snapshot.path, &tests, &plan, |_, _| Ok(()))?;
     let header = Header {
         revision,
+        provenance: base_provenance,
         selection,
         groups: Vec::new(),
         engine_sha256: snapshot.sha256.clone(),
@@ -359,8 +394,11 @@ fn restore(path: &Path, expected: &Json, names: &[String]) -> Result<(usize, Vec
         .map_or(0, |index| index + 1);
     let text = std::str::from_utf8(&contents[..complete]).map_err(|error| error.to_string())?;
     let mut lines = text.lines();
-    let header: Json = serde_json::from_str(lines.next().ok_or("empty checkpoint")?)
+    let mut header: Json = serde_json::from_str(lines.next().ok_or("empty checkpoint")?)
         .map_err(|error| error.to_string())?;
+    if header.get("corpus_provenance").is_none() {
+        header["corpus_provenance"] = corpus::provenance("original");
+    }
     if &header != expected {
         return Err("checkpoint configuration or worker digest mismatch".into());
     }
@@ -389,4 +427,98 @@ fn restore(path: &Path, expected: &Json, names: &[String]) -> Result<(usize, Vec
             .map_err(|error| error.to_string())?;
     }
     Ok((count, results))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checkpoint_rejects_different_corpus_provenance() {
+        let plan = Plan {
+            jobs: 1,
+            timeout: Duration::from_secs(5),
+            skip: vec![],
+        };
+        let original = fingerprint(
+            "same",
+            &corpus::provenance("original"),
+            "engine",
+            &plan,
+            &[],
+            &[],
+            &[],
+        );
+        let reviewed = fingerprint(
+            "same",
+            &corpus::provenance("reviewed-5112"),
+            "engine",
+            &plan,
+            &[],
+            &[],
+            &[],
+        );
+        let path =
+            std::env::temp_dir().join(format!("test262-profile-checkpoint-{}", std::process::id()));
+        std::fs::write(&path, format!("{original}\n")).unwrap();
+        assert!(restore(&path, &original, &[]).is_ok());
+        assert!(restore(&path, &reviewed, &[]).is_err());
+        let mut legacy = original.clone();
+        legacy.as_object_mut().unwrap().remove("corpus_provenance");
+        std::fs::write(&path, format!("{legacy}\n")).unwrap();
+        assert!(restore(&path, &original, &[]).is_ok());
+        assert!(restore(&path, &reviewed, &[]).is_err());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn missing_include_keeps_each_variant_identity() {
+        let root = std::env::temp_dir().join(format!("test262-runner-test-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("test")).unwrap();
+        std::fs::create_dir_all(root.join("harness")).unwrap();
+        std::fs::write(root.join("harness/sta.js"), "").unwrap();
+        std::fs::write(root.join("harness/assert.js"), "").unwrap();
+        assert!(
+            std::process::Command::new("git")
+                .args(["init", "-q", "-b", "main"])
+                .arg(&root)
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            std::process::Command::new("git")
+                .args(["-C"])
+                .arg(&root)
+                .args([
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "commit",
+                    "-q",
+                    "--allow-empty",
+                    "-m",
+                    "fixture"
+                ])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let test = root.join("test/missing.js");
+        std::fs::write(&test, "/*---\nincludes: [missing.js]\n---*/").unwrap();
+        let (corpus, _) = Corpus::open(&root, None).unwrap();
+        let rows = run_file(
+            &corpus,
+            Path::new("unused"),
+            &test,
+            Duration::from_secs(1),
+            &[],
+        );
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["variant"], "script");
+        assert_eq!(rows[1]["variant"], "strict");
+        assert!(rows.iter().all(|row| row["status"] == "harness_error"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

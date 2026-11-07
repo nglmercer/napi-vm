@@ -542,9 +542,28 @@ pub(super) fn parse_int(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Re
     let val = if radix == 10 {
         digits.parse::<f64>().unwrap_or(f64::INFINITY)
     } else {
-        digits.chars().fold(0.0, |value, c| {
-            value * radix as f64 + c.to_digit(radix as u32).expect("validated digit") as f64
-        })
+        // Accumulating in binary64 rounds after every digit. A discarded bit
+        // can affect a later tie, so even power-of-two radices must be rounded
+        // only after the complete integer has been read.
+        use crate::bigint::BigInt;
+        let base = BigInt::from_i64(radix as i64);
+        let mut integer = BigInt::zero();
+        let mut result = 0.0;
+        for c in digits.chars() {
+            integer = integer.mul(&base).map_err(VmErr::Msg)?;
+            integer = integer
+                .add(&BigInt::from_i64(
+                    c.to_digit(radix as u32).expect("validated digit") as i64,
+                ))
+                .map_err(VmErr::Msg)?;
+            result = integer.to_f64();
+            // Subsequent digits can only increase the magnitude. Stopping
+            // here also bounds the temporary BigInt for very long inputs.
+            if result.is_infinite() {
+                break;
+            }
+        }
+        result
     };
     Ok(Value::Number(if neg { -val } else { val }))
 }

@@ -395,9 +395,6 @@ fn pad(
     if len <= s.len() {
         return bounded_string(s);
     }
-    if len > crate::value::MAX_STRING_LEN {
-        return Err(crate::value::limit_err("Maximum string length exceeded"));
-    }
     let fill = if matches!(args.get(1), None | Some(Value::Undefined)) {
         JsString::from(" ")
     } else {
@@ -405,6 +402,9 @@ fn pad(
     };
     if fill.is_empty() {
         return bounded_string(s);
+    }
+    if len > crate::value::MAX_STRING_LEN {
+        return Err(crate::value::limit_err("Maximum string length exceeded"));
     }
     let pad = JsString::from_units(
         fill.units()

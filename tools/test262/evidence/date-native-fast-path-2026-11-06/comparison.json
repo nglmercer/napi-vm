@@ -1,0 +1,14 @@
+{
+  "gains": [
+    {
+      "test": "staging/sm/Date/dst-offset-caching-1-of-8.js",
+      "variant": "strict",
+      "before": "timeout",
+      "after": "pass"
+    }
+  ],
+  "losses": [],
+  "changed": [],
+  "added": [],
+  "removed": []
+}

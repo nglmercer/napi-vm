@@ -1,0 +1,16 @@
+{
+  "audit": "passed",
+  "variants": 102992,
+  "files": 53615,
+  "identical_variant_set_to_original": true,
+  "all_variants_pass": true,
+  "no_skips_or_errors": true,
+  "profile": "reviewed-5112",
+  "original_corpus_unchanged": true,
+  "overlay_files": 1,
+  "engine_sha256": "cedda1803516ed6d0b3f9e46b624e36d7dc05aec459ff4561d63dc4b7a8dcad9",
+  "worker_jobs": 2,
+  "timeout_seconds": 10,
+  "dst_variants": 16,
+  "dst_max_seconds": 6.046
+}

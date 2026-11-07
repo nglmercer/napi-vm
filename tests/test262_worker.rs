@@ -173,6 +173,25 @@ fn worker_create_realm_has_distinct_globals_and_intrinsics() {
 }
 
 #[test]
+fn date_primitive_construction_keeps_constructor_realm() {
+    let report = worker(json!({"source": r#"
+        var realm = $262.createRealm();
+        var ForeignDate = realm.global.Date;
+        var date = new ForeignDate(42);
+        if (Object.getPrototypeOf(date) !== ForeignDate.prototype ||
+            date instanceof Date || !(date instanceof ForeignDate)) throw new Error('prototype');
+        date.extra = 1; // Materialize its ordinary properties.
+        if (Object.getPrototypeOf(date) !== ForeignDate.prototype || date.getTime() !== 42 ||
+            date.extra !== 1) throw new Error('materialized date');
+        if (Date.prototype.setTime.call(date, 7) !== 7 ||
+            ForeignDate.prototype.getTimezoneOffset.call(date) !== 0) throw new Error('borrowed method');
+        var invalid = new ForeignDate(NaN);
+        if (!Number.isNaN(invalid.getTimezoneOffset())) throw new Error('invalid date');
+    "#}));
+    assert_eq!(report["status"], "ok", "{report}");
+}
+
+#[test]
 fn worker_agents_share_memory_and_report_without_transferring_guest_state() {
     let result = worker(json!({"source": r#"
         var sab = new SharedArrayBuffer(16);

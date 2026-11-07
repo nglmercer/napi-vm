@@ -3450,10 +3450,34 @@ impl Value {
     /// A date whose prototype link is already known, as `set_proto` on its
     /// property cell would record it.
     pub(crate) fn date_with_prototype(milliseconds: f64, prototype: Option<Rc<Value>>) -> Self {
+        let realm =
+            crate::interpreter::realm::allocation_global().map(|realm| Rc::downgrade(&realm));
+        Self::date_with_prototype_and_weak_realm(milliseconds, prototype, realm)
+    }
+
+    /// Construct a date for a known realm without changing the current
+    /// allocation context. The date keeps the same weak realm link used by
+    /// the general constructor.
+    pub(crate) fn date_with_prototype_in_realm(
+        milliseconds: f64,
+        prototype: Option<Rc<Value>>,
+        realm: &crate::interpreter::Env,
+    ) -> Self {
+        Self::date_with_prototype_and_weak_realm(
+            milliseconds,
+            prototype,
+            Some(Rc::downgrade(realm)),
+        )
+    }
+
+    fn date_with_prototype_and_weak_realm(
+        milliseconds: f64,
+        prototype: Option<Rc<Value>>,
+        realm: Option<std::rc::Weak<RefCell<crate::interpreter::Environment>>>,
+    ) -> Self {
         Self::Date(Rc::new(DateData {
             properties: std::cell::OnceCell::new(),
-            realm: crate::interpreter::realm::allocation_global()
-                .map(|realm| Rc::downgrade(&realm)),
+            realm,
             prototype: RefCell::new(prototype),
             milliseconds: std::cell::Cell::new(milliseconds),
         }))
@@ -3803,6 +3827,17 @@ impl Value {
         match self {
             Value::Binding(cell) => cell.borrow().clone_for_execution(),
             other => other.clone_for_execution(),
+        }
+    }
+
+    /// Resolve an owned value without cloning it again when it is not a live
+    /// binding. Cached property reads already own their copied slot value.
+    #[inline]
+    pub(crate) fn into_deref_binding(self) -> Value {
+        if let Value::Binding(cell) = &self {
+            cell.borrow().clone_for_execution()
+        } else {
+            self
         }
     }
 
@@ -4538,6 +4573,30 @@ mod object_index_tests {
     use super::{ObjectCell, Value};
     use std::cell::Cell;
     use std::ops::Deref;
+
+    #[test]
+    fn owned_binding_resolution_reads_current_value() {
+        let cell = std::rc::Rc::new(std::cell::RefCell::new(Value::Number(1.0)));
+        assert!(matches!(
+            Value::Binding(cell.clone()).into_deref_binding(),
+            Value::Number(1.0)
+        ));
+        *cell.borrow_mut() = Value::Number(2.0);
+        assert!(matches!(
+            Value::Binding(cell).into_deref_binding(),
+            Value::Number(2.0)
+        ));
+        let object = Value::object(vec![]);
+        let Value::Object { props } = &object else {
+            unreachable!()
+        };
+        let identity = std::rc::Rc::as_ptr(props);
+        let resolved = object.into_deref_binding();
+        let Value::Object { props } = &resolved else {
+            unreachable!()
+        };
+        assert_eq!(std::rc::Rc::as_ptr(props), identity);
+    }
 
     #[test]
     fn cached_slot_read_disables_after_raw_storage_escapes() {

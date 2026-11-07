@@ -407,7 +407,7 @@ fn get_prop_cached(
             && !is_accessor_for(&value, name)
         {
             interp.check_execution_interrupt()?;
-            let value = value.deref_binding();
+            let value = value.into_deref_binding();
             if matches!(value, Value::Uninitialized) {
                 return Err(VmErr::Msg(format!(
                     "ReferenceError: Cannot access '{name}' before initialization"
@@ -458,7 +458,7 @@ fn get_prop_cached(
         && props.meta.borrow().explicit_accessor_kind(name).is_none()
         && !is_accessor_for(&value, name)
     {
-        let value = value.deref_binding();
+        let value = value.into_deref_binding();
         if matches!(value, Value::Uninitialized) {
             return Err(VmErr::Msg(format!(
                 "ReferenceError: Cannot access '{name}' before initialization"
@@ -1165,9 +1165,10 @@ fn execute_instruction(
             args,
             argc,
         } => {
-            let argv = take_range(frame, args, argc)?;
+            let argv = borrow_range(frame, args, argc)?;
             let callee = frame.registers[callee as usize].clone_for_execution();
-            frame.registers[dst as usize] = interp.ctor(&callee, argv)?;
+            let value = interp.ctor_borrowed(&callee, argv)?;
+            frame.registers[dst as usize] = value;
         }
         Instr::ExpandSpread { dst, src } => {
             let source = frame.registers[src as usize].clone_for_execution();

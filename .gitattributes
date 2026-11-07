@@ -5,3 +5,6 @@
 /examples/trusted/*/src/plugin-metadata.* text eol=lf
 /packages/plugin-cli/templates/** text eol=lf
 /fixtures/trusted-plugins/** text eol=lf
+
+# Preserve the reviewed patch digest, including blank unified-diff context lines.
+/tools/test262/evidence/date-native-fast-path-2026-11-06/upstream-5112.patch -text -whitespace

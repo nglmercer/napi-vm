@@ -2307,6 +2307,17 @@ impl Interpreter {
         this_val: Value,
         args: &[Value],
     ) -> Result<Value, VmErr> {
+        if matches!(this_val, Value::Date(_))
+            && let Value::Function(fd) = f
+            && fd.bound.is_none()
+            && let Some(callable) = fd.native
+            && args.len() <= crate::value::MAX_ARRAY_LEN
+        {
+            self.execution.check()?;
+            if let Some(result) = crate::builtins::date::fast_date_call(callable, &this_val, args) {
+                return Ok(result);
+            }
+        }
         if let Value::NativeFunction { callable, .. } = f {
             // Native functions have no realm of their own. They execute in
             // the current realm, while allocation and native-boundary state
@@ -3120,6 +3131,19 @@ impl Interpreter {
         if let Some(date) = self.construct_intrinsic_date(f, &args)? {
             return Ok(date);
         }
+        self.ctor_general(f, args)
+    }
+
+    /// Avoid allocating an argument vector when the intrinsic Date fast path
+    /// can construct directly from bytecode registers.
+    pub(crate) fn ctor_borrowed(&mut self, f: &Value, args: &[Value]) -> Result<Value, VmErr> {
+        if let Some(date) = self.construct_intrinsic_date(f, args)? {
+            return Ok(date);
+        }
+        self.ctor_general(f, args.to_vec())
+    }
+
+    fn ctor_general(&mut self, f: &Value, args: Vec<Value>) -> Result<Value, VmErr> {
         let caller = self.persistent_global.clone();
         // EvaluateNew checks IsConstructor in the evaluating caller's realm,
         // before entering the operand's realm or reading newTarget.prototype.
@@ -3167,8 +3191,11 @@ impl Interpreter {
             return Ok(None);
         };
         self.execution.check()?;
-        let _allocation_realm = super::realm::AllocationRealm::enter(Some(owner));
-        Ok(Some(Value::date_with_prototype(time, Some(prototype))))
+        Ok(Some(Value::date_with_prototype_in_realm(
+            time,
+            Some(prototype),
+            &owner,
+        )))
     }
 
     fn ctor_in_realm(&mut self, f: &Value, args: Vec<Value>) -> Result<Value, VmErr> {

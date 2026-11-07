@@ -55,6 +55,7 @@ commands:
         Time JavaScript snippet files through the worker (--harness adds Test262 harness).
 
 common options:
+  --profile NAME     original (default) or reviewed-5112 one-file overlay
   --corpus DIR       Test262 checkout (default .napi-vm/test262)
   --revision SHA     required corpus commit (default tools/test262/corpus.lock.json)
   --engine FILE      worker binary (default target/release/napi-vm-test262)

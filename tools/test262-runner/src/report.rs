@@ -16,6 +16,7 @@ const LIMITATION: &str =
 /// Run-level facts recorded beside the outcomes.
 pub struct Header {
     pub revision: String,
+    pub provenance: Json,
     pub selection: Vec<String>,
     pub groups: Vec<String>,
     pub engine_sha256: String,
@@ -56,6 +57,7 @@ pub fn document(header: &Header, results: Vec<Json>) -> Json {
         "domain": "ECMAScript",
         "suite": "Test262",
         "revision": header.revision,
+        "corpus_provenance": header.provenance,
         "selection": header.selection,
         "groups": header.groups,
         "engine_sha256": header.engine_sha256,
@@ -70,6 +72,14 @@ pub fn document(header: &Header, results: Vec<Json>) -> Json {
         "limitations": [LIMITATION],
         "results": results,
     })
+}
+
+/// Reports predating named profiles used the original pinned corpus.
+pub fn provenance(report: &Json) -> Json {
+    report
+        .get("corpus_provenance")
+        .cloned()
+        .unwrap_or_else(|| crate::corpus::provenance("original"))
 }
 
 pub fn write(path: &Path, document: &Json) -> Result<(), String> {
@@ -99,10 +109,22 @@ fn indexed(report: &Json) -> Result<BTreeMap<(String, String), Json>, String> {
         .as_array()
         .ok_or("report has no results")?
     {
-        let key = (
-            row["test"].as_str().unwrap_or_default().to_string(),
-            row["variant"].as_str().unwrap_or_default().to_string(),
-        );
+        let test = row["test"]
+            .as_str()
+            .filter(|value| !value.is_empty())
+            .ok_or("outcome has missing or empty test")?;
+        let variant = row["variant"]
+            .as_str()
+            .filter(|value| {
+                matches!(*value, "script" | "strict" | "module")
+                    || (*value == "metadata" && row["status"] == "harness_error")
+            })
+            .ok_or_else(|| format!("invalid variant for {test}"))?;
+        row["status"]
+            .as_str()
+            .filter(|value| STATUSES.contains(value))
+            .ok_or_else(|| format!("invalid status for {test} [{variant}]"))?;
+        let key = (test.to_string(), variant.to_string());
         if rows.insert(key.clone(), row.clone()).is_some() {
             return Err(format!("duplicate outcome: {} [{}]", key.0, key.1));
         }
@@ -111,6 +133,54 @@ fn indexed(report: &Json) -> Result<BTreeMap<(String, String), Json>, String> {
         return Err("outcome count does not match report total".into());
     }
     Ok(rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compare_rejects_invalid_outcomes() {
+        let report = |row| json!({"total": 1, "results": [row]});
+        let valid = json!({"test": "a.js", "variant": "script", "status": "pass"});
+        assert!(indexed(&report(valid.clone())).is_ok());
+        assert!(
+            indexed(&report(
+                json!({"test":"a.js", "variant":"metadata", "status":"harness_error"})
+            ))
+            .is_ok()
+        );
+        assert!(
+            indexed(&report(
+                json!({"test":"a.js", "variant":"metadata", "status":"pass"})
+            ))
+            .is_err()
+        );
+        for (field, value) in [
+            ("test", json!("")),
+            ("variant", json!("unknown")),
+            ("status", json!("passed")),
+            ("status", Json::Null),
+        ] {
+            let mut row = valid.clone();
+            row[field] = value;
+            assert!(indexed(&report(row)).is_err(), "accepted invalid {field}");
+        }
+        assert!(indexed(&json!({"total": 2, "results": [valid.clone(), valid]})).is_err());
+    }
+
+    #[test]
+    fn legacy_reports_are_original_and_reviewed_provenance_is_distinct() {
+        let legacy = json!({"revision": crate::corpus::BASE_REVISION});
+        let original = json!({"corpus_provenance": crate::corpus::provenance("original")});
+        let reviewed = json!({"corpus_provenance": crate::corpus::provenance("reviewed-5112")});
+        assert_eq!(provenance(&legacy), provenance(&original));
+        assert_ne!(provenance(&legacy), provenance(&reviewed));
+        assert_eq!(
+            provenance(&reviewed)["upstream_head"],
+            crate::corpus::REVIEW_HEAD
+        );
+    }
 }
 
 fn detail(row: &Json) -> String {
@@ -135,6 +205,9 @@ pub fn compare(options: &Options) -> Result<ExitCode, String> {
     let current = read(&paths[1])?;
     let subset = options.flag("subset");
     if !options.flag("allow-config-change") {
+        if provenance(&baseline) != provenance(&current) {
+            return Err("incompatible corpus provenance (pass --allow-config-change)".into());
+        }
         for field in ["revision", "worker_jobs", "timeout_seconds"] {
             if baseline[field] != current[field] {
                 return Err(format!(
@@ -226,6 +299,16 @@ pub fn summary(options: &Options) -> Result<ExitCode, String> {
         .as_array()
         .ok_or("report has no results")?;
     let counts = counts(results);
+    let provenance = provenance(&report);
+    println!(
+        "corpus profile: {}{}",
+        provenance["profile"].as_str().unwrap_or("unknown"),
+        if provenance["profile"] == "reviewed-5112" {
+            " (one-file overlay from https://github.com/tc39/test262/pull/5112, head 1f3d994e2658c2934a64781ffbb7a9b3782d3310)"
+        } else {
+            ""
+        }
+    );
     println!(
         "{}/{} passed ({}), revision {}, engine {}",
         counts["pass"],
@@ -329,6 +412,7 @@ pub fn summary(options: &Options) -> Result<ExitCode, String> {
             .collect();
         let document = json!({
             "revision": report["revision"], "engine_sha256": report["engine_sha256"],
+            "corpus_provenance": provenance,
             "total": results.len(), "counts": Json::Object(counts.clone()),
             "pass_percentage": report["pass_percentage"],
             "non_passing_phases": phases, "groups": by_area,

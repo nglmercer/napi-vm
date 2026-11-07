@@ -411,6 +411,34 @@ fn date_zero(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, V
     }))
 }
 
+/// Execute the side-effect-free portion of common Date calls without entering
+/// a native realm. Object conversion and incompatible receivers must use the
+/// ordinary call path, which provides their observable behavior and errors.
+pub(crate) fn fast_date_call(
+    callable: super::NativeFn,
+    this: &Value,
+    args: &[Value],
+) -> Option<Value> {
+    let Value::Date(slot) = this else { return None };
+    if std::ptr::fn_addr_eq(callable, date_zero as super::NativeFn) {
+        return Some(Value::Number(if slot.get().is_nan() {
+            f64::NAN
+        } else {
+            0.0
+        }));
+    }
+    if std::ptr::fn_addr_eq(callable, date_set_time as super::NativeFn) {
+        let ms = match args.first() {
+            Some(Value::Number(number)) => time_clip(*number),
+            None | Some(Value::Undefined) => f64::NAN,
+            _ => return None,
+        };
+        slot.set(ms);
+        return Some(Value::Number(ms));
+    }
+    None
+}
+
 fn date_set_time(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let Value::Date(slot) = &this else {
         return Err(VmErr::Msg(

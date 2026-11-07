@@ -126,6 +126,27 @@ fn numeric_binary_fast_path_preserves_special_values_and_coercion() {
 }
 
 #[test]
+fn parse_int_rounds_full_nondecimal_integer() {
+    let source = r#"
+        parseInt('10010101010001101100001101010010010100101110100001010110000101101101101011110001001010001010010001100', 2) === Number(1478362036826391439010917848204n) &&
+        parseInt('222302230303200323021230201330', 4) === Number(770875540325714044n) &&
+        parseInt('540252310343324425702442650727', 8) === Number(851888428081940793939153367n) &&
+        parseInt('88520cfd52b3e4a3a2be64b52b426c', 16) === Number(707816559485875088884942864028222060n) &&
+        parseInt('i013ueenb4ia4ci89lnfglkn9sv96u', 32) === Number(802875761958384223297190600079127592949490910n) &&
+        parseInt('0x20000000000001') === 9007199254740992 &&
+        parseInt('0x20000000000003') === 9007199254740996 &&
+        Object.is(parseInt('-000', 16), -0) &&
+        parseInt('1'.repeat(2000), 2) === Infinity &&
+        parseInt('-' + '1'.repeat(2000), 2) === -Infinity;
+    "#;
+    check(source, true);
+    assert!(matches!(
+        run_ast_with_modules(source, &[]),
+        Ok(Value::Bool(true))
+    ));
+}
+
+#[test]
 fn string_binary_fast_path_preserves_utf16_and_object_coercion() {
     let source = r#"
         let s = '\uD800', log = '';
@@ -212,6 +233,33 @@ fn date_construction_observes_coercion_and_new_target_prototype() {
         let other = Reflect.construct(Date, [43], bound);
         log === 'vpg' && Object.getPrototypeOf(date) === proto &&
           Object.getPrototypeOf(other) === proto && Date.prototype.getTime.call(date) === 42;
+    "#;
+    check(source, true);
+    assert!(matches!(
+        run_ast_with_modules(source, &[]),
+        Ok(Value::Bool(true))
+    ));
+}
+
+#[test]
+fn borrowed_construction_arguments_preserve_general_constructor_behavior() {
+    let source = r#"
+        let log = '';
+        let input = { valueOf() { log += 'v'; return 42; } };
+        let date = new Date(input);
+        let ctor = new Proxy(function(x) { this.value = x; }, {
+          construct(target, args, newTarget) {
+            log += 'p';
+            return Reflect.construct(target, args, newTarget);
+          }
+        });
+        let object = new ctor(17);
+        let threw = false;
+        try { new Date({ valueOf() { throw 'conversion'; } }); }
+        catch (error) { threw = error === 'conversion'; }
+        let plain = new Date(NaN);
+        log === 'vp' && date.getTime() === 42 && object.value === 17 &&
+          threw && Number.isNaN(plain.getTime());
     "#;
     check(source, true);
     assert!(matches!(

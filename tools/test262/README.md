@@ -20,6 +20,27 @@ target/release/test262 fetch              # clones the pinned revision into .nap
 Runs refuse a corpus at another revision or with modified files, so every
 report is reproducible.
 
+## Reviewed correction profile
+
+`--profile reviewed-5112` selects a separate corpus built from the original
+pin plus the corrected `block-decl-func-skip-arguments.js` from the reviewed,
+unmerged [Test262 PR #5112](https://github.com/tc39/test262/pull/5112).
+The original checkout and default corpus remain unchanged. This profile is
+an explicitly corrected Test262 corpus, not the unmodified upstream pin.
+
+```sh
+target/release/test262 fetch --profile reviewed-5112
+target/release/test262 run --profile reviewed-5112 --jobs 2 --timeout 10 \
+  --output reviewed-5112-full.json --checkpoint reviewed-5112.checkpoint
+```
+
+Ten seconds is the existing CI timeout. Reports and checkpoints identify
+the profile and correction provenance. Keep corrected-profile results
+separate from original-corpus results; a corrected-profile full pass does
+not establish a full pass of the contradictory original corpus.
+The manual Test262 CI workflow exposes the same profile choice and labels
+its job and artifacts with that choice. Scheduled CI retains `original`.
+
 ## Validation loop
 
 Use the cheapest step that answers the question.
@@ -76,6 +97,11 @@ report. Statuses: `pass`, `fail`, `skip`, `timeout`, `crash`, `harness_error`.
 
 ## Reference numbers
 
+- Reviewed profile `reviewed-5112-full-2026-11-06`: **102,992 / 102,992 pass**;
+  zero failures, skips, timeouts, crashes or harness errors at two workers
+  and ten seconds. This is the user-selected one-file correction profile,
+  with the original corpus preserved. Evidence:
+  [`evidence/reviewed-5112-full-2026-11-06/`](evidence/reviewed-5112-full-2026-11-06/).
 - Full run `full-interpreter-overhead-2026-10-30`: 102,975 / 102,992 pass;
   1 failure; 16 timeouts; no crashes or harness errors. Evidence:
   [`evidence/full-interpreter-overhead-2026-10-30/`](evidence/full-interpreter-overhead-2026-10-30/).

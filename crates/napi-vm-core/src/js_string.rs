@@ -41,7 +41,11 @@ impl JsString {
         String::from_utf16(self.units())
     }
     pub fn slice(&self, start: usize, end: usize) -> Self {
-        Self::from_units(self.units()[start..end].to_vec())
+        if start == 0 && end == self.len() {
+            self.clone()
+        } else {
+            Self::from_units(self.units()[start..end].to_vec())
+        }
     }
     pub fn concat(&self, other: &Self) -> Self {
         let mut units = Vec::with_capacity(self.len().saturating_add(other.len()));
@@ -346,6 +350,17 @@ impl<'de> serde::Deserialize<'de> for JsString {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn full_slice_shares_storage_but_mutations_remain_independent() {
+        let original = JsString::from_units(vec![b'a' as u16, 0xd800]);
+        let mut full = original.slice(0, original.len());
+        assert!(Arc::ptr_eq(&original.0, &full.0));
+        full.push('b');
+        assert_eq!(original.units(), &[b'a' as u16, 0xd800]);
+        assert_eq!(full.units(), &[b'a' as u16, 0xd800, b'b' as u16]);
+        assert_eq!(original.slice(1, 2).units(), &[0xd800]);
+    }
 
     #[test]
     fn property_key_encoding_borrows_ordinary_and_paired_strings() {
