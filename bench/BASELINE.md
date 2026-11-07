@@ -1,201 +1,35 @@
-# Performance Baseline
+# Local performance baseline (2026-11-06)
 
-Captured at commit `2a6a610` (clean tree), Linux x64, Node v26.4.0, Rust release profile (default, no LTO).
-Test suite: **535 pass / 0 fail**.
+The [machine-readable capture](baselines/2026-11-06/baseline.json) contains 41
+representative workloads: 16 Criterion VM/frontend/plugin cases, 4 Node binding
+cases, 2 language-service cases, 10 Rust scheduler cases, 4 Node async scheduler
+cases, and 5 trusted-process Node plugin cases. It records the samples, medians,
+median absolute deviations, environment, feature selections, binary hashes and
+git state. See [performance methodology](../docs/performance.md) for commands,
+interpretation, and coverage limits.
 
-## End-to-end through NAPI (`npm run bench`)
+| Workload | Median | Sample meaning |
+| --- | ---: | --- |
+| Lexer, large source | 4.84 ms/iteration | Median of 10 Criterion batch averages |
+| Fresh AST arithmetic | 9.25 ms/iteration | Median of 10 Criterion batch averages, including parse, VM setup and collection |
+| Warm bytecode monomorphic property access | 0.551 ms/iteration | Median of 10 Criterion batch averages |
+| Node binding arithmetic | 8.88 ms/call | Median of 20 calls, fresh VM and warmed source-template cache |
+| Language-service completion | 0.534 ms/call | Median of 20 calls on a cached document |
+| Rust scheduler, 1,000 VM timers | 6.18 ms/batch | Median of three independent run medians, each from 25 batches |
+| Persistent Node async, trivial call | 0.0104 ms/call | Median of three independent run medians, each from 500 calls |
+| Trusted Node plugin, 64-byte echo | 0.368 ms/call | Median of three independent run medians, each from 10 calls |
 
-Each workload measured ≥ 250 ms after 20 warmup iterations.
+These numbers are measurements on an AMD BC-250 with background activity and
+no CPU isolation; they are not a performance guarantee or a comparison against
+an optimized implementation. Criterion measures batch averages; scheduler and
+trusted-process samples above are run-level medians, not individual latencies.
+The tracked JSON includes individual Node binding samples and the derived
+Criterion samples; full Criterion source samples, run logs, and the explicitly
+loaded addon are in the local ignored `artifacts/performance/baseline-2026-11-06-verified/raw/`
+directory. The snapshot was taken from a dirty checkout at commit
+`6866a18ba5b624e12a960556125b8f101db6b5ba`; the user's pre-existing
+`packages/plugin-protocol/src/index.ts` edit was included in the emitted trusted
+plugin code. The complete start/end status and input hashes are in the JSON.
 
-| workload        | vm/op     | vm ops/s | native/op  | ratio |
-|-----------------|-----------|----------|------------|-------|
-| arithmetic_loop | 3.69 ms   | 271      | 5.02 µs    | 736x  |
-| recursion_fib   | 20.06 ms  | 50       | 102.19 µs  | 196x  |
-| array_chain     | 2.11 ms   | 473      | 16.24 µs   | 130x  |
-| string_ops      | 1.13 ms   | 888      | 69.38 µs   | 16x   |
-| class_methods   | 2.48 ms   | 403      | 40.17 µs   | 62x   |
-| closures        | 5.65 ms   | 177      | 32.63 µs   | 173x  |
-| json_roundtrip  | 1.58 ms   | 635      | 164.31 µs  | 10x   |
-
-ratio = vm time / native time (higher = slower than the host engine).
-
-## Criterion microbenchmarks (`npm run bench:rust`)
-
-Full pipeline (lex → parse → eval) unless noted; 100 samples each.
-
-| benchmark                 | time (estimate)          |
-|---------------------------|--------------------------|
-| run/arithmetic_loop       | 3.78 ms (3.75–3.81)      |
-| run/recursion_fib         | 18.38 ms (18.19–18.61)   |
-| run/array_chain           | 2.02 ms (2.00–2.04)      |
-| run/string_ops            | 1.11 ms (1.10–1.13)      |
-| run/class_methods         | 2.55 ms (2.52–2.60)      |
-| run/closures              | 5.77 ms (5.74–5.82)      |
-| run/json_roundtrip        | 1.67 ms (1.65–1.70)      |
-| frontend/lex_big_source   | 2.66 ms (2.60–2.74)      |
-| frontend/parse_big_source | 5.33 ms (5.27–5.39)      |
-
-Criterion also persists these as the saved baseline in `target/criterion/`,
-so subsequent `cargo bench` runs report % change automatically.
-
-## Observations
-
-- Call-heavy workloads (fib, closures, class_methods) carry the largest
-  overhead: every call allocates an environment (`Rc<RefCell<Environment>>` +
-  `HashMap`) and eagerly builds an `arguments` object.
-- Parsing is a significant share of end-to-end time: `parse_big_source`
-  (5.3 ms) exceeds `lex_big_source` (2.7 ms) ~2:1, and `bench.js` re-parses on
-  every `runCode` iteration.
-- Operators are stored as `String`s in the AST and string-matched on every
-  evaluation; control-flow signals (`break`/`continue`) allocate `String`s.
-
-## Results after optimization (commit `7f69614`)
-
-Same machine and methodology, after four optimization phases (each a
-revertable commit: `760c65e` release profile + lazy `arguments`, `6d66c3a`
-typed control flow + operator enums, `6eddcdf` dedicated JSON parser +
-cheaper string concat, `7f69614` hybrid small-vec/hash-map env frames).
-Test suite: **535 pass / 0 fail**.
-
-### End-to-end through NAPI (`npm run bench`)
-
-| workload        | before   | after      | delta | ratio before | ratio after |
-|-----------------|----------|------------|-------|--------------|-------------|
-| arithmetic_loop | 3.69 ms  | 2.86 ms    | −22%  | 736x         | 474x        |
-| recursion_fib   | 20.06 ms | 8.81 ms    | −56%  | 196x         | 69x         |
-| array_chain     | 2.11 ms  | 1.04 ms    | −51%  | 130x         | 49x         |
-| string_ops      | 1.13 ms  | 1.06 ms    | −6%   | 16x          | 13x         |
-| class_methods   | 2.48 ms  | 1.63 ms    | −34%  | 62x          | 31x         |
-| closures        | 5.65 ms  | 3.09 ms    | −45%  | 173x         | 83x         |
-| json_roundtrip  | 1.58 ms  | 671.14 µs  | −58%  | 10x          | 3x          |
-
-### Criterion microbenchmarks (`npm run bench:rust`)
-
-| benchmark                 | before                | after                 | delta |
-|---------------------------|-----------------------|-----------------------|-------|
-| run/arithmetic_loop       | 3.78 ms               | 3.95 ms               | +4% (noise; lex canary +1%) |
-| run/recursion_fib         | 18.38 ms              | 8.56 ms               | −53%  |
-| run/array_chain           | 2.02 ms               | 1.08 ms               | −47%  |
-| run/string_ops            | 1.11 ms               | 1.04 ms               | −6%   |
-| run/class_methods         | 2.55 ms               | 1.53 ms               | −40%  |
-| run/closures              | 5.77 ms               | 3.72 ms               | −36%  |
-| run/json_roundtrip        | 1.67 ms               | 592.74 µs             | −65%  |
-| frontend/lex_big_source   | 2.66 ms               | 2.69 ms               | +1%   |
-| frontend/parse_big_source | 5.33 ms               | 5.19 ms               | −3%   |
-
-Run-to-run drift on this machine is ±6–8% on the JS bench (Criterion is
-tighter); `frontend/lex_big_source` exercises untouched code and serves as a
-noise canary. Levers evaluated and deferred as not worth their invasiveness
-for this workload profile: O(1) property maps for objects (benchmark objects
-have ≤6 props; the linear scan is cache-friendly and a per-object HashMap
-would tax creation-heavy code), string-literal interning (`Value::String`
-to `Rc<str>`), and RefCell-traffic reduction.
-
-## Results after borrowed-key lookups + hoist skip (uncommitted worktree)
-
-Same machine and methodology (`npm run bench`, Node v26.8.2, Linux x64).
-Changes, all behavior-preserving: `&str`-keyed property reads/writes end to
-end (`prop_str`, `get_prop_value_str`, `assign_member_str`, static-member fast
-paths in `eval_expr`, internal `"prototype"`/`"length"`/`"name"`/`"next"` call
-sites), per-call hoist skip via a `needs_hoisting` flag computed once at
-function creation, allocation-free `array_index`, ASCII fast paths for string
-length/char access, and removal of double-clones on property reads plus
-upfront receiver clones in prototype-chain walks. Test suites:
-`cargo test --release` **298 pass / 0 fail** (incl. 3 new `array_index`/string
-unit tests), `bun test` **1497 pass / 1 environmental fail** (rdev
-`t.skip()` unsupported under Bun, pre-existing), `node --test` **17/17**.
-
-### End-to-end through NAPI (`npm run bench`)
-
-| workload        | before   | after    | delta |
-|-----------------|----------|----------|-------|
-| arithmetic_loop | 3.64 ms  | 3.66 ms  | +1% (control path untouched; drift) |
-| recursion_fib   | 10.93 ms | 10.65 ms | −3%   |
-| array_chain     | 1.73 ms  | 1.60 ms  | −8%   |
-| string_ops      | 1.57 ms  | 1.44 ms  | −8%   |
-| class_methods   | 3.53 ms  | 3.09 ms  | −12%  |
-| closures        | 4.86 ms  | 4.58 ms  | −6%   |
-| json_roundtrip  | 1.25 ms  | 1.17 ms  | −6%   |
-
-Cross-checked with an interleaved old/new probe (eval-only, setup excluded,
-2×2 runs against HEAD): array −9%, string −6%, class −8%, json −3%, fib −2%,
-closures −1%, prop-read micro −21%, method-call micro −13% (untouched
-arithmetic/parse controls read +0.4%/±1% in the well-balanced round,
-confirming the gains exceed drift). Micro win
-breakdown: static member key alloc elimination (class/method workloads),
-hoist-walk skip (call-heavy workloads), receiver/deref clone removal
-(member-heavy workloads).
-
-Deferred again as not worth it: sharing/caching the builtins realm across
-`runCode` calls (breaks fresh-realm isolation — guest `Array.prototype`
-mutation would leak), `Rc<str>` string interning, prototype/inline caches
-(invalidation surface), and frontend work (parse is 4–12 µs of millisecond
-workloads).
-
-## Results after runtime-upgrade merge + lazy shapes (commit `de472ce`)
-
-Same machine and methodology (Node v26.8.2, Linux x64, Rust release
-profile). Before = `f6a1f57` (phase H tip: bytecode VM + heap/GC, without
-the remote hot-path opts); after = `e8d025a` (merge of phases A–J +
-cross-cutting with remote `006132b` borrowed-key lookups + hoist skip)
-plus `de472ce` (two-strike lazy shape assignment, keeping object creation
-cheap). The delta therefore measures phases I (shapes/slots/inline caches),
-J (tier-up seam), cross-cutting (RuntimeBuilder/observability), and the
-remote hot-path opts combined. Phases A–H are roughly perf-neutral on these
-workloads: the before-column below matches the previous section's
-before-column within run-to-run drift.
-Test suites: `cargo test --lib` **325 pass / 0 fail**, `--features
-node-api-host` **358 pass / 0 fail**, `node --test` **17/17**, `bun test`
-1446 pass / 15 pre-existing environmental fails (browser-build artifacts,
-rdev-node setup, timing-sensitive promise ordering — verified identical
-with and without `de472ce` via stash).
-
-### End-to-end through NAPI (`npm run bench`)
-
-| workload        | before   | after    | delta |
-|-----------------|----------|----------|-------|
-| arithmetic_loop | 3.97 ms  | 3.83 ms  | −4%   |
-| recursion_fib   | 10.96 ms | 10.60 ms | −3%   |
-| array_chain     | 1.73 ms  | 1.63 ms  | −6%   |
-| string_ops      | 1.57 ms  | 1.53 ms  | −3%   |
-| class_methods   | 3.53 ms  | 3.18 ms  | −10%  |
-| closures        | 4.98 ms  | 4.67 ms  | −6%   |
-| json_roundtrip  | 1.26 ms  | 1.26 ms  | flat  |
-
-### Criterion microbenchmarks (paired back-to-back runs)
-
-Full-suite runs on this box showed load/order artifacts (late-running
-benches inflated when the machine was busy), so each bench below was run
-filtered and back-to-back on both trees, alternating before/after; noisy
-cases were re-run until confidence intervals stabilized.
-`frontend/lex_big_source` exercises untouched code and serves as the noise
-canary (+3% ≈ drift).
-
-| benchmark                   | before   | after    | delta                    |
-|-----------------------------|----------|----------|--------------------------|
-| run/arithmetic_loop         | 3.91 ms  | 3.91 ms  | flat                     |
-| run/recursion_fib           | —        | —        | noisy, no claim (320–655 µs run-to-run on the same tree; bench.js fib −3% is the stable read) |
-| run/array_chain             | 1.80 ms  | 1.61 ms  | −11%                     |
-| run/string_ops              | 1.46 ms  | 1.42 ms  | −3% (~flat)              |
-| run/closures                | 5.69 ms  | 4.84 ms  | −15%                     |
-| run/json_roundtrip          | 1.21 ms  | 1.24 ms  | +2% (flat)               |
-| frontend/lex_big_source     | 3.71 ms  | 3.81 ms  | +3% (canary ≈ drift)     |
-| frontend/parse_big_source   | 6.77 ms  | 6.73 ms  | flat                     |
-| warm/class_methods_reused_vm| 3.03 ms  | 2.73 ms  | −10%                     |
-| plugin_call/legacy_wrapper_eval | 164 µs | 160 µs  | flat                     |
-| plugin_call/direct_call_json| 57 µs   | 56 µs    | flat                     |
-
-### New `tiers` steady-state suite (after only, first baselines)
-
-| benchmark          | time (estimate) |
-|--------------------|-----------------|
-| tiers/prop_mono_hot| 1.12 ms         |
-| tiers/prop_mega_hot| 2.03 ms         |
-| tiers/call_tiny_hot| 2.07 ms         |
-| tiers/shape_churn  | 1.08 ms         |
-| tiers/gc_collect   | 877 µs          |
-
-Headline: property/call-heavy paths −10..−15% (shapes + inline caches +
-borrowed-key lookups); everything else flat; no regressions. Gains from the
-remote opts vs phase I were not bisected further — the two landed together
-in the merge and both target the same member-access paths.
+The [previous baseline](history/BASELINE-legacy.md) is retained as historical
+material and uses a different methodology.

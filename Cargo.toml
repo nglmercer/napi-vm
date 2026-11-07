@@ -73,6 +73,11 @@ name = "vm"
 harness = false
 
 [[example]]
+name = "scheduler_bench"
+path = "examples/scheduler_bench.rs"
+required-features = ["runtime"]
+
+[[example]]
 name = "rust-native-addon"
 path = "examples/rust_native_addon.rs"
 required-features = ["node-api-host"]

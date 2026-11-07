@@ -1,9 +1,9 @@
 # Table generators
 
-Offline Rust generators for the Unicode, CLDR and IANA tables committed under
-`crates/napi-vm-core`. They are not part of validation or the build; run them
-only when a pinned upstream release changes. Each one reproduces the committed
-output exactly, so a regeneration that changes nothing confirms the pins.
+Rust generators for the Unicode, CLDR and IANA tables committed under
+`crates/napi-vm-core`. They are not run by the normal build. Some download
+pinned upstream data; others require input files supplied locally. Review
+regenerated output and source hashes before updating the committed tables.
 
 | Binary | Reads | Writes | Check after running |
 | --- | --- | --- | --- |
@@ -29,12 +29,7 @@ because the committed files are rustfmt output. `number-data` compresses each
 locale record with zlib-rs at level 9 and `mtime` 0; the committed blob is
 byte-identical to that output.
 
-## Verified in this change
-
-- `tz-data`, `number-data`, `emoji-tables` and `locale-data` reproduce the
-  committed outputs exactly, except for the header comment that now names the
-  Rust tool.
-- `rgi-check` exits 0: every set matches its test262 list exactly.
+## Interpreting the emoji check
 
 `rgi-check` replaces the Python checker, whose set definitions were wrong: its
 `Basic_Emoji` omitted the skin-tone modifiers and the other text-default

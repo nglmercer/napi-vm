@@ -1,0 +1,968 @@
+{
+  "schema": 1,
+  "metadata": {
+    "utc": "2026-11-07T04:22:30.220704+00:00",
+    "git_head": "6866a18ba5b624e12a960556125b8f101db6b5ba",
+    "git_status_porcelain_start": "M Cargo.toml\n M README.md\n M bench/run-scheduler.sh\n M benches/vm.rs\n M contracts/trusted-plugins/schema-profile.md\n M crates/napi-vm-plugin-conformance/README.md\n M docs/api.md\n M docs/audit-2026-10-23.md\n M docs/crate-architecture.md\n M docs/destructuring-assignment-checkpoint.md\n M docs/destructuring-declarations-checkpoint.md\n M docs/destructuring-name-inference-checkpoint.md\n M docs/destructuring-validation-checkpoint.md\n M docs/development.md\n M docs/editor.md\n M docs/engine-execution-validation.md\n M docs/getting-started.md\n M docs/iterator-compound-checkpoint.md\n M docs/json-host-conversion-depth.md\n M docs/native-addon-loader-plan.md\n M docs/next-implementations.md\n M docs/next-steps.md\n M docs/node-addon-runtime-plan.md\n M docs/node-addon-snapshot-reference-order.md\n M docs/optional-runtime.md\n M docs/plain-assignment-checkpoint.md\n M docs/plugins.md\n M docs/pr7-verification.md\n M docs/roadmap.md\n M docs/runtime-improvements.md\n M docs/runtime-plan.md\n M docs/runtime-protocol.md\n M docs/safety.md\n M docs/scheduler-benchmarks.md\n M docs/test262-full-pass-plan.md\n M docs/test262-full-pass-progress.md\n M docs/test262-history.md\n M docs/trusted-plugins/README.md\n M docs/trusted-plugins/compatibility.md\n M docs/trusted-plugins/contracts.md\n M docs/trusted-plugins/development.md\n M docs/trusted-plugins/protocol.md\n M docs/utf16-extraction-validation.md\n M examples/plugins/rust-napi-plugin/README.md\n M examples/scheduler_bench.rs\n M packages/plugin-protocol/src/index.ts\n M packages/plugin-sdk/README.md\n M playground/README.md\n M tools/ci/README.md\n M tools/generators/README.md\n M tools/test262/README.md\n M zed-extension/README.md\n?? bench/performance.py\n?? bench/performance/node.cjs\n?? docs/README.md\n?? docs/native-addons.md\n?? docs/performance.md\n?? tools/docs/check.mjs",
+    "git_status_porcelain_end": "M Cargo.toml\n M README.md\n M bench/run-scheduler.sh\n M benches/vm.rs\n M contracts/trusted-plugins/schema-profile.md\n M crates/napi-vm-plugin-conformance/README.md\n M docs/api.md\n M docs/audit-2026-10-23.md\n M docs/crate-architecture.md\n M docs/destructuring-assignment-checkpoint.md\n M docs/destructuring-declarations-checkpoint.md\n M docs/destructuring-name-inference-checkpoint.md\n M docs/destructuring-validation-checkpoint.md\n M docs/development.md\n M docs/editor.md\n M docs/engine-execution-validation.md\n M docs/getting-started.md\n M docs/iterator-compound-checkpoint.md\n M docs/json-host-conversion-depth.md\n M docs/native-addon-loader-plan.md\n M docs/next-implementations.md\n M docs/next-steps.md\n M docs/node-addon-runtime-plan.md\n M docs/node-addon-snapshot-reference-order.md\n M docs/optional-runtime.md\n M docs/plain-assignment-checkpoint.md\n M docs/plugins.md\n M docs/pr7-verification.md\n M docs/roadmap.md\n M docs/runtime-improvements.md\n M docs/runtime-plan.md\n M docs/runtime-protocol.md\n M docs/safety.md\n M docs/scheduler-benchmarks.md\n M docs/test262-full-pass-plan.md\n M docs/test262-full-pass-progress.md\n M docs/test262-history.md\n M docs/trusted-plugins/README.md\n M docs/trusted-plugins/compatibility.md\n M docs/trusted-plugins/contracts.md\n M docs/trusted-plugins/development.md\n M docs/trusted-plugins/protocol.md\n M docs/utf16-extraction-validation.md\n M examples/plugins/rust-napi-plugin/README.md\n M examples/scheduler_bench.rs\n M packages/plugin-protocol/src/index.ts\n M packages/plugin-sdk/README.md\n M playground/README.md\n M tools/ci/README.md\n M tools/generators/README.md\n M tools/test262/README.md\n M zed-extension/README.md\n?? bench/performance.py\n?? bench/performance/node.cjs\n?? docs/README.md\n?? docs/native-addons.md\n?? docs/performance.md\n?? tools/docs/check.mjs",
+    "source_sha256_start": "ad2b211128cca25547482748f82d16b387f377808e56101178142bdb76656a3e",
+    "source_sha256_end": "ad2b211128cca25547482748f82d16b387f377808e56101178142bdb76656a3e",
+    "build_inputs_sha256_start": "51a48d68875f0870afda9af2720cf1eaec40387150e6848e38a91efb782f0c71",
+    "build_inputs_sha256_end": "51a48d68875f0870afda9af2720cf1eaec40387150e6848e38a91efb782f0c71",
+    "platform": "Linux-7.3.0-4-cachyos-x86_64-with-glibc2.44",
+    "machine": "x86_64",
+    "cpu": "AMD BC-250",
+    "cpu_count": 12,
+    "load_average_at_end": [
+      6.08251953125,
+      5.1240234375,
+      4.72802734375
+    ],
+    "build_environment": {},
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)\nbinary: rustc\ncommit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4\ncommit-date: 2026-09-28\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.0\nLLVM version: 23.1.1",
+    "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+    "node": "v26.12.1",
+    "features": {
+      "library": "default (napi)",
+      "criterion": "default (napi), plus core test-hooks dev feature",
+      "scheduler_rust": "default plus runtime",
+      "trusted_process": "emitted TypeScript on Node"
+    },
+    "profile": "release / Cargo bench profile",
+    "criterion": {
+      "samples": 10,
+      "warmup_seconds": 0.2,
+      "measurement_seconds": 0.5
+    },
+    "backend_artifacts": {
+      "criterion_sha256": "d5d5ace904f182b0ccfda180bfacee1057c14af02e71809c0687937fb753419b",
+      "trusted_emitted_js_sha256": "3156a1c71019368132786c54a42604e84bbf1d626bc48e93efda9b8512e8f79b",
+      "addon_path": "/home/meme/Documentos/Default Project/node-vm/artifacts/performance/baseline-2026-11-06-verified/raw/napi-vm.node",
+      "addon_sha256": "6ad68958cecf1f34a9c25ff1cc85d27e341ce1f59580428db8b3235642e52e06",
+      "built_library_sha256_at_build": "6ad68958cecf1f34a9c25ff1cc85d27e341ce1f59580428db8b3235642e52e06",
+      "scheduler_sha256": "acf4f4f359e615b7fd4d1cefcdb47654075731c9ba3d1e08c06f60aef1fa2a3b",
+      "lsp_sha256": "83ea3f7404ea2c04d812385e2b78fdc924126b1453f2a1d4e0c5f6fd26ace440"
+    },
+    "limitations": [
+      "Finite representative workloads, not full code coverage.",
+      "No CPU affinity or isolation; compare on the same quiet machine.",
+      "Criterion samples are per-iteration batch averages. Scheduler and trusted samples are independent whole-run summary medians, not per-call samples.",
+      "Trusted process measurement uses the current emitted TypeScript sources, including any dirty edits.",
+      "LanguageService cases use the NAPI binding; LSP transport is built and fingerprinted but not measured.",
+      "No filesystem/network runtime, wasm, Bun, or native trusted-process workload measured."
+    ]
+  },
+  "results": [
+    {
+      "name": "node_binding/arithmetic",
+      "unit": "ns/call",
+      "samples": [
+        8592401,
+        9664423,
+        8972908,
+        8558379,
+        9029457,
+        8618726,
+        9036496,
+        8850087,
+        8534047,
+        8412469,
+        8546337,
+        8534688,
+        8905780,
+        9116236,
+        8704493,
+        8965985,
+        8903105,
+        8634616,
+        9028493,
+        9006639
+      ],
+      "backend": "runCode: fresh VM with warmed source-template cache via explicitly loaded NAPI addon",
+      "summary": {
+        "median": 8876596.0,
+        "mad": 205871.5,
+        "min": 8412469,
+        "max": 9664423,
+        "count": 20
+      }
+    },
+    {
+      "name": "node_binding/fibonacci",
+      "unit": "ns/call",
+      "samples": [
+        3475698,
+        3565303,
+        3363857,
+        3711370,
+        4844826,
+        3522848,
+        3714988,
+        3504068,
+        3497295,
+        3565681,
+        3761443,
+        3788020,
+        3907983,
+        3481199,
+        3468072,
+        3862053,
+        3356284,
+        3277436,
+        4088199,
+        3800704
+      ],
+      "backend": "runCode: fresh VM with warmed source-template cache via explicitly loaded NAPI addon",
+      "summary": {
+        "median": 3565492.0,
+        "mad": 172723.5,
+        "min": 3277436,
+        "max": 4844826,
+        "count": 20
+      }
+    },
+    {
+      "name": "node_binding/array",
+      "unit": "ns/call",
+      "samples": [
+        14264009,
+        13351726,
+        13434777,
+        13225492,
+        13172098,
+        13477624,
+        13132325,
+        13293079,
+        13381707,
+        14561048,
+        13496543,
+        13410787,
+        14707692,
+        13629657,
+        14172948,
+        13894831,
+        13677802,
+        14191754,
+        13574693,
+        13577629
+      ],
+      "backend": "runCode: fresh VM with warmed source-template cache via explicitly loaded NAPI addon",
+      "summary": {
+        "median": 13535618.0,
+        "mad": 213215.5,
+        "min": 13132325,
+        "max": 14707692,
+        "count": 20
+      }
+    },
+    {
+      "name": "node_binding/json",
+      "unit": "ns/call",
+      "samples": [
+        9044804,
+        8867108,
+        9025766,
+        9048715,
+        8750492,
+        8963801,
+        9106737,
+        8942874,
+        9143658,
+        8843051,
+        9057172,
+        8966232,
+        9123569,
+        8911672,
+        9773379,
+        9505867,
+        9094234,
+        8875233,
+        9228716,
+        9166919
+      ],
+      "backend": "runCode: fresh VM with warmed source-template cache via explicitly loaded NAPI addon",
+      "summary": {
+        "median": 9046759.5,
+        "mad": 100392.0,
+        "min": 8750492,
+        "max": 9773379,
+        "count": 20
+      }
+    },
+    {
+      "name": "language_service/completion",
+      "unit": "ns/call",
+      "samples": [
+        549023,
+        528079,
+        540185,
+        553380,
+        569922,
+        535370,
+        531458,
+        528993,
+        541655,
+        522407,
+        527937,
+        526525,
+        594892,
+        577881,
+        537460,
+        541557,
+        526879,
+        531520,
+        533050,
+        526921
+      ],
+      "backend": "NAPI LanguageService; cached document completion",
+      "summary": {
+        "median": 534210.0,
+        "mad": 7310.0,
+        "min": 522407,
+        "max": 594892,
+        "count": 20
+      }
+    },
+    {
+      "name": "language_service/diagnostics_update",
+      "unit": "ns/call",
+      "samples": [
+        12194,
+        11049,
+        10249,
+        13006,
+        14527,
+        10210,
+        9657,
+        9267,
+        12646,
+        9146,
+        9831,
+        9336,
+        9209,
+        9532,
+        9204,
+        8940,
+        11992,
+        9445,
+        9303,
+        9261
+      ],
+      "backend": "NAPI LanguageService; update plus diagnostics",
+      "summary": {
+        "median": 9594.5,
+        "mad": 419.5,
+        "min": 8940,
+        "max": 14527,
+        "count": 20
+      }
+    },
+    {
+      "name": "criterion/frontend/lex_big_source",
+      "unit": "ns/iteration",
+      "samples": [
+        5125615.5,
+        4552841.0,
+        4610945.333333333,
+        4841687.125,
+        4562230.4,
+        4867405.5,
+        4620447.0,
+        5271295.4375,
+        5273737.611111111,
+        4834173.55
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 4837930.3375,
+        "mad": 251342.47083333367,
+        "min": 4552841.0,
+        "max": 5273737.611111111,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/frontend/parse_big_source",
+      "unit": "ns/iteration",
+      "samples": [
+        9970556.0,
+        10544127.0,
+        10179663.666666666,
+        10396954.25,
+        10303538.4,
+        10438139.5,
+        10644835.142857144,
+        10392701.875,
+        10267539.888888888,
+        10350136.4
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 10371419.1375,
+        "mad": 85879.99305555504,
+        "min": 9970556.0,
+        "max": 10644835.142857144,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/plugin_call/direct_call_json",
+      "unit": "ns/iteration",
+      "samples": [
+        139490.4193548387,
+        160735.50806451612,
+        154125.37096774194,
+        152808.65725806452,
+        149826.6677419355,
+        147555.15322580645,
+        148357.70276497694,
+        141786.49798387097,
+        144710.47849462365,
+        146064.00967741935
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 147956.4279953917,
+        "mad": 4049.089381720434,
+        "min": 139490.4193548387,
+        "max": 160735.50806451612,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/plugin_call/legacy_wrapper_eval",
+      "unit": "ns/iteration",
+      "samples": [
+        2378340.75,
+        2285581.0,
+        2268332.1666666665,
+        2514851.3125,
+        2400786.3,
+        2371486.4166666665,
+        2289273.0714285714,
+        2361625.03125,
+        2428203.527777778,
+        2407227.475
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 2374913.583333333,
+        "mad": 42801.918055556016,
+        "min": 2268332.1666666665,
+        "max": 2514851.3125,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/run/arithmetic_loop",
+      "unit": "ns/iteration",
+      "samples": [
+        9080149.0,
+        9195153.0,
+        9283575.666666666,
+        9326197.5,
+        9209368.2,
+        9370233.5,
+        9223022.857142856,
+        9205962.875,
+        9601993.666666666,
+        9641431.5
+      ],
+      "backend": "AST fresh",
+      "summary": {
+        "median": 9253299.261904761,
+        "mad": 65522.25,
+        "min": 9080149.0,
+        "max": 9641431.5,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/run/array_chain",
+      "unit": "ns/iteration",
+      "samples": [
+        13139611.0,
+        13689276.5,
+        13473890.333333334,
+        13295921.25,
+        13257648.2,
+        13428391.0,
+        13301753.142857144,
+        13375300.125,
+        13525086.0,
+        13669197.5
+      ],
+      "backend": "AST fresh",
+      "summary": {
+        "median": 13401845.5625,
+        "mad": 114582.375,
+        "min": 13139611.0,
+        "max": 13689276.5,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/run/closures",
+      "unit": "ns/iteration",
+      "samples": [
+        13355299.0,
+        12513693.5,
+        12618603.666666666,
+        12738422.75,
+        12515568.6,
+        12806973.333333334,
+        13056809.714285715,
+        12973460.375,
+        12645975.222222222,
+        12697758.4
+      ],
+      "backend": "AST fresh",
+      "summary": {
+        "median": 12718090.575,
+        "mad": 151004.44166666642,
+        "min": 12513693.5,
+        "max": 13355299.0,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/run/json_roundtrip",
+      "unit": "ns/iteration",
+      "samples": [
+        9926476.0,
+        10239484.0,
+        10081889.333333334,
+        10120484.0,
+        9889994.6,
+        11285466.666666666,
+        9880958.0,
+        9649626.125,
+        9735788.555555556,
+        9971965.5
+      ],
+      "backend": "AST fresh",
+      "summary": {
+        "median": 9949220.75,
+        "mad": 151965.91666666698,
+        "min": 9649626.125,
+        "max": 11285466.666666666,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/run/recursion_fib",
+      "unit": "ns/iteration",
+      "samples": [
+        4315423.333333333,
+        4206834.0,
+        4108495.0,
+        4231011.583333333,
+        4178422.066666667,
+        4178035.0,
+        4166765.4285714286,
+        4113508.25,
+        4148107.3703703703,
+        4429989.066666666
+      ],
+      "backend": "AST fresh",
+      "summary": {
+        "median": 4178228.533333333,
+        "mad": 41452.10648148134,
+        "min": 4108495.0,
+        "max": 4429989.066666666,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/run/string_ops",
+      "unit": "ns/iteration",
+      "samples": [
+        11009769.0,
+        10748270.5,
+        11221946.666666666,
+        10948006.0,
+        11031152.6,
+        11027662.166666666,
+        10943410.714285715,
+        10964139.625,
+        11996123.666666666,
+        11232166.7
+      ],
+      "backend": "AST fresh",
+      "summary": {
+        "median": 11018715.583333332,
+        "mad": 73007.22619047482,
+        "min": 10748270.5,
+        "max": 11996123.666666666,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/tiers/call_tiny_hot",
+      "unit": "ns/iteration",
+      "samples": [
+        1365785.0,
+        1423679.7857142857,
+        1368271.142857143,
+        1393584.6785714286,
+        1372298.0857142857,
+        1408557.4047619049,
+        1382377.9387755103,
+        1390845.2857142857,
+        1417995.0476190476,
+        1418660.142857143
+      ],
+      "backend": "bytecode asserted",
+      "summary": {
+        "median": 1392214.9821428573,
+        "mad": 21930.367857142934,
+        "min": 1365785.0,
+        "max": 1423679.7857142857,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/tiers/gc_collect",
+      "unit": "ns/iteration",
+      "samples": [
+        4053199.6666666665,
+        4044144.3333333335,
+        3979134.3333333335,
+        4012833.5833333335,
+        4108454.533333333,
+        4103180.777777778,
+        3943087.380952381,
+        3952323.4583333335,
+        4063154.0,
+        4050528.033333333
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 4047336.1833333336,
+        "mad": 45173.59722222225,
+        "min": 3943087.380952381,
+        "max": 4108454.533333333,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/tiers/prop_mega_hot",
+      "unit": "ns/iteration",
+      "samples": [
+        1758120.8333333333,
+        1775143.8333333333,
+        1815166.388888889,
+        1813132.125,
+        1962882.7666666666,
+        1833205.861111111,
+        1851337.5238095238,
+        1826655.9375,
+        1832861.2222222222,
+        2337982.216666667
+      ],
+      "backend": "bytecode asserted",
+      "summary": {
+        "median": 1829758.579861111,
+        "mad": 19102.699404761894,
+        "min": 1758120.8333333333,
+        "max": 2337982.216666667,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/tiers/prop_mono_hot",
+      "unit": "ns/iteration",
+      "samples": [
+        550987.4117647059,
+        574207.5882352941,
+        572707.9411764706,
+        540387.3088235294,
+        550902.9176470588,
+        549080.4117647059,
+        551977.7310924369,
+        553985.8897058824,
+        552779.0653594771,
+        540187.2411764705
+      ],
+      "backend": "bytecode asserted",
+      "summary": {
+        "median": 551482.5714285714,
+        "mad": 2452.7389705882524,
+        "min": 540187.2411764705,
+        "max": 574207.5882352941,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/tiers/shape_churn",
+      "unit": "ns/iteration",
+      "samples": [
+        1511912.2857142857,
+        1457661.4285714286,
+        1421030.0,
+        1432205.75,
+        1423401.0285714285,
+        1478721.8333333333,
+        1436275.469387755,
+        1511691.3214285714,
+        1413360.365079365,
+        1416613.6714285715
+      ],
+      "backend": "bytecode asserted",
+      "summary": {
+        "median": 1434240.6096938774,
+        "mad": 19253.591439909185,
+        "min": 1413360.365079365,
+        "max": 1511912.2857142857,
+        "count": 10
+      }
+    },
+    {
+      "name": "criterion/warm/class_methods_reused_vm",
+      "unit": "ns/iteration",
+      "samples": [
+        12217771.0,
+        11367257.5,
+        11625019.666666666,
+        11801383.0,
+        11782150.6,
+        11784759.833333334,
+        11714349.285714285,
+        11797009.125,
+        11824930.555555556,
+        11600090.7
+      ],
+      "backend": "see suite source",
+      "summary": {
+        "median": 11783455.216666667,
+        "mad": 55290.63492063526,
+        "min": 11367257.5,
+        "max": 12217771.0,
+        "count": 10
+      }
+    },
+    {
+      "name": "scheduler-rust/timers/100",
+      "unit": "ns/batch",
+      "samples": [
+        18967.0,
+        18812.0,
+        18925.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 18925.0,
+        "mad": 42.0,
+        "min": 18812.0,
+        "max": 18967.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/cancel/100",
+      "unit": "ns/batch",
+      "samples": [
+        15666.0,
+        15700.0,
+        15796.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 15700.0,
+        "mad": 34.0,
+        "min": 15666.0,
+        "max": 15796.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/timers/1000",
+      "unit": "ns/batch",
+      "samples": [
+        369332.0,
+        365557.0,
+        363642.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 365557.0,
+        "mad": 1915.0,
+        "min": 363642.0,
+        "max": 369332.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/cancel/1000",
+      "unit": "ns/batch",
+      "samples": [
+        360287.0,
+        360486.0,
+        362162.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 360486.0,
+        "mad": 199.0,
+        "min": 360287.0,
+        "max": 362162.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/timers/10000",
+      "unit": "ns/batch",
+      "samples": [
+        5641373.0,
+        5411060.0,
+        5190042.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 5411060.0,
+        "mad": 221018.0,
+        "min": 5190042.0,
+        "max": 5641373.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/cancel/10000",
+      "unit": "ns/batch",
+      "samples": [
+        5223064.0,
+        5469169.0,
+        5484004.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 5469169.0,
+        "mad": 14835.0,
+        "min": 5223064.0,
+        "max": 5484004.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/vm/timers",
+      "unit": "ns/batch",
+      "samples": [
+        6182014.0,
+        6146778.0,
+        6490444.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 6182014.0,
+        "mad": 35236.0,
+        "min": 6146778.0,
+        "max": 6490444.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/vm/cancel",
+      "unit": "ns/batch",
+      "samples": [
+        4987365.0,
+        4933110.0,
+        5023624.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 4987365.0,
+        "mad": 36259.0,
+        "min": 4933110.0,
+        "max": 5023624.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/vm/promises",
+      "unit": "ns/batch",
+      "samples": [
+        29332626.0,
+        28913710.0,
+        30588052.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 29332626.0,
+        "mad": 418916.0,
+        "min": 28913710.0,
+        "max": 30588052.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-rust/vm/mixed",
+      "unit": "ns/batch",
+      "samples": [
+        9819783.0,
+        9718447.0,
+        9982862.0
+      ],
+      "backend": "scheduler-rust; individual samples are per-run p50",
+      "summary": {
+        "median": 9819783.0,
+        "mad": 101336.0,
+        "min": 9718447.0,
+        "max": 9982862.0,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-node-legacy/trivial-async",
+      "unit": "ns/call",
+      "samples": [
+        17834.00000000057,
+        10598.000000001663,
+        11183.000000002608
+      ],
+      "backend": "scheduler-node-legacy; individual samples are per-run p50",
+      "summary": {
+        "median": 11183.000000002608,
+        "mad": 585.0000000009459,
+        "min": 10598.000000001663,
+        "max": 17834.00000000057,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-node-legacy/awaited-host-async",
+      "unit": "ns/call",
+      "samples": [
+        32238.00000000665,
+        26407.000000006065,
+        26722.000000006574
+      ],
+      "backend": "scheduler-node-legacy; individual samples are per-run p50",
+      "summary": {
+        "median": 26722.000000006574,
+        "mad": 315.0000000005093,
+        "min": 26407.000000006065,
+        "max": 32238.00000000665,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-node-persistent/trivial-async",
+      "unit": "ns/call",
+      "samples": [
+        10245.000000004722,
+        10410.000000000253,
+        12673.999999996966
+      ],
+      "backend": "scheduler-node-persistent; individual samples are per-run p50",
+      "summary": {
+        "median": 10410.000000000253,
+        "mad": 164.99999999553074,
+        "min": 10245.000000004722,
+        "max": 12673.999999996966,
+        "count": 3
+      }
+    },
+    {
+      "name": "scheduler-node-persistent/awaited-host-async",
+      "unit": "ns/call",
+      "samples": [
+        24748.000000045067,
+        25526.000000013482,
+        24870.000000021264
+      ],
+      "backend": "scheduler-node-persistent; individual samples are per-run p50",
+      "summary": {
+        "median": 24870.000000021264,
+        "mad": 121.9999999761967,
+        "min": 24748.000000045067,
+        "max": 25526.000000013482,
+        "count": 3
+      }
+    },
+    {
+      "name": "trusted-node/payload_64_p50",
+      "unit": "ns",
+      "samples": [
+        424617.000000012,
+        315791.00000001857,
+        368497.99999998824
+      ],
+      "backend": "trusted-node; individual samples are per-run p50",
+      "summary": {
+        "median": 368497.99999998824,
+        "mad": 52706.999999969674,
+        "min": 315791.00000001857,
+        "max": 424617.000000012,
+        "count": 3
+      }
+    },
+    {
+      "name": "trusted-node/payload_4096_p50",
+      "unit": "ns",
+      "samples": [
+        939612.9999999801,
+        982861.999999983,
+        980971.000000011
+      ],
+      "backend": "trusted-node; individual samples are per-run p50",
+      "summary": {
+        "median": 980971.000000011,
+        "mad": 1890.9999999720603,
+        "min": 939612.9999999801,
+        "max": 982861.999999983,
+        "count": 3
+      }
+    },
+    {
+      "name": "trusted-node/payload_262144_p50",
+      "unit": "ns",
+      "samples": [
+        8377954.000000046,
+        7732983.999999988,
+        8224823.000000015
+      ],
+      "backend": "trusted-node; individual samples are per-run p50",
+      "summary": {
+        "median": 8224823.000000015,
+        "mad": 153131.00000003073,
+        "min": 7732983.999999988,
+        "max": 8377954.000000046,
+        "count": 3
+      }
+    },
+    {
+      "name": "trusted-node/payload_1048576_p50",
+      "unit": "ns",
+      "samples": [
+        27586791.999999944,
+        29038015.00000003,
+        27803070.99999999
+      ],
+      "backend": "trusted-node; individual samples are per-run p50",
+      "summary": {
+        "median": 27803070.99999999,
+        "mad": 216279.0000000447,
+        "min": 27586791.999999944,
+        "max": 29038015.00000003,
+        "count": 3
+      }
+    },
+    {
+      "name": "trusted-node/startup",
+      "unit": "ns",
+      "samples": [
+        127078297.99999999,
+        123471977.00000001,
+        133252798.99999999
+      ],
+      "backend": "trusted-node; individual samples are per-run p50",
+      "summary": {
+        "median": 127078297.99999999,
+        "mad": 3606320.99999997,
+        "min": 123471977.00000001,
+        "max": 133252798.99999999,
+        "count": 3
+      }
+    }
+  ]
+}

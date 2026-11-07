@@ -11,8 +11,8 @@ Pinned corpus: `corpus.lock.json`. Test selections and named groups:
 ## Setup
 
 ```sh
-cargo build --release --no-default-features --bin napi-vm-test262
-cargo build --release -p napi-vm-test262-runner
+cargo build --release --locked --no-default-features --bin napi-vm-test262
+cargo build --release --locked -p napi-vm-test262-runner
 target/release/test262 fetch              # clones the pinned revision into .napi-vm/test262
 ```
 
@@ -47,10 +47,10 @@ Use the cheapest step that answers the question.
 
 | Step | Command | Time on the 2-core reference host |
 | --- | --- | --- |
-| Smoke: fixed cross-section, 1,014 variants | `target/release/test262 run --group smoke --output smoke.json` | about 16 s |
+| Smoke: fixed cross-section, 1,014 variants | `target/release/test262 run --profile reviewed-5112 --group smoke --timeout 10 --output smoke.json` | about 16 s |
 | Retest: only the non-passing tests of a report | `target/release/test262 retest smoke.json --output retest.json` | under 1 s for one test |
 | Subset check: lost passes among retested variants | `target/release/test262 compare smoke.json retest.json --subset` | instant |
-| Gate: the complete corpus | `target/release/test262 run --output full.json` | about 25 min |
+| Gate: the complete selected corpus | `target/release/test262 run --profile reviewed-5112 --timeout 10 --output full.json` | about 25 min |
 
 `compare` exits with 1 when a variant that passed in the baseline no longer
 passes. Before committing an engine change, run the smoke group and retest its
@@ -60,7 +60,7 @@ passed before: the smoke group and retest cannot show them.
 ## Commands
 
 ```text
-test262 fetch [--corpus DIR]
+test262 fetch [--profile original|reviewed-5112] [--corpus DIR]
 test262 run [--path P]... [--group G]... [--skip-feature F]... [--jobs N]
             [--timeout S] [--output FILE] [--checkpoint FILE [--resume]]
 test262 retest BASE [--output FILE] [--jobs N] [--timeout S]
@@ -77,8 +77,10 @@ test262 bench FILE... [--harness] [--repeat N] [--timeout S]
 - `--checkpoint FILE` journals each finished file in order. After an
   interruption, rerun the same command with `--resume`; a changed configuration
   or worker binary is rejected.
-- `retest` reuses the base report's worker count, timeout and skip list, so its
-  results are comparable with the base.
+- `--profile` selects the corpus for corpus-reading commands. The default is
+  `original`; use `reviewed-5112` explicitly for the corrected corpus.
+- `retest` reuses the base report's profile, worker count, timeout and skip list.
+  Explicit job/timeout overrides change the comparison configuration.
 - `compare --subset` compares only the variants present in the second report.
   `retest` output is checked this way against the report it came from.
 - `summary` prints counts, non-passing tests grouped by area (most first),
@@ -90,7 +92,8 @@ test262 bench FILE... [--harness] [--repeat N] [--timeout S]
   worker to profile a single test.
 - `bench` times snippet files through the worker, optionally with the harness.
 
-Report format: `domain`, `suite`, `revision`, `engine_sha256`, `worker_jobs`,
+Report format: `domain`, `suite`, `revision`, `corpus_provenance`,
+`engine_sha256`, `worker_jobs`,
 `timeout_seconds`, `counts`, `pass_percentage`, and one `results` row per
 test variant with `test`, `variant`, `status`, `seconds`, and the engine
 report. Statuses: `pass`, `fail`, `skip`, `timeout`, `crash`, `harness_error`.
@@ -111,7 +114,9 @@ report. Statuses: `pass`, `fail`, `skip`, `timeout`, `crash`, `harness_error`.
   contradicts `staging/sm/lexical-environment/block-scoped-functions-annex-b-arguments.js`
   in the same revision ([upstream issue 5113](https://github.com/tc39/test262/issues/5113)).
   Both cannot pass.
-- Timeouts: the 16 `staging/sm/Date/dst-offset-caching-*` variants.
+- The archived five-second baseline timed out on the 16
+  `staging/sm/Date/dst-offset-caching-*` variants. All 16 pass in the recorded
+  reviewed-profile run at the ten-second CI deadline.
 
 Where the time goes in a full run: process startup is about 10 ms per variant
 (about 1,100 seconds of worker time across 103,000 variants). The Unicode
@@ -127,9 +132,9 @@ itself is not the bottleneck; the engine's startup and that workload are.
 - `evidence/`: archived reports of the full runs referenced above.
 - Table generators for the Unicode, CLDR and IANA data the engine commits (number
   patterns, time zones, emoji sets, locale data) are in
-  [`tools/generators`](../generators/README.md). They are offline and not part of
+  [`tools/generators`](../generators/README.md). They are separate from
   Test262 validation; `rgi-check` in that crate reads the corpus's emoji property
-  lists, and its current mismatches are recorded there.
+  lists. Consult that guide for each generator's input, network and validation requirements.
 
 Experiment-by-experiment history of the earlier Python-based campaign is in
 [`docs/test262-history.md`](../../docs/test262-history.md).

@@ -1,5 +1,7 @@
 # Native-addon snapshot reference order
 
+> **Historical record.** This records a specific implementation change and validation at the time. Consult the current native-addon tests for present behavior. See the [implementation map](roadmap.md) and [development guide](development.md) for current entry points.
+
 Two synchronization defects caused invalid guest object references during
 native-to-guest callbacks.
 

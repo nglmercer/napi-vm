@@ -16,6 +16,6 @@ Control methods: hello, initialize, invoke, event, cancel, quiesce, snapshot, sh
 
 Inputs, results, domain errors and events are validated on both sides. Cancellation is cooperative. A local deadline settles once and sends cancellation; a handler that ignores it retains the endpoint slot. An expired caller is not evidence its action did not occur. Event callbacks are separated from readers and bounded; stale-session delivery is rejected.
 
-Default engineering limits:8MiB frame,64KiB pre-auth frame, depth64,256 pending calls,16MiB queued bytes, call chain16, startup10s, calls30s, shutdown5s, logs1MiB. Limits are explicit and negotiated downward. These are reliability bounds, not benchmark-derived support promises.
+Default engineering limits: 8 MiB frame, 64 KiB pre-auth frame, depth 64, 256 pending calls, 16 MiB queued bytes, call chain 16, startup 10 s, calls 30 s, shutdown 5 s, logs 1 MiB. Limits are explicit and negotiated downward. These are reliability bounds, not benchmark-derived support promises.
 
 Errors have stable numeric and string identities defined in both protocol implementations. Domain errors use APPLICATION_ERROR plus domainCode and validated data. No stack trace or bootstrap secret is part of the business error contract.

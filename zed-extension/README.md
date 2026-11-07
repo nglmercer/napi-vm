@@ -7,7 +7,7 @@ Zed extension
   ↓ locate (settings → $PATH) or download the platform binary
 napi-vm-lsp
   ↓
-napi_vm::lang::LanguageService (Rust core)
+napi_vm_core::lang::LanguageService (Rust core)
 ```
 
 Node.js is never involved. Nothing is resolved out of the consumer project's
@@ -35,8 +35,8 @@ at all.
    (`napi-vm-lsp-<os>-<arch>.tar.gz` / `.zip`), extracted into the extension's
    working directory and marked executable. Older versions are pruned.
 
-The executable is never inspected with a text-reading API; it is located by
-path or by `which`, and then executed.
+The extension uses the normal platform archive when downloading automatically.
+To select the musl archive on Linux, install it separately and configure its path.
 
 ## Local development
 

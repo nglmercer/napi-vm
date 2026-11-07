@@ -1,5 +1,7 @@
 # UTF-16 migration and crate extraction validation
 
+> **Historical record.** This is a historical migration and validation record. Counts and remaining gaps describe the tested revision, not current conformance. See the [implementation map](roadmap.md) and [development guide](development.md) for current entry points.
+
 Validation performed on Linux x86_64, with local Node and wasm builds. This is
 implementation evidence, not a stable ECMAScript or runtime compatibility claim.
 

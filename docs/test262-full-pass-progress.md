@@ -1,6 +1,6 @@
 # Test262 progress log
 
-Current status and remaining work: [`test262-full-pass-plan.md`](test262-full-pass-plan.md).
+Current profile status and validation policy: [`test262-full-pass-plan.md`](test262-full-pass-plan.md).
 Commands and reports: [`tools/test262/README.md`](../tools/test262/README.md).
 Earlier experiment-by-experiment notes are listed in [`test262-history.md`](test262-history.md).
 
@@ -87,9 +87,10 @@ handles bare carriage returns; that was checked with the Rust runner's
 - `9bc2103`: Date property objects created on first use (`new Date` about
   twice as fast; the DST tests moved from about 6.5 to about 6.1 seconds alone).
 
-## Still failing
+## Original-profile five-second limitations
 
 - `annexB/language/function-code/block-decl-func-skip-arguments.js`:
   contradicted by a staging test in the same revision (see the plan).
 - `staging/sm/Date/dst-offset-caching-1..8-of-8` (script and strict): timeouts,
-  about 6.1 seconds alone against a five-second limit.
+  historical measurements around 6.1 seconds alone against a five-second limit.
+  The selected reviewed-profile full run passes all 16 at ten seconds.

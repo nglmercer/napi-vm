@@ -102,31 +102,40 @@ fn main() {
             0
         });
     }
-    for (name, source, jobs) in [
+    for (name, source, jobs, expected_hits) in [
         (
             "vm/timers",
             "var hits=0; for(var i=0;i<1000;i++) setTimeout(()=>hits++,i%17);",
+            1000,
             1000,
         ),
         (
             "vm/cancel",
             "var hits=0; for(var i=0;i<1000;i++){ var id=setTimeout(()=>hits++,i); clearTimeout(id); }",
             1000,
+            0,
         ),
         (
             "vm/promises",
             "var hits=0; var p=Promise.resolve(); for(var i=0;i<1000;i++) p=p.then(()=>hits++);",
             1000,
+            1000,
         ),
     ] {
         measure(name, jobs, || {
             let mut vm = Interpreter::with_builtins();
+            napi_vm::runtime::install_timers(&mut vm.global.borrow_mut());
             vm.eval_source(source).unwrap();
+            vm.drain_jobs().unwrap();
+            assert!(
+                matches!(vm.global.borrow().get("hits"), Some(Value::Number(n)) if n == expected_hits as f64)
+            );
             0
         });
     }
     measure("vm/mixed", 4000, || {
         let mut vm = Interpreter::with_builtins();
+        napi_vm::runtime::install_timers(&mut vm.global.borrow_mut());
         let callback = vm
             .eval_source("var hits=0; ()=>{hits++; queueMicrotask(()=>hits++);}")
             .unwrap();

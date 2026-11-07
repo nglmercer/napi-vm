@@ -1,52 +1,31 @@
 # Compatibility and evidence
 
-## Inherited Linux execution observations
+The trusted process plugin system is independent of the VM's legacy plugin
+host. It runs code with the launching account's OS privileges and does not
+provide a sandbox. The package's declared runtime and artifact inventory must
+match the machine; the host does not retry execution under another runtime.
 
-The retained implementation reports describe Linux x64 GNU; Node 24.19.0, Bun 1.4.2, Rust/Cargo 1.98.1. The earlier documentation reported a Rust 1.96.0 CI baseline; engine/compiler declarations are not execution evidence.
+| Host | JavaScript artifact | Native executable |
+| --- | --- | --- |
+| Node or Bun host | Node or Bun, when declared by the package | Rejected |
+| Rust host | Node or Bun, when declared by the package | Supported for matching target and declared format |
 
-| Host | Node plugin | Bun plugin | Rust executable | Bun standalone |
-|---|---|---|---|---|
-| Node | Runtime-tested | Runtime-tested | Unsupported, rejected | Unsupported, rejected |
-| Bun | Runtime-tested | Runtime-tested | Unsupported, rejected | Unsupported, rejected |
-| Rust | Runtime-tested | Runtime-tested | Runtime-tested | Runtime-tested without external Node/Bun on PATH |
+A portable JavaScript package excludes native dependencies. An
+`external-runtime` package may declare specific native dependencies and their
+target, runtime and ABI; this is not a promise that arbitrary addons work. A
+Bun standalone executable is target-specific and requires the Rust host.
+HTTP/MCP declarations expose host-supplied connection settings; they are not a
+complete MCP client implementation. Only the Rust host can opt into managed
+native service processes.
 
-The six JS cells use one compiled TS package. The Rust-host examples exercise actual callbacks and domain errors, not mocks. State migration TS→Rust→TS and Rust→TS→Rust preserves 12, advances 15 then 17, retains logical identity and rotates sessions. These are inherited observations, not fresh validation of this checkout; see [provenance](evidence/README.md).
+One business handler per endpoint runs at a time; overlapping calls fail rather
+than queue. Cancellation is cooperative, and a timeout does not undo external
+effects. State replacement is non-atomic, and shutdown supervises direct
+children; see [migration](migration-ts-to-rust.md) and
+[architecture](architecture.md) for lifecycle details.
 
-The npm consumer test installs all five local package tarballs outside the checkout without workspace links. Third-party build dependencies may use the configured registry/cache. Rust-only template checks are reproduced separately using the [development guide](development.md) with Node/Bun absent from PATH. One controlled Node-API v1 fixture exposes answer 42 through an explicitly declared/inventoried external-runtime dependency; this is not evidence for all addons or ABI versions.
-
-## Current Linux reference validation
-
-Source revision `d94803c5aa22f3310544f7e01aeceb40f8323ae4` was exercised locally on Linux x64 GNU with Node 24.19.0, Bun 1.4.2 and Rust 1.96.0. The Node/Bun process matrix, actual Rust-host interoperability and relocated native packages passed. A separate external application built from extracted `.crate` archives compiled all four generated Rust contract bindings and exercised READY, callbacks, events, snapshot, reload and awaited shutdown with an empty `PATH` and minimal environment. No Node/Bun/npm/Cargo command is available in that runtime environment.
-
-The npm consumer installed all five packages from tarballs, compiled their declarations with `skipLibCheck: false`, generated greeter and wire-type bindings and ran templates from the installed CLI. POSIX development reload and signal shutdown were exercised; Windows console-interrupt injection remains untested by this helper.
-
-These are local runtime observations. Cross-platform remote CI remains a separate prerequisite; see the configured jobs and the [verification commands](testing.md).
-
-## Native platform scope
-
-| Platform | Execution claim |
-|---|---|
-| Linux x64 GNU | Locally runtime-tested on the source revision above; historical benchmarks separately attributed |
-| Linux arm64 / musl | No runtime evidence retained |
-| macOS | No runtime evidence retained |
-| Windows GNU | Earlier documentation reported compile-only checks; no runtime evidence retained |
-| Browser/Wasm | Earlier documentation reported a root VM compile check; no browser runtime evidence; process hosts are not browser runtimes |
-
-Native CI definitions exist for Linux/macOS/Windows. Their existence does not establish successful execution; no fresh remote CI result is claimed here. Compile-only results never become runtime support claims.
-
-## Explicit limitations
-
-- Trusted processes retain the launching account's OS access. No new sandbox or application permission model
-- One active handler per endpoint; concurrent busy calls fail promptly rather than wait in a possible distributed deadlock
-- No automatic retry, transaction rollback, crash persistence or atomic hot-swap
-- Direct-child cleanup only; arbitrary descendants require OS-specific containment
-- Author-created state-mutating tasks must use SDK tracking so quiescence can observe them
-- External HTTP/MCP injection exposes connection capabilities. It does not implement a complete MCP client, registry or authentication workflow
-- Native dependencies currently require the explicit external-runtime Node-API path or an explicitly managed Rust-host executable service; there is no universal dynamic-library loader
-- CLI/codegen are authored ESM JavaScript with strict public declaration/consumer checks; protocol/SDK/host and TS examples are strictly compiled TypeScript
-
-## Remote validation prerequisite
-
-No workflow runs or checks were available for the current portable-host PR during review. The existing root validation record documents intentionally disabled repository Actions; the latest available historical CI run is [labelled as blocked by billing](https://github.com/nglmercer/napi-vm/actions/runs/36674833312). This is historical evidence, not a live billing-settings audit. Remote runtime validation and merge remain pending until the CI workflows can execute successfully.
-
-Final JS output/error credential coverage and the package whitelist fixture were rechecked on source revision `3ad057ee561b396a64d730f1d26119b4cd41bf7d`: Node 125 passed with no skipped cases, Bun 125 passed, strict package declarations and independent tarball imports passed. Rust and root VM code are unchanged from the reference revision above.
+[Testing](testing.md) describes the local commands and configured CI scope.
+Historical Linux runtime and packaging results, their source revisions, and
+known limitations are retained in [evidence](evidence/README.md). They do not
+certify the current checkout or establish that remote CI ran. A build or a
+listed platform alone is not runtime validation on that platform.

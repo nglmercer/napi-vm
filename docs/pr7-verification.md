@@ -1,5 +1,7 @@
 # PR #7 verification
 
+> **Historical record.** This is a historical PR verification record. Results, limitations and follow-up status describe the revisions tested at the time. See the [implementation map](roadmap.md) and [development guide](development.md) for current entry points.
+
 Reviewed head: `ba1443705bb80d2e4eafeb2783e74b2cb1ad40b3` (also the remote head at the start of this task). Final implementation and regression-test revision: `b918b38`.
 
 ## Reproductions

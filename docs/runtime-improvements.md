@@ -123,10 +123,10 @@ Module sources share `Arc<str>` between bookkeeping and the interpreter.
 
 ## Evidence and release gates
 
-See [measured results and release blockers](implementation-evidence/results.md).
-The local correctness gates pass, but performance acceptance remains blocked by
-cold `runCode` and public global-loop regressions, inconclusive large timer
-measurements, and unexecuted remote CI. This implementation is not release approved.
+The [runtime evidence](implementation-evidence/results.md) records a historical
+set of measurements and acceptance decisions for the revision it tested. It
+is not a current release verdict. For the current benchmark procedure and
+baseline, see [performance](performance.md).
 
 See `implementation-evidence` for raw commands, results, memory regressions and
 benchmark runs. Build all variants before timing, run identical source workloads,
@@ -136,16 +136,15 @@ Criterion provides confidence intervals for existing Rust canaries. RSS threshol
 are tested in dedicated processes after warming allocator caches. Do not infer a
 speedup from one run or include competing builds in timing samples.
 
-Local checks cannot establish cross-platform release readiness. The runtime CI
-matrix checks Linux x64/ARM64, macOS x64/ARM64, Windows x64/ARM64 and Node 22/24/26;
-existing browser CI checks Wasm. Release requires passing remote results and
-review of regressions beyond 3–5%, generated bindings, and retained-memory results.
+Local checks alone cannot establish cross-platform release readiness. Review
+the current CI workflows and remote results for the platforms being released,
+as well as generated bindings and retained-memory results.
 
 ## Review guide
 
-The implementation covers the specification's twelve workstreams. The table
-maps each one to its principal review surface; shared interpreter and ownership
-changes cross more than one workstream.
+The historical workstreams below map to principal review surfaces; shared
+interpreter and ownership changes cross more than one workstream. Paths are
+relative to the relevant crate or test directory.
 
 | Workstream | Principal implementation | Regression/evidence |
 | --- | --- | --- |
@@ -160,7 +159,7 @@ changes cross more than one workstream.
 | 9. Property caches | compact property-site indices and shape-key reuse | verifier rejection, mono/mega/shape canaries |
 | 10. Source caches | exact-key bounded parser LRU and per-owner programs | forced hash collision and LRU tests |
 | 11. Growth/duplication | generational exports and shared module sources | stale releases and export churn |
-| 12. Release quality | Node requirements, docs, expanded native CI and focused Miri | complete local gate logs; remote results still required |
+| 12. Release quality | Node requirements, docs, expanded native CI and focused Miri | historical local gate logs; check current remote results |
 
 Bytecode guest errors and Rust host panics clear/recycle activation storage and
 restore bytecode function scopes. A Rust panic still propagates to its caller; it is not

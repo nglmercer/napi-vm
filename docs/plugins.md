@@ -329,8 +329,8 @@ Node/Bun/VM compatibility tests. This path requires the `node-api-host`
 feature, an explicit addon allowlist and trusted SHA-256. Node-API support is
 currently broad but partial; addons that need V8, NAN, Node C++ APIs, or
 libuv ABI compatibility need the Node sidecar. See the
-[Rust desktop native addon loader plan](native-addon-loader-plan.md) for the
-current compatibility matrix and remaining implementation work.
+[Rust desktop native addon loader plan](native-addon-loader-plan.md) for historical design context; consult the current loader and tests for
+compatibility.
 
 [`examples/rust_plugin_napi.rs`](../examples/rust_plugin_napi.rs) runs a
 complete Rust-hosted plugin whose native module is itself written in Rust

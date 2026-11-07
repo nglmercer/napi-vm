@@ -1,5 +1,7 @@
 # Next implementation sequence
 
+> **Historical record.** This is a historical implementation sequence. Completed work, evidence, priorities and open items may have changed; it is not the current roadmap. See the [implementation map](roadmap.md) and [development guide](development.md) for current entry points.
+
 This plan continues the optional runtime implementation in PR #18. It describes
 future work; checked-in APIs and tests are documented in
 [optional-runtime.md](optional-runtime.md). Completing a stage requires its

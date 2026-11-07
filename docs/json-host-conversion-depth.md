@@ -1,5 +1,7 @@
 # Host JSON conversion depth
 
+> **Historical record.** This records a specific implementation change and its validation at the time. Check the current implementation and tests for present limits. See the [implementation map](roadmap.md) and [development guide](development.md) for current entry points.
+
 Host JSON input conversion now uses an explicit work stack instead of recursive
 Rust calls. The depth check can therefore return its RangeError without first
 exhausting a small host thread stack. The existing maximum depth (512), array

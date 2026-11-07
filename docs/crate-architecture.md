@@ -1,60 +1,70 @@
-# Crate ownership and embedding
+# Crate architecture and Rust embedding
 
-`napi-vm-core` owns the lexer, parser/AST, bytecode compiler and VM, ECMAScript
-builtins, guest heap, Promise jobs, module-loader contracts and engine limits.
-It has no dependency on the runtime crate, Tokio, HTTP/WebSocket transports,
-npm extraction or TypeScript tooling. A new interpreter exposes no filesystem,
-network, environment, console, timers or Buffer globals. Native-addon backend
-implementations remain optional trusted host integrations; core initialization
-never enables them or loads an addon. Explicit loader contracts remain available
-to embedders.
+## Ownership
 
-`napi-vm-runtime` depends on core and owns capability installation, event-loop
-adapters, external events, permission checks, OS transports, npm/Node loaders,
-TypeScript transformation, console, timers, Buffer, Web globals and CLI
-implementation (including the process-isolation supervisor). Its Cargo
-features select implementations; `RuntimeBuilder` selects installed capabilities
-and permissions. Compiling a feature grants no guest access by itself.
+| Crate or facade | Owns |
+| --- | --- |
+| `napi-vm-core` | Lexer, parser/AST, bytecode compiler and VM, ECMAScript builtins, values and heap, Promise jobs, module-loader contracts, engine limits and language analysis |
+| `napi-vm-runtime` | Explicit capability installation, permissions, event-loop adapters, external events, filesystem/network/npm/Node integrations, TypeScript transformation and CLI implementation |
+| `napi-vm` | Engine reexports, Node and WASM bindings, LSP, legacy Rust guest-plugin host and thin CLI entry point |
+| `napi-vm-plugin-*` | Independent trusted process protocol, SDK, host and conformance tooling |
 
-`napi-vm` reexports the engine for existing Rust consumers and owns N-API, wasm,
-LSP, trusted plugin host and a thin CLI entry adapter. Its default feature remains `napi`.
-Runtime features forward to the optional runtime dependency.
+Core has no dependency on the runtime crate, Tokio, HTTP transports, npm
+extraction or TypeScript tooling. Native-addon contracts and optional trusted
+backends are available to embedders, but core initialization does not install
+them or grant guest privileges.
+
+The root facade defaults to the `napi` feature. Its runtime feature flags
+forward to the optional runtime dependency. Runtime features make code
+available; `RuntimeBuilder` and explicit host configuration choose installed
+capabilities and permissions. See [optional runtime](optional-runtime.md).
+
+## Minimal engine
 
 ```rust
 use napi_vm_core::{Interpreter, JsString, Value};
+
 let mut engine = Interpreter::with_builtins();
 let result = engine.eval_source("'😀'.length").unwrap();
 assert_eq!(result, Value::Number(2.0));
+
 let lone = JsString::from_units(vec![0xd800]);
 assert!(lone.to_utf8().is_err());
 assert_eq!(lone.units(), &[0xd800]);
 ```
 
-Engine values now use `Value::String(JsString)`; migrate Rust string constructors
-with `.into()`. Use `units()` for lossless host transport, `to_utf8()` for strict
-UTF-8 and `as_str()`/`Display` only for intentional replacement at text boundaries.
-`len()` counts UTF-16 units. Serde represents valid scalar strings as text and
-other strings as a unit array. The guest JSON builtin independently implements
-well-formed ECMAScript JSON stringification.
+A bare engine provides JavaScript builtins, not Node's process, filesystem,
+network, timers or console. CommonJS and native addons require explicit host
+configuration; [native addon embedding](native-addons.md) explains that boundary.
 
-The former `Interpreter::with_runtime_builtins()` convenience constructor is now
-`napi_vm_runtime::runtime::with_runtime_builtins()`. Prefer `RuntimeBuilder` for
-capability and permission configuration. The facade also exposes the helper as
-`napi_vm::runtime::with_runtime_builtins()` when runtime is enabled.
+## UTF-16 and host text
 
-The core's test-only host fixtures exercise engine scheduling and native interop;
-they are excluded from production builds. Runtime integration tests live in
-`crates/napi-vm-runtime/tests`. Workspace CI tests both extracted packages and
-standalone minimal configurations.
+`Value::String(JsString)` retains JavaScript UTF-16 code units, including lone
+surrogates. In Rust, convert ordinary string constructors with `.into()`.
+Use `units()` for lossless transport, `to_utf8()` for strict UTF-8 validation,
+and `as_str()` or `Display` only when replacement at a host text boundary is
+intentional. `len()` counts code units.
 
-The existing module-loader identifier and source-file interfaces accept Rust
-UTF-8 text. Module specifiers with unpaired surrogates are rejected explicitly
-at that host contract rather than aliasing another module through replacement.
-Guest-created `eval` and `Function` source is lexed from code units directly.
-`Interpreter::compile_utf16` and `eval_utf16` also accept raw code-unit source;
-N-API and wasm script entry points use these APIs. Binding module registration
-rejects non-Unicode identifiers/source rather than replacing their units; UTF-8
-module files can express surrogate literals through JavaScript Unicode escapes.
+Serde uses text for valid scalar strings and unit arrays for other strings.
+Guest `JSON.stringify` implements its own well-formed ECMAScript behavior.
+`compile_utf16` and `eval_utf16` accept raw source code units; Node and WASM
+script entry points use those paths.
 
-Validation evidence and remaining compatibility failures are recorded in
-[utf16-extraction-validation.md](utf16-extraction-validation.md).
+The module loader's identifiers and file-source contracts use UTF-8. A
+specifier with unpaired surrogates is rejected rather than aliased through
+replacement. Binding module registration likewise rejects non-Unicode host
+identifiers/source. UTF-8 module files can express surrogate literals with
+JavaScript Unicode escapes.
+
+## Migration and validation
+
+The runtime convenience constructor lives at
+`napi_vm_runtime::runtime::with_runtime_builtins()`; the root facade reexports
+it through `napi_vm::runtime` when runtime is enabled. Prefer `RuntimeBuilder`
+for explicit capability and permission setup.
+
+Core test-only fixtures are excluded from production builds. Runtime tests
+live in `crates/napi-vm-runtime/tests`; CI checks extracted packages and minimal
+feature configurations. See [development](development.md) for commands,
+[UTF-16 extraction history](utf16-extraction-validation.md) for the original
+migration record, and [performance](performance.md) for current measurements.

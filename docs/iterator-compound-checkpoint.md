@@ -1,5 +1,7 @@
 # Iterator helpers and compound assignments
 
+> **Historical record.** This is a historical focused checkpoint. Its counts describe the run recorded below, not the current engine. See the [implementation map](roadmap.md) and [development guide](development.md) for current entry points.
+
 Implemented all Iterator APIs selected by the pinned Test262 corpus: static `from`, `concat`, `zip`, `zipKeyed`; prototype `map`, `filter`, `flatMap`, `take`, `drop`, `chunks`, `windows`, `toArray`, `reduce`, `forEach`, `some`, `every`, `find`, `includes`, `join`, and `[Symbol.dispose]`.
 
 Helper records are internal, traced heap state. Helpers share iterator stepping, closing, callback-error handling, completion, reentrancy guards, and brand checks. Zip supports shortest, longest (with padding), strict, and keyed output. Boxed strings now iterate through the normal ToString conversion. Suspended-generator cleanup tolerates heap TLS teardown.

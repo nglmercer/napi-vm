@@ -1,5 +1,7 @@
 # Destructuring validation follow-up
 
+> **Historical record.** This is a historical focused checkpoint. Its counts describe the run recorded below, not the current engine. See the [implementation map](roadmap.md) and [development guide](development.md) for current entry points.
+
 Continues assignment, declaration, and default name inference work through `f9ab3a7`.
 
 Array patterns mark iterator records done when calling `next`, validating its result, or reading `done` or `value` fails. These failures skip IteratorClose for ordinary elements, elisions, and rest. Failure while obtaining `next` also skips closing. Target and default initializer failures still close unfinished iterators and preserve the original exception; close failures propagate on normal early completion.

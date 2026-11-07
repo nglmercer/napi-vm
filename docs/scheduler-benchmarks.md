@@ -1,5 +1,7 @@
 # Final PR #7 scheduler benchmarks
 
+> **Historical record.** These are historical PR #7 measurements on the stated environment; they are not the current performance baseline. See the [implementation map](roadmap.md) and [development guide](development.md) for current entry points.
+
 Measured 2026-09-30 on Linux x86_64, 12 available CPUs, Rust 1.97.1 and Node 26.10.0, release builds. Original baseline: `0fa987d8860d620cd1008a84f2a17c9b67c495cd`. Final implementation: `b918b389f7f2c12cdca0844bbd45c0c86ca48d46`. Subsequent commits do not change the benchmarked runtime implementation.
 
 ## Reproduce

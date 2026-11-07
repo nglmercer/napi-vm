@@ -36,7 +36,8 @@ application-level package layout.
 cargo build --release --no-default-features --bin napi-vm-lsp
 ```
 
-The binary in `target/release/napi-vm-lsp` is fully self-contained.
+The binary is at `target/release/napi-vm-lsp`; its platform runtime and shared
+library requirements depend on how it was built.
 
 ### Capabilities
 
@@ -49,6 +50,12 @@ The binary in `target/release/napi-vm-lsp` is fully self-contained.
 | `textDocument/completion`         | Returns context-aware completions.             |
 | `textDocument/hover`              | Returns type and documentation on hover.       |
 | `textDocument/publishDiagnostics` | Pushed automatically on every change.          |
+
+The server also implements document symbols, definition, references, document
+highlight, rename, signature help, inlay hints, semantic tokens, formatting and
+code actions. See [`src/lsp/server.rs`](../src/lsp/server.rs) and the
+[`lsp_protocol`](../tests/lsp_protocol.rs) and [`lsp_runtime`](../tests/lsp_runtime.rs)
+tests for the supported requests and behavior.
 
 ### Optional static manifest
 
@@ -129,12 +136,12 @@ npm run zed:build
 
 ### Linux binary compatibility
 
-Each release ships two Linux builds per architecture: a glibc build
+The release workflow builds two Linux variants for x64 and arm64: a glibc build
 (`napi-vm-lsp-linux-<arch>.tar.gz`) and a statically linked musl build
 (`napi-vm-lsp-linux-<arch>-musl.tar.gz`). The extension downloads the glibc
 build; on a distribution older than the CI image, that can fail with
 `GLIBC_x.xx not found`. Download the musl archive instead and point
-`lsp.napi-vm.binary.path` at it — it has no shared-library requirements.
+`lsp.napi-vm.binary.path` at it — it is built with static musl linking.
 
 Install the `zed-extension/` directory using Zed's local development-extension
 flow. If a `VmSession` is running in the workspace, the editor automatically

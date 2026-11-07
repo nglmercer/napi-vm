@@ -9,7 +9,7 @@ The commands below use a POSIX shell. On Windows, use equivalent PowerShell path
 From this checkout:
 
 ```sh
-npm install --ignore-scripts
+npm ci --ignore-scripts
 npm run plugins:build:ts
 REPO="$PWD"
 CLI="$REPO/packages/plugin-cli/src/index.mjs"

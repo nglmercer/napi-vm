@@ -6,8 +6,9 @@ timers, queueMicrotask, Web globals, Buffer, process, require, or placeholder
 browser APIs. ECMAScript builtins, Promise jobs, modules, bytecode and the AST
 fallback remain available in the engine.
 
-This is the first implementation stage of [the runtime plan](runtime-plan.md),
-not the runtime preview milestone or a stable ECMAScript engine release.
+The runtime is opt-in and its Node, Web and npm APIs cover selected behavior,
+not complete platform compatibility. The [implementation map](roadmap.md)
+and [development guide](development.md) link to current tests and evidence.
 
 ## Rust embedding
 
@@ -209,38 +210,20 @@ request them explicitly and use a native build with the relevant features.
 The browser adapter explicitly creates its own captured console namespace;
 this capability is owned by the browser host rather than core builtin setup.
 
-## Compatibility evidence
+## Compatibility and further work
 
-The pinned Test262 runner and report generator live in
-[`tools/test262`](../tools/test262/README.md). The first full development baseline
-passed **32,359 / 102,956 variants (31.43%)**, with 70,099 failures, 8 timeouts,
-20 crashes and 470 harness errors. Runner limitations are recorded with the
-measurement. The percentage is not a stable-engine claim. Web API, Node and npm
-compatibility measurements remain separate and unmeasured by those corpora.
+The [Test262 guide](../tools/test262/README.md) identifies the pinned corpus,
+profiles, settings and reports. Those results measure ECMAScript tests; they do
+not measure Node, Web or npm compatibility. Run the relevant runtime and
+platform tests for those APIs. Historical milestones and measurements are
+preserved in the [runtime plan](runtime-plan.md) and
+[implementation sequence](next-implementations.md); they are not a current
+release checklist.
 
-## Remaining roadmap work
-
-The ordered follow-up PR scopes and acceptance gates are in
-[next-implementations.md](next-implementations.md).
-
-- Expand Unicode and ECMAScript conformance coverage beyond the UTF-16 migration.
-- Complete Test262 host hooks and module linking/negative-phase classification;
-  improve bytecode coverage, weak reachability and finalization.
-- Complete Web Platform Test coverage: streaming bodies, Blob/FormData, the full
-  URL API, EventTarget semantics and remaining WebCrypto algorithms. Current
-  HTTP server support is sequential HTTP/1.x with Content-Length, bounded
-  headers/bodies, no chunked requests or server TLS.
-- Complete npm semantics (peer/optional dependencies, aliases, all npm range
-  syntax, installation rollback/upgrades and complete ESM/CJS interop), the
-  remaining Node tier APIs, and permission-aware native-addon runtime wiring.
-- Add TypeScript type checking and source-map integration into guest stack
-  traces. Oxc transformation generates source maps, but generating a map does
-  not yet remap interpreter frames.
-- Implement in-process heap accounting and non-Unix secure file/process limits;
-  expand the remaining CLI commands and compatibility corpora.
-
-The runtime preview checklist remains open. Feature names and passing targeted
-integration tests do not establish Web, Node or npm corpus compatibility.
+The implementation retains explicit limits and platform differences, including
+partial Node and Web APIs, nontransactional npm installation, and the secure
+filesystem implementation's platform restrictions described above. Check the
+source and tests when a specific compatibility or resource guarantee matters.
 
 ## Rust crate boundary and string migration
 

@@ -1,5 +1,7 @@
 # Plain assignment reference checkpoint
 
+> **Historical record.** This is a historical focused checkpoint. Its counts describe the run recorded below, not the current engine. See the [implementation map](roadmap.md) and [development guide](development.md) for current entry points.
+
 Continues commit `9d7ce1b` (Iterator helpers and compound assignments).
 
 Both execution tiers resolve plain-assignment binding references and evaluate member targets before the RHS, preserving the original reference when RHS code changes scope or objects. Resolution does not invoke property getters. Member key conversion and write validation occur after the RHS. This includes super references, private-field writes, anonymous function/class name inference, and parenthesized-target naming. Number constants have their required non-writable, non-enumerable, non-configurable descriptors.

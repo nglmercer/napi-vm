@@ -10,7 +10,7 @@ cargo build --release --manifest-path examples/plugins/rust-napi-plugin/native/C
 ```
 
 On Linux or macOS, run the complete build, copy, integrity-pin, and Rust-host
-workflow with one command from any directory:
+workflow with one command from the repository root:
 
 ```bash
 examples/plugins/rust-napi-plugin/build-and-run.sh

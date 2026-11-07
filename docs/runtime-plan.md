@@ -1,5 +1,7 @@
 # Optional runtime implementation plan
 
+> **Historical record.** This is a historical implementation plan. Its milestones and acceptance status are not a current release schedule. See the [implementation map](roadmap.md) and [development guide](development.md) for current entry points.
+
 Target: **Rust-native embeddable JavaScript engine by default, with an optional
 sandboxed runtime supporting Web APIs, npm, Node compatibility and TypeScript.**
 

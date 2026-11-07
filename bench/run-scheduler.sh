@@ -13,7 +13,7 @@ cp "$repo_dir/examples/scheduler_bench.rs" "$baseline_dir/examples/scheduler_ben
 cp "$repo_dir/bench/scheduler-async.cjs" "$baseline_dir/bench/scheduler-async.cjs"
 # Compile everything before timing. Never benchmark competing Cargo builds.
 (cd "$baseline_dir" && cargo build --locked --release --lib --example scheduler_bench) > "$output_dir/baseline-build.log" 2>&1
-(cd "$repo_dir" && cargo build --locked --release --lib --example scheduler_bench --example scheduler_metrics) > "$output_dir/modified-build.log" 2>&1
+(cd "$repo_dir" && cargo build --locked --release --features runtime --lib --example scheduler_bench --example scheduler_metrics) > "$output_dir/modified-build.log" 2>&1
 cp "$baseline_dir/target/release/libnapi_vm.so" "$baseline_dir/napi-vm.linux-x64-gnu.node"
 cp "$repo_dir/target/release/libnapi_vm.so" "$repo_dir/napi-vm.linux-x64-gnu.node"
 "$baseline_dir/target/release/examples/scheduler_bench" > "$output_dir/baseline-rust.jsonl"

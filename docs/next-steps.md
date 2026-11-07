@@ -1,10 +1,12 @@
 # What's next
 
+> **Historical record.** This is a historical investigation and task list. Its CI status, open questions and priorities are not current status. See the [implementation map](roadmap.md) and [development guide](development.md) for current entry points.
+
 State as of `630131f`, with CI results from run 33517882112. The roadmap
 (`docs/roadmap.md`) is the feature tracker; this is the shorter list of what
 to *do*, in the order it is worth doing.
 
-## Blocking — CI is red
+## CI blockers recorded at the time
 
 Three failures on
 [run 33514005272](https://github.com/hernan-lc/napi-vm/actions/runs/33514005272),
@@ -211,7 +213,7 @@ the browser build already makes. The alternatives were dropping the target
 outright, or writing an `aarch64_windows.rs` backend upstream — the correct
 fix, and considerably more work than this.
 
-## Then — the one remaining roadmap capability
+## Planned follow-up at the time
 
 **True generator suspension on `wasm32`.** Today the browser build runs a
 generator body to completion on the first `next()` and buffers its yields.
@@ -228,7 +230,7 @@ and documented. Closing it needs one of:
 A *partial* transform is worse than today: it would make a generator's
 semantics depend on whether its body matched a pattern.
 
-## Smaller, in order
+## Other proposed work at the time
 
 1. **Re-entrant host calls.** A VM function exported to the host is refused
    with "VM is busy" if called from inside a VM execution. Generators at the
@@ -239,7 +241,7 @@ semantics depend on whether its body matched a pattern.
 3. **`Intl`, `Object.groupBy`** and the other recent library additions. None
    are load-bearing for the sandbox.
 
-## Decisions waiting on you
+## Decisions recorded at the time
 
 **`Function` and `Proxy` are now implemented.** A test named *"cannot escape
 sandbox via constructor"* had asserted `Function` was inert; I implemented it
@@ -249,7 +251,7 @@ stubs, and the `f.constructor.constructor` chain the classic escape travels
 does not exist at all. If the inert `Function` was deliberate policy rather
 than an unimplemented stub, revert `7ab6b0b`.
 
-## Health
+## Health at the time
 
 - **Tests:** 1378 (bun) · 184 Rust · 27 LSP protocol · 17 Node-compat ·
   21 generator stress · 8 coroutine backend · 7 WASM.

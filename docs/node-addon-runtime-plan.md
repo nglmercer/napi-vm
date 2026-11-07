@@ -1,5 +1,7 @@
 # Rust Desktop Node Addon Runtime Plan
 
+> **Historical record.** This is a historical design plan, not the current implementation status or a commitment to complete its milestones. See the [implementation map](roadmap.md) and [development guide](development.md) for current entry points.
+
 ## Goal
 
 Allow a Rust desktop application embedding `napi-vm` to run guest CommonJS

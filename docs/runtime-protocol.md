@@ -38,8 +38,8 @@ The LSP is always the **client**. The application is the **server**.
 Path: `<workspace>/.napi-vm/runtime.json`
 
 The application writes this file when its session starts and removes it (or
-lets it become stale) when the session ends. The LSP polls this file every
-500 ms.
+lets it become stale) when the session ends. The native LSP currently polls this file every
+250 ms.
 
 ### Locator schema
 
@@ -69,8 +69,8 @@ lets it become stale) when the session ends. The LSP polls this file every
 
 ### Workspace ID computation
 
-The workspace ID is computed identically by both the application and the LSP
-to prevent cross-workspace socket hijacking:
+The application and LSP compute the same workspace ID to identify the workspace.
+The ID is not secret; transport access also requires the capability token:
 
 ```
 sha256(realpath(workspaceRoot)).hex().slice(0, 20)

@@ -1,5 +1,11 @@
 # Test262 history
 
+Historical index of earlier campaigns. Current commands are in the
+[runner guide](../tools/test262/README.md), current conformance status is in
+[the status page](test262-full-pass-plan.md), and new performance work uses
+[the measurement workflow](performance.md). The records below retain the
+revision-specific context of their original experiments.
+
 Earlier Test262 notes were one document per experiment. The current status is in
 [`test262-full-pass-progress.md`](test262-full-pass-progress.md). The removed notes
 were superseded: several describe the removed Python runner, and their

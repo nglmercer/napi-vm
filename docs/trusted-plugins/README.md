@@ -9,7 +9,7 @@ This additive subsystem runs trusted plugins as supervised OS processes over pri
 | Node or Bun TS host | Yes, under its declared Node/Bun runtime | Explicitly rejected |
 | Rust host | Yes, under its declared Node/Bun runtime | Yes, matching native target |
 
-A single compiled portable TS package is the interoperability target. A Rust host does not reinterpret TS or translate it into Rust. External-runtime profiles can depend on specific runtime/native dependencies; portable-js profiles reject native dependencies. A listed target or CI job is not evidence it was executed. See [compatibility](compatibility.md).
+A single compiled portable TS package is the interoperability target. A Rust host does not reinterpret TS or translate it into Rust. External-runtime profiles can depend on specific runtime/native dependencies; portable-js profiles reject native dependencies. See [compatibility](compatibility.md) for the execution boundary and evidence.
 
 ## Repository commands
 

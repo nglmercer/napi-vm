@@ -1,48 +1,58 @@
-# Sandbox limits and crash safety
+# Safety and operational limits
 
-"Sandboxed" means both isolation and containment. Guest code cannot see
-Node's `require`, filesystem, network, or process globals by default, and
-known process-killing vectors are converted into catchable guest errors.
+## Guest isolation and host trust
 
-Run the executable safety catalogue with:
+A bare engine does not expose Node `require`, the filesystem, network or
+process globals. The host explicitly installs capabilities and is responsible
+for permission checks and validation at every privileged operation.
 
-```bash
-bun examples/crash.ts
-```
+The in-process VM is not an operating-system security boundary. Synchronous
+guest code blocks its calling thread, host callbacks can block outside guest
+loop accounting, and per-allocation caps are not a total heap quota. Use a
+supervised child process with external CPU, memory and wall-time limits when
+those guarantees are required.
 
-| Vector | Behavior | Guard |
-|--------|----------|-------|
-| Deep recursion | Catchable `RangeError` | Call-depth counter, checked before every VM frame |
-| Deep parsing | Catchable `RangeError` | Parser nesting cap and depth latch |
-| Cyclic structures | Safe stringification | Visited pointers and depth cap |
-| Cyclic JSON | Catchable `TypeError` | Visited set plus JSON parse/stringify depth cap |
-| Deep teardown | Clean shutdown | Iterative `Drop` work stack, not native recursion |
-| Array exhaustion | Catchable `RangeError` | Hard array-length cap on push, spread, and growth paths |
-| String exhaustion | Catchable `RangeError` | Hard string-size cap on concat, repeat, and join paths |
-| Infinite loops | Catchable `RangeError` | Per-execution loop budget, configurable with `setLoopLimit` |
-| Generator misuse | Safe completion | Same-thread stackful coroutine with a guard-paged stack; explicitly closed generators run `finally`, while merely abandoned ones unwind with no guest handlers and no platform unwinder |
-| Oversized plugin file reads | Catchable `ResourceLimit` | Per-call byte cap checked on the open descriptor, before the read |
-| Runtime/host errors | Catchable error objects | Error propagation into guest `catch` |
+Native addons and trusted process plugins execute with host/account privileges.
+An addon allowlist chooses code that may load; it does not sandbox that code.
+[Native addons](native-addons.md) and [trusted plugins](trusted-plugins/README.md)
+have separate trust and shutdown contracts.
 
-Host capabilities are opt-in and enforced host-side. The plugin host in
-`plugins/` shows the intended shape: a manifest *requests* filesystem access,
-the host policy decides, and every privileged call canonicalizes its path —
-resolving `..` and symlinks — before matching it against the granted patterns.
-See [Plugins](plugins.md).
+## Engine guards
 
-Filesystem calls are additionally bounded and hardened at the host backend:
-every read and write has a byte cap (8 MiB by default, see
-`createNodeFileSystem`), the size is checked against the same descriptor the
-data is read from, and files are opened `O_NOFOLLOW`. The permission layer
-hands down canonical paths, so a symlink at the final component means one was
-swapped in after the check; refusing to follow it closes that window. Directory
-components in the middle of the path remain racy — closing that needs
-`openat2(RESOLVE_BENEATH)`, which `node:fs` does not expose.
+| Area | Guard and boundary |
+| --- | --- |
+| Guest recursion | Call-depth limit; failures become guest errors |
+| Parsing | Nesting/depth limits |
+| Loops and execution | Loop/fuel budgets; cancellation and deadline mechanisms at execution checkpoints |
+| Arrays | Bounded materialized storage; large logical lengths may remain sparse |
+| Strings | Bounded construction paths, measured in UTF-16 units |
+| Cycles | Cycle-aware formatting and bounded JSON paths |
+| Teardown | Iterative value dropping and quiescent cycle collection |
+| Generators | Same-thread stackful coroutine lifecycle and reentry checks |
 
-The in-process VM is not a complete operating-system security boundary. CPU
-time is bounded per execution but synchronous code blocks the Node event loop,
-and allocation caps are not an aggregate heap quota. For strict CPU or memory
-limits, run the VM in a worker or disposable child process with a watchdog and
-OS limits such as cgroups or `ulimit`.
+The constants and exact checks live in
+[`value.rs`](../crates/napi-vm-core/src/value.rs) and
+[`interpreter`](../crates/napi-vm-core/src/interpreter/mod.rs). A JavaScript
+array's logical length is not the same as its allocated storage. Do not
+infer an aggregate memory quota from either an array or string cap.
 
-See [Runtime improvements](runtime-improvements.md) for the current ownership, evaluation, collection, cache bounds, polling limits, and benchmark methodology.
+Run `bun examples/crash.ts` for the executable safety catalogue and use the
+targeted tests listed in [development](development.md) after changing guards.
+A successful old run does not certify a new code change or host integration.
+
+## Capability hosts
+
+The legacy plugin host resolves paths against granted roots and patterns;
+its manifest requests capabilities rather than granting them. The Node file
+backend also bounds reads/writes and uses descriptor-based checks plus
+`O_NOFOLLOW` where supported. Parent-directory replacement races remain a
+boundary of that Node filesystem implementation. Review [the plugin guide](plugins.md)
+and its backend code for platform-specific behavior.
+
+Keep privileged callbacks small, bounded and explicit. Check permissions on
+each operation so a previously retained guest reference cannot bypass a
+revoked policy. Separate guest execution, native-addon lifecycle, and trusted
+child-process supervision in operational monitoring.
+
+[Runtime ownership and collection](runtime-improvements.md) ·
+[Event-loop scheduling](event-loop.md)

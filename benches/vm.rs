@@ -28,7 +28,9 @@ fn parse(src: &str) -> Vec<Statement> {
 fn run_stmts(stmts: &[Statement], collector: &mut Interpreter) {
     let mut interp = Interpreter::new();
     setup_builtins(&interp.global);
-    interp.run(stmts).expect("benchmark workload succeeds");
+    interp
+        .run_program_body(stmts)
+        .expect("benchmark workload succeeds");
     drop(interp);
     // Fresh AST embeddings must collect after discarding guest results/roots.
     // Otherwise Criterion measures accumulating garbage and eventually OOMs.
@@ -82,6 +84,20 @@ const WORKLOADS: &[(&str, &str)] = &[
 fn bench_run(c: &mut Criterion) {
     let mut group = c.benchmark_group("run");
     for (name, src) in WORKLOADS {
+        let expected = match *name {
+            "arithmetic_loop" => 99980000.0,
+            "recursion_fib" => 55.0,
+            "array_chain" => 333666.0,
+            "string_ops" => 1000.0,
+            "closures" => 10001.0,
+            "json_roundtrip" => 5.0,
+            _ => unreachable!(),
+        };
+        let mut check = Interpreter::with_builtins();
+        assert!(
+            matches!(check.run_program_body(&parse(src)).unwrap(), napi_vm::Value::Number(n) if n == expected),
+            "{name} returned an unexpected result"
+        );
         group.bench_with_input(BenchmarkId::from_parameter(name), src, |b, src| {
             let mut collector = Interpreter::new();
             b.iter(|| run(black_box(src), &mut collector));
@@ -126,6 +142,9 @@ fn bench_class_methods(c: &mut Criterion) {
         .run_program_body(&setup)
         .expect("class benchmark setup should execute");
 
+    assert!(
+        matches!(interp.run(&invocation).unwrap(), napi_vm::Value::Number(n) if n == 1000000.0)
+    );
     let mut group = c.benchmark_group("warm");
     group.bench_function("class_methods_reused_vm", |b| {
         b.iter(|| {
@@ -203,6 +222,10 @@ export default {
         let mut host = RustPluginHost::new(RustPluginHostOptions::default());
         host.load(&root).unwrap();
         let plugin = host.get_mut("bench-plugin").unwrap();
+        let check = plugin.call_json(&request, &context).unwrap();
+        assert_eq!(check["total"], 496);
+        assert_eq!(check["plugin"], "bench-plugin");
+        assert_eq!(check["echo"], request);
         b.iter(|| {
             black_box(
                 plugin
@@ -267,7 +290,17 @@ fn bench_tiers(c: &mut Criterion) {
             "{name} must be bytecode-backed"
         );
         // Warm the caches once so iterations measure steady state.
-        interp.execute(&invoke).unwrap();
+        let expected = match *name {
+            "prop_mono_hot" => 2000.0,
+            "prop_mega_hot" => 13200.0,
+            "call_tiny_hot" => 1999000.0,
+            "shape_churn" => 44850.0,
+            _ => unreachable!(),
+        };
+        assert!(
+            matches!(interp.execute(&invoke).unwrap(), napi_vm::Value::Number(n) if n == expected),
+            "{name} returned an unexpected result"
+        );
         group.bench_function(*name, |b| {
             b.iter(|| black_box(interp.execute(black_box(&invoke)).unwrap()));
         });

@@ -1,5 +1,7 @@
 # Engine execution and collection changes
 
+> **Historical record.** This is a historical implementation and validation snapshot. The reported gaps and test totals may have changed; consult current tests and Test262 status before relying on them. See the [implementation map](roadmap.md) and [development guide](development.md) for current entry points.
+
 Module linking now discovers dependencies and creates live bindings before executing bodies. Missing and ambiguous exports fail during resolution; cyclic reads enforce the temporal dead zone. Module evaluation caches success and the original thrown value. Dynamic imports run as jobs, and concurrent importers share evaluation. Module namespaces share identity across imports and remain rooted during collection. Namespace re-export placeholders receive the completed export set before evaluation. Module namespaces use sorted UTF-16 export names, a null prototype, and reject mutation. Imported bindings cannot overwrite local declarations. Module functions retain their defining module as the resolution context.
 
 `Interpreter::link_module` links without executing bodies. `Interpreter::import_module` returns a Promise; pending module evaluation progresses through the existing event loop. Native stackful execution can suspend dependency evaluation at top-level await and resume after its Promise settles.
@@ -18,7 +20,7 @@ WeakMap and WeakSet store weak keys. Collection traces ephemerons to a fixed poi
 - Rust formatting and all-target, all-feature Clippy checks pass.
 - Focused Test262 revision `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`: 158 passed and 133 failed out of 291 selected variants, with zero skips, crashes, timeouts, or harness errors. Selection: `language/module-code/ambiguous-export-bindings` and `built-ins/WeakMap`. This selection is not an overall ECMAScript compatibility score.
 
-## Remaining gaps
+## Gaps recorded at the time
 
 Collection still pauses while stackful async tasks or generators are suspended: opaque Rust stacks do not provide traceable roots. Pending top-level await on platforms without stackful execution remains unsupported; settled Promises and thenables are tested on WebAssembly.
 

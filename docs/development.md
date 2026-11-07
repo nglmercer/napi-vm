@@ -1,124 +1,117 @@
 # Development
 
-## Commands
+## Prerequisites and ownership
 
-| Command | Description |
-|---------|-------------|
-| `npm run build` | Build the optimized native addon |
-| `npm run build:debug` | Build the debug native addon |
-| `npm test` | Run the JavaScript regression suite (requires Bun) |
-| `npm run test:rust` | Run the Rust unit and integration tests |
-| `npm run test:node` | Run the Node.js compatibility suite (`engines.node` range) |
-| `npm run lint` | Rust formatting + Clippy, then TypeScript type-checking |
-| `npm run lint:playground` | Type-check the playground (needs `playground:build` first) |
-| `npm run lint:rust` | `cargo fmt --check` and `cargo clippy -D warnings` |
-| `npm run lint:ts` | `tsc --noEmit` for the package and the playground |
-| `npm run check:generated` | Rebuild the committed bindings and fail on drift |
-| `npm run ipc:smoke` | Test IPC commands and events |
-| `npm run runtime:smoke` | Test the local runtime locator/transport |
-| `npm run lsp` | Start the native `napi-vm-lsp` server |
-| `npm run lsp:build` | Build the standalone `napi-vm-lsp` binary |
-| `npm run lsp:test` | Run the protocol-level LSP and runtime tests |
-| `npm run lsp:legacy` | Start the deprecated Node stdio server (`lsp/server.cjs`) |
-| `npm run lsp:legacy-smoke` | Legacy: LSP framing with an explicit temporary manifest |
-| `npm run lsp:legacy-runtime-smoke` | Legacy: LSP discovery from a live `VmSession` |
-| `npm run zed:build` | Build the Zed `wasm32-wasip2` extension |
-| `npm run playground:build` | Build the browser WASM package |
-| `npm run playground` | Start the Vite browser playground |
-| `npm run bench` | Run NAPI end-to-end benchmarks |
-| `npm run bench:stress` | Run hot-reload and bridge stress tests |
-| `npm run bench:rust` | Run Criterion interpreter benchmarks |
+Use Node.js 22+, npm, Rust, and Bun for the JavaScript regression suite.
+CI pins Rust in [ci.yml](../.github/workflows/ci.yml); check that workflow
+when reproducing CI. Browser builds also require `wasm-pack`, and Zed
+builds require the `wasm32-wasip2` target. Build native code before testing
+or benchmarking through Node so an old `.node` artifact cannot mask changes.
 
-The quality gate is:
-
-```bash
-npm run lint          # cargo fmt, clippy, and tsc --noEmit
+```sh
+npm ci --ignore-scripts
 npm run build
-npm test              # main suite, under Bun
-npm run test:node     # Node compatibility boundaries
-npm run test:rust     # Rust unit and integration tests
-npm run test:wasm     # the browser build, loaded under Node
 ```
 
-`test:rust` is easy to forget because most of the suite is JavaScript, but the
-lexer, parser, bignum, symbol index and language-analysis tests live in Rust
-and cover things the JavaScript suite cannot reach. A parser change that only
-those tests notice has slipped through before.
+The [architecture guide](crate-architecture.md) explains engine/runtime
+boundaries. [Generated declarations](../index.d.ts) are build outputs;
+edit their Rust or wrapper source and regenerate them through the build scripts.
 
-`test:wasm` builds the browser package, type-checks the playground against it,
-and loads it under Node. The two targets compile different code — generators
-especially — so a change that passes everything else can still break the
-playground. It has.
+## Choose the smallest relevant check
 
-The playground's type-check lives here rather than in `lint:ts` because it
-imports `/pkg/napi_vm.js`, which `wasm-pack` generates: its types do not exist
-until the package is built. Running it in the fast lint job could never pass
-on a clean checkout, and it silently did not — CI had no job that built the
-package at all, so the failure only appeared once the lint job was added.
+| Change | Commands |
+| --- | --- |
+| Core engine | `cargo test -p napi-vm-core --lib`; relevant Rust integration tests |
+| Root Rust facade | `npm run test:rust` |
+| Node bridge | `npm run build`, `npm run test:node`, targeted Bun tests |
+| Full JavaScript suite | `npm test` (includes Node and WASM test invocations) |
+| Rust style and lints | `npm run lint:rust` |
+| Main TypeScript sources | `npm run lint:ts` |
+| Playground | `npm run test:wasm` |
+| Generated root bindings | `npm run check:generated` |
+| Test262 runner/profile | `cargo test -p napi-vm-test262-runner`; [profile smoke](../tools/test262/README.md) |
+| Trusted plugin SDKs | [Plugin development](trusted-plugins/development.md) |
+| Documentation | `node tools/docs/check.mjs` |
 
-CI enforces each of these on every pull request, plus two checks that are easy
-to miss locally:
+`lint:ts` uses the root TypeScript configuration. The playground has its own
+configuration and generated WASM imports; `test:wasm` builds those imports,
+type-checks the playground and runs the WASM regression suite. A successful
+Node build does not validate WASM-specific code.
 
-- **`generated`** rebuilds `index.js`, `index.mjs` and `index.d.ts` and fails
-  if the committed copies differ. These are build outputs that are also
-  committed, so nothing but a check keeps them honest — they have previously
-  drifted to two different versions with an empty `index.d.ts`.
-- **`node-compat`** runs `tests/node/` on every Node version in
-  `engines.node`. The main suite runs under Bun, which has its own module
-  loader and native-addon implementation, so it cannot verify that claim.
+The full local gate is:
 
-### Prerequisites
+```sh
+npm run lint
+npm run check:generated
+npm run build
+npm test
+npm run test:rust
+npm run test:wasm
+```
 
-Rust 1.96+, Node.js 22+, and [Bun](https://bun.sh) for the main test suite.
+CI also tests the supported Node matrix, extracted crate configurations,
+and optional runtime/platform configurations. The workflows are the
+executable source for matrix values and toolchain versions.
 
-## Sanitizers
+## Test262
 
-Generators run their body on a dedicated stack via a stackful coroutine, on the
-calling thread. `tests/generator_stress.rs` exercises that lifecycle, and
-ThreadSanitizer is worth running after any change to it:
+Build the isolated worker and runner, then iterate with a focused group or
+`retest`. Complete-corpus reports remain necessary for broad engine changes.
+Always identify the corpus profile, engine digest, worker count, timeout,
+and skipped features. The reviewed one-file correction profile and original
+upstream corpus are distinct validation targets.
 
-```bash
+[Commands and evidence](../tools/test262/README.md) ·
+[completed reviewed-profile gate](../tools/test262/evidence/reviewed-5112-full-2026-11-06/README.md)
+
+## Measure before optimizing
+
+Use [the performance workflow](performance.md) to build first, capture a
+baseline with raw samples and provenance, then compare a changed binary on
+the same host. Avoid competing builds or benchmarks while measuring. Keep
+cold startup, parsing, warm execution, host bridges, scheduling and plugin
+transport results separate. Correctness gates accompany a measured improvement.
+
+Blaze may be used for iteration when it supports a configuration. It failed
+on ICU provider types in the recorded Test262 build; the verified worker
+was built with Cargo. The project's pinned toolchain and CI remain the gate.
+
+## Source map
+
+| Path | Responsibility |
+| --- | --- |
+| `crates/napi-vm-core/src/` | Lexer, parser, bytecode VM, builtins, values, heap, language service |
+| `crates/napi-vm-runtime/src/` | Optional capabilities, permissions, runtime adapters and CLI |
+| `src/bindings/`, `src/wasm.rs` | Node and browser boundaries |
+| `src/lsp/`, `src/bin/napi-vm-lsp.rs` | Native language server |
+| `src/plugin_host.rs`, `plugins/` | Legacy guest-plugin hosting |
+| `crates/napi-vm-plugin-*`, `packages/plugin-*` | Trusted process protocols, hosts, SDKs, tools |
+| `runtime/`, `lsp/` | Opt-in live metadata sessions and compatibility tooling |
+| `playground/`, `zed-extension/` | Browser/editor integration |
+| `tests/`, `examples/` | Executable behavior and embedding examples |
+| `tools/test262-runner/`, `tools/generators/` | Validation runner and committed data generation |
+| `bench/`, `benches/` | Performance workloads and baseline tooling |
+
+## Stackful coroutine changes
+
+Generators run on the caller thread with a separate stack. For changes to
+coroutine lifecycle or ownership, run the targeted generator stress tests.
+A Linux ThreadSanitizer configuration is:
+
+```sh
 rustup component add rust-src --toolchain nightly
 RUSTFLAGS="-Zsanitizer=thread" cargo +nightly test -Zbuild-std \
-    --release --no-default-features --test generator_stress \
-    --target x86_64-unknown-linux-gnu -- --test-threads=1
+  --release --no-default-features --test generator_stress \
+  --target x86_64-unknown-linux-gnu -- --test-threads=1
 ```
 
-This reports **zero** races. It is a regression gate, not an open issue: an
-earlier OS-thread implementation moved `Rc`-backed state across threads under
-`unsafe impl Send` and measured ~7.6 races per run (~1.0 after the threads were
-joined). Replacing the thread with a coroutine removed the boundary entirely,
-so there is no non-atomic refcount for two threads to race on.
+A historical sanitizer result is not a result for a new patch. Record the
+actual toolchain, platform and command with new evidence.
 
-## Benchmarks
+## Documentation maintenance
 
-`benches/vm.rs` measures the lexer/parser/interpreter without NAPI overhead.
-`bench/bench.js` measures the published binding and compares it with native
-JavaScript. Both layers assert matching results; Criterion reports are written
-under `target/criterion/`.
-
-## Project structure
-
-```text
-src/
-├── lexer.rs, parser/       tokenizer and recursive-descent parser
-├── interpreter/            evaluation, calls, scope, resolution, operators
-├── builtins/               Math, Array, String, Number, Object, JSON
-├── lang/                   completion, hover, diagnostics, symbols
-├── bindings/               Node NAPI bridge and LanguageService
-├── value.rs                runtime values
-└── error.rs                error types
-
-runtime/                    live VM metadata session
-lsp/                        stdio server and runtime client
-playground/                 browser editor and WASM integration
-examples/                   host bridge, IPC, hot-reload, and safety demos
-zed-extension/              local Zed launcher
-tests/                      JavaScript regression suite
-```
-
-The implementation is intentionally modular: parser expression/statement
-families, interpreter operations, builtins, language analysis, NAPI bindings,
-runtime sessions, and LSP transport each have separate responsibilities.
-
-See [Runtime improvements](runtime-improvements.md) for the current ownership, evaluation, collection, cache bounds, polling limits, and benchmark methodology.
+Use [the documentation index](README.md) for canonical pages. Keep current
+instructions separate from dated checkpoints and immutable reports. Update
+links and relevant examples when behavior changes; check Markdown links with
+`node tools/docs/check.mjs`. Generated contracts and scaffold copies have
+separate generator checks and should not be manually rewritten.
