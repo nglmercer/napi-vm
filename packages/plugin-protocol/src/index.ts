@@ -216,7 +216,8 @@ export function encodeFrame(value: unknown, maxBytes = DEFAULT_LIMITS.maxFrameBy
 }
 /** Bounded incremental codec: allocates payload only after validating its header. */
 export class FrameDecoder {
-  private header = Buffer.alloc(4); private headerUsed = 0; private payload: Buffer | undefined; private used = 0;
+  private header = Buffer.alloc(4); private headerUsed = 0; private payload: Uint8Array | undefined; private used = 0;
+  private readonly utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   maxBytes: number; maxDepth: number;
   constructor(maxBytes = DEFAULT_LIMITS.maxFrameBytes, maxDepth: number = DEFAULT_LIMITS.maxDepth) { this.maxBytes = maxBytes; this.maxDepth = maxDepth; }
   push(chunk: Uint8Array, onFrame?: (value: JsonValue) => boolean): JsonValue[] {
@@ -227,14 +228,16 @@ export class FrameDecoder {
         if (this.headerUsed !== 4) continue;
         const size = this.header.readUInt32BE(); this.headerUsed = 0;
         if (size === 0 || size > this.maxBytes) throw new PluginError('INVALID_REQUEST', `Invalid frame length ${size}`);
-        this.payload = Buffer.allocUnsafe(size); this.used = 0;
+        if (size <= chunk.length - offset) {
+          this.payload = chunk.subarray(offset, offset + size); this.used = size; offset += size;
+        } else { this.payload = Buffer.allocUnsafe(size); this.used = 0; }
       }
       const count = Math.min(this.payload.length - this.used, chunk.length - offset); this.payload.set(chunk.subarray(offset, offset + count), this.used); offset += count; this.used += count;
       if (this.used === this.payload.length) {
         const payload = this.payload; this.payload = undefined; this.used = 0;
         decodedBytes += payload.length; if (++decodedFrames > 256 || decodedBytes > 16 * 1024 * 1024) throw new PluginError('OVERLOADED', 'Coalesced frame admission limit exceeded');
         let parsed: unknown;
-        try { const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(payload); parsed = JSON.parse(text); }
+        try { const text = this.utf8.decode(payload); parsed = JSON.parse(text); }
         catch { throw new PluginError('PARSE_ERROR', 'Invalid UTF-8 or JSON'); }
         const value = wireValue(parsed, this.maxDepth);
         // Dispatch before decoding the next frame: hello may tighten limits.
