@@ -21,6 +21,8 @@ test('asset checks reject missing, stale and extra payloads without writing; syn
   await write(join(cli,'templates/js/src/generated/greeter.js'),'export const CONTRACT = JSON.parse("{}");\r\n');
   await capture(process.execPath,[script],{cwd:root});await capture(process.execPath,[script,'--check'],{cwd:root});
   const vendor=join(cli,'templates/rust/vendor/napi-vm-plugin-sdk');
+  await assert.rejects(readFile(join(vendor,'Cargo.toml')), {code:'ENOENT'});
+  assert.match(await readFile(join(vendor,'Cargo.toml.template'),'utf8'), /name = "napi-vm-plugin-sdk"/);
   assert.equal(await readFile(join(vendor,'README.md'),'utf8'),'SDK\n');assert.equal(await readFile(join(vendor,'LICENSE'),'utf8'),'MIT\n');
   const file=join(vendor,'src/lib.rs');await writeFile(file,'stale\n');
   await assert.rejects(capture(process.execPath,[script,'--check'],{cwd:root}),/Stale CLI template assets/);

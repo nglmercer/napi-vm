@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { materializeManifests } from './template-manifests.mjs';
 import {readFile,writeFile,mkdir,stat,lstat,realpath,readdir,cp,rm,mkdtemp,symlink} from 'node:fs/promises';
 import {watch} from 'node:fs';
 import {resolve,join,dirname,basename,delimiter,sep,relative} from 'node:path';
@@ -137,7 +138,7 @@ async function vendorLocalPackages(directory) {
 async function create(directory,language){
  if(!['ts','js','rust'].includes(language))throw new Error('language must be ts, js or rust');
  try{await lstat(directory);throw new Error('Refusing to overwrite existing directory');}catch(e){if(e.code!=='ENOENT')throw e;}
- await mkdir(directory,{recursive:false});try{const template=fileURLToPath(new URL('../templates/'+language+'/',import.meta.url));for(const entry of await readdir(template))await cp(join(template,entry),join(directory,entry),{recursive:true,errorOnExist:true,force:false});if(language!=='rust')await vendorLocalPackages(directory);if(language==='rust'){const manifest=await readJson(join(directory,'plugin.json'));manifest.launch.target=currentTarget();if(process.platform==='win32')manifest.launch.entry+='.exe';await writeFile(join(directory,'plugin.json'),JSON.stringify(manifest,null,2)+'\n');}return {created:directory,language};}catch(e){await rm(directory,{recursive:true,force:true});throw e;}
+ await mkdir(directory,{recursive:false});try{const template=fileURLToPath(new URL('../templates/'+language+'/',import.meta.url));for(const entry of await readdir(template))await cp(join(template,entry),join(directory,entry),{recursive:true,errorOnExist:true,force:false});if(language!=='rust')await vendorLocalPackages(directory);if(language==='rust'){await materializeManifests(directory);const manifest=await readJson(join(directory,'plugin.json'));manifest.launch.target=currentTarget();if(process.platform==='win32')manifest.launch.entry+='.exe';await writeFile(join(directory,'plugin.json'),JSON.stringify(manifest,null,2)+'\n');}return {created:directory,language};}catch(e){await rm(directory,{recursive:true,force:true});throw e;}
 }
 async function codegen(file,options){
  const config=await readJson(file);if(config.descriptorVersion)return generate(file,resolve(String(options.out??join(dirname(file),'generated'))),{check:options.check===true});

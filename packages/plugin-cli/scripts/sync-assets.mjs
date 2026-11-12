@@ -29,7 +29,7 @@ const vendorRoots=[];
 for(const name of ['napi-vm-plugin-sdk','napi-vm-plugin-protocol']) {
  const source=join(root,'crates',name),destination=join(cli,'templates/rust/vendor',name);vendorRoots.push(destination);
  await tree(join(source,'src'),join(destination,'src'));
- for(const name of ['Cargo.toml','README.md'])await add(join(source,name),join(destination,name));
+ for(const name of ['Cargo.toml','README.md'])await add(join(source,name),join(destination,name==='Cargo.toml'?'Cargo.toml.template':name));
  await add(join(root,license),join(destination,license));
 }
 for(const language of ['ts','js','rust']) {
